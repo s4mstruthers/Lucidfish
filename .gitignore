@@ -1,0 +1,48 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Secrets / config
+.env
+.env.*
+*.key
+
+# Engine & model binaries (large, download separately)
+stockfish
+stockfish*
+*.nnue
+models/
+*.gguf
+*.bin
+
+# Opening books / game data (optional — remove if you want to commit them)
+*.polyglot
+*.pgn.gz
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Logs
+*.log
+logs/
