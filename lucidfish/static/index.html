@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lucidfish</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
+<style>
+:root{
+  --bg:#0f1117; --panel:#181b25; --panel2:#1f2330; --border:#2a2f3f;
+  --text:#e6e9f0; --muted:#8b93a7; --accent:#4f9cf9; --accent2:#37d0a2;
+  --best:#37d0a2; --good:#9ac26b; --inacc:#e8c341; --mistake:#e8892b; --blunder:#e5484d;
+  --radius:12px; font-size:15px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif}
+header{display:flex;align-items:baseline;gap:14px;padding:18px 28px;border-bottom:1px solid var(--border)}
+header h1{margin:0;font-size:22px;letter-spacing:.3px}
+header h1 span{color:var(--accent)}
+header p{margin:0;color:var(--muted);font-size:13px}
+.wrap{max-width:1340px;margin:0 auto;padding:20px 28px}
+.tabs{display:flex;gap:8px;margin-bottom:16px}
+.tab{padding:8px 16px;border-radius:999px;border:1px solid var(--border);background:var(--panel);
+  color:var(--muted);cursor:pointer;font-size:14px}
+.tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px;margin-bottom:16px}
+.card h3{margin:0 0 10px;font-size:14px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted)}
+textarea,input,select{background:var(--panel2);border:1px solid var(--border);border-radius:8px;
+  color:var(--text);padding:9px 12px;font-size:14px;font-family:inherit}
+textarea{width:100%;min-height:110px;resize:vertical}
+button{background:var(--accent);border:none;border-radius:8px;color:#fff;padding:9px 18px;
+  font-size:14px;font-weight:600;cursor:pointer}
+button:hover{filter:brightness(1.1)}
+button.ghost{background:var(--panel2);border:1px solid var(--border);color:var(--text);font-weight:400}
+button:disabled{opacity:.45;cursor:default}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.grid{display:grid;grid-template-columns:minmax(380px,520px) 1fr;gap:20px;align-items:start}
+@media(max-width:980px){.grid{grid-template-columns:1fr}}
+.boardwrap{display:flex;gap:12px}
+#evalbar{width:14px;border-radius:7px;background:#3a3f52;overflow:hidden;display:flex;flex-direction:column;flex-shrink:0}
+#evalwhite{background:#e6e9f0;width:100%;transition:height .3s ease;margin-top:auto}
+#board{width:100%}
+.controls{display:flex;gap:8px;justify-content:center;margin-top:12px}
+.controls button{padding:8px 14px;font-size:16px}
+#movelist{display:grid;grid-template-columns:44px 1fr 1fr;gap:4px 6px;max-height:340px;overflow-y:auto;align-items:stretch}
+.mvnum{color:var(--muted);font-size:13px;display:flex;align-items:center;justify-content:flex-end;padding-right:4px}
+.mv{padding:6px 10px;border-radius:8px;background:var(--panel2);border:1px solid transparent;
+  cursor:pointer;font-size:13.5px;display:flex;justify-content:space-between;gap:6px}
+.mv.empty{background:none;cursor:default}
+.mvhead{position:sticky;top:0;background:var(--panel);z-index:1;font-size:12px;
+  text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:700;
+  padding:2px 10px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mv:hover{border-color:var(--accent)}
+.mv.sel{border-color:var(--accent);background:#243048}
+.badge{font-size:11px;padding:1px 7px;border-radius:999px;font-weight:700;color:#0f1117;align-self:center}
+.b-best{background:var(--best)} .b-good{background:var(--good)} .b-inaccuracy{background:var(--inacc)}
+.b-mistake{background:var(--mistake)} .b-blunder{background:var(--blunder);color:#fff}
+#explain{line-height:1.55;font-size:14.5px}
+ul.mdl{margin:6px 0;padding-left:20px}
+ul.mdl li{margin:4px 0}
+.opplabel{display:block;color:var(--accent2);font-weight:700;font-size:13px;
+  text-transform:uppercase;letter-spacing:.7px;margin-bottom:7px}
+.sect{font-size:11.5px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);
+  font-weight:700;margin:14px 0 6px}
+.lineitem{background:var(--panel2);border-radius:8px;padding:8px 11px;margin:6px 0;font-size:13.5px}
+.lineitem .ev{display:inline-block;background:#2c3245;border-radius:999px;padding:0 8px;
+  font-size:12px;margin-left:6px;color:var(--text)}
+.lineitem .pv{color:var(--muted);margin-top:2px;display:block}
+.lineitem .idea{color:var(--accent2);margin-top:5px;display:block;line-height:1.45}
+#review{line-height:1.6;font-size:14.5px}
+#review h3,#explain h3{color:var(--text);text-transform:none;letter-spacing:0;font-size:15px;margin:14px 0 6px}
+.progress{color:var(--accent2);font-size:13.5px}
+.err{color:var(--blunder);font-size:13.5px;white-space:pre-wrap}
+.gamerow{display:flex;justify-content:space-between;padding:9px 12px;border-radius:8px;
+  background:var(--panel2);margin-bottom:6px;cursor:pointer;font-size:14px;border:1px solid transparent}
+.gamerow:hover{border-color:var(--accent)}
+.gamerow .meta{color:var(--muted);font-size:12.5px}
+.res{font-size:11px;font-weight:800;border-radius:999px;padding:1px 8px;margin-left:8px}
+.res-w{background:var(--best);color:#0f1117}
+.res-l{background:var(--blunder);color:#fff}
+.res-d{background:#3a3f52;color:var(--text)}
+.acc{color:var(--accent2);font-weight:600}
+#chatlog{max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
+.msg{padding:9px 12px;border-radius:10px;max-width:88%;line-height:1.5;font-size:14px;white-space:pre-wrap}
+.msg.user{background:var(--accent);color:#fff;align-self:flex-end}
+.msg.coach{background:var(--panel2);align-self:flex-start}
+.msg.think{color:var(--muted);font-style:italic;background:none;padding:4px}
+.hl-from{box-shadow:inset 0 0 0 3px rgba(79,156,249,.75)!important}
+.hl-to{box-shadow:inset 0 0 0 3px rgba(55,208,162,.85)!important}
+.hidden{display:none!important}
+.small{font-size:12.5px;color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Lucid<span>fish</span></h1>
+  <p>Stockfish tells you the best move — Lucidfish tells you why.</p>
+</header>
+
+<div class="wrap">
+  <div class="tabs">
+    <div class="tab active" data-mode="upload">Upload PGN</div>
+    <div class="tab" data-mode="games">My games</div>
+    <div class="tab" data-mode="editor">Board editor</div>
+  </div>
+
+  <!-- ============ INPUT PANELS ============ -->
+  <div id="p-upload" class="card">
+    <h3>Paste or upload a PGN</h3>
+    <textarea id="pgnText" placeholder="[Event ...]&#10;1. e4 e5 2. Nf3 ..."></textarea>
+    <div class="row" style="margin-top:10px">
+      <input type="file" id="pgnFile" accept=".pgn,.txt">
+      <select id="sideSel">
+        <option value="">Coach side: auto / both</option>
+        <option value="white">I played White</option>
+        <option value="black">I played Black</option>
+      </select>
+      <input type="number" id="eloInput" placeholder="Your ELO (optional)" min="100" max="3500" style="width:150px">
+      <button id="analyzeBtn">Analyze game</button>
+    </div>
+  </div>
+
+  <div id="p-games" class="card hidden">
+    <h3>Pick a recent game</h3>
+    <div class="row">
+      <select id="siteSel"><option value="chesscom">chess.com</option><option value="lichess">Lichess</option></select>
+      <input id="userInput" value="scrubb3rs" placeholder="username">
+      <button id="loadGames">Load games</button>
+      <span class="small">fetched by your browser, so it works even when Python is blocked</span>
+    </div>
+    <div id="gamelist" style="margin-top:12px;max-height:300px;overflow-y:auto"></div>
+  </div>
+
+  <div id="p-editor" class="card hidden">
+    <h3>Set up a position</h3>
+    <div class="row" style="margin-bottom:10px">
+      <button class="ghost" id="edStart">Start position</button>
+      <button class="ghost" id="edClear">Clear board</button>
+      <select id="edTurn"><option value="w">White to move</option><option value="b">Black to move</option></select>
+      <button id="edAnalyze">Analyze position</button>
+    </div>
+    <div id="editorBoard" style="max-width:460px"></div>
+    <p class="small">Drag pieces on/off the board. Spare pieces appear above and below.</p>
+  </div>
+
+  <div id="status" class="card hidden">
+    <div class="row" style="justify-content:space-between">
+      <span><span class="progress" id="progressText"></span><span class="err" id="errorText"></span></span>
+      <button class="ghost hidden" id="stopBtn" style="border-color:var(--blunder);color:var(--blunder)">■ Stop</button>
+    </div>
+  </div>
+
+  <!-- ============ ANALYSIS VIEW ============ -->
+  <div id="analysis" class="grid hidden">
+    <div>
+      <div class="card">
+        <h3 id="gameTitle">Game</h3>
+        <div class="boardwrap">
+          <div id="evalbar"><div id="evalwhite" style="height:50%"></div></div>
+          <div style="flex:1"><div id="board"></div></div>
+        </div>
+        <div class="controls">
+          <button class="ghost" id="btnFirst">⏮</button>
+          <button class="ghost" id="btnPrev">◀</button>
+          <button class="ghost" id="btnNext">▶</button>
+          <button class="ghost" id="btnLast">⏭</button>
+          <button class="ghost" id="btnFlip">⇅</button>
+        </div>
+        <p class="small" style="text-align:center">tip: use ← → arrow keys</p>
+      </div>
+      <div class="card"><h3>Coach chat</h3>
+        <div id="chatlog"></div>
+        <div class="row">
+          <input id="chatInput" style="flex:1" placeholder="Ask about this move, plans, ideas…">
+          <button id="chatSend">Send</button>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="card"><h3>Moves</h3><div id="movelist"></div></div>
+      <div class="card"><h3 id="explTitle">Move</h3><div id="explain">Select a move.</div></div>
+      <div class="card" id="reviewCard"><h3>Post-game review</h3><div id="review"><span class="small">appears when analysis finishes…</span></div></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+<script>
+const PIECES = 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png';
+let board=null, editorBoard=null, moves=[], cur=-1, headers={}, review='', chat=[], mode='game', posData=null, coachSide=null, activeJob=null;
+const $id = s => document.getElementById(s);
+
+/* restore remembered ELO */
+if(localStorage.getItem('lucidfish_elo')) $id('eloInput').value=localStorage.getItem('lucidfish_elo');
+
+/* ---------- tabs ---------- */
+document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
+  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+  t.classList.add('active');
+  ['upload','games','editor'].forEach(m => $id('p-'+m).classList.toggle('hidden', m!==t.dataset.mode));
+  if (t.dataset.mode==='editor' && !editorBoard) initEditor();
+});
+
+/* ---------- helpers ---------- */
+function esc(s){return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+function md(s){ // markdown-lite: headers, bold, bullets, newlines
+  const lines=esc(s).split('\n'); let out='',inList=false;
+  for(const ln of lines){
+    if(/^\s*[-•*]\s+/.test(ln)){
+      if(!inList){out+='<ul class="mdl">';inList=true}
+      out+='<li>'+ln.replace(/^\s*[-•*]\s+/,'')+'</li>';
+    }else{
+      if(inList){out+='</ul>';inList=false}
+      if(/^## /.test(ln)) out+='<h3>'+ln.slice(3)+'</h3>';
+      else if(ln.trim()!=='') out+=ln+'<br>';
+    }
+  }
+  if(inList) out+='</ul>';
+  return out.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
+}
+function badge(cls){return `<span class="badge b-${cls}">${{best:'✓',good:'○',inaccuracy:'?!',mistake:'?',blunder:'??'}[cls]||cls}</span>`}
+function evalLabel(ev){ // "+1.11" -> "♚ +1.11" (White better), "-0.50" -> "♔ +0.50" (Black better)
+  if(ev.includes('mate')) return ev;
+  const v=parseFloat(ev); if(isNaN(v)) return ev;
+  return (v>=0?'♚ White +':'♔ Black +')+Math.abs(v).toFixed(2);
+}
+function evalPct(ev){
+  if(ev.includes('mate')) return ev.includes('-')?2:98;
+  const v=parseFloat(ev); if(isNaN(v)) return 50;
+  return Math.max(4,Math.min(96,50+ v*8));
+}
+
+/* ---------- input: file upload ---------- */
+$id('pgnFile').onchange = e => {
+  const f=e.target.files[0]; if(!f) return;
+  f.text().then(t => $id('pgnText').value = t);
+};
+
+/* ---------- input: analyze uploaded/selected pgn ---------- */
+$id('analyzeBtn').onclick = () => startAnalysis($id('pgnText').value, $id('sideSel').value||null);
+
+async function startAnalysis(pgn, side){
+  if(!pgn.trim()){alert('Paste a PGN first');return}
+  if(!side){ // auto-detect from username field if headers match
+    const u=$id('userInput').value.trim().toLowerCase();
+    const w=(pgn.match(/\[White "(.*?)"\]/)||[])[1]||'', b=(pgn.match(/\[Black "(.*?)"\]/)||[])[1]||'';
+    if(u && w.toLowerCase()===u) side='white'; else if(u && b.toLowerCase()===u) side='black';
+  }
+  showStatus('starting engine…');
+  const elo = parseInt($id('eloInput').value)||null;
+  if(elo) localStorage.setItem('lucidfish_elo', elo);
+  const r = await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({pgn, side, elo})});
+  const d = await r.json();
+  if(d.error){showError(d.error);return}
+  mode='game'; moves=[]; cur=-1; review=''; chat=[];
+  $id('chatlog').innerHTML=''; $id('review').innerHTML='<span class="small">appears when analysis finishes…</span>';
+  activeJob=d.job_id;                       // stale polls from a previous run are ignored
+  setInputsLocked(true);                    // side choice is fixed once analysis starts
+  poll(d.job_id);
+}
+function setInputsLocked(locked){
+  ['sideSel','analyzeBtn','loadGames'].forEach(id=>$id(id).disabled=locked);
+}
+
+async function poll(id){
+  if(id!==activeJob) return;   // a newer analysis started — abandon this poll chain
+  const r = await fetch('/api/job/'+id); const j = await r.json();
+  if(id!==activeJob) return;
+  headers=j.headers||{}; coachSide=j.side||null;
+  if(j.moves.length>moves.length){
+    moves=j.moves;
+    renderMoves();
+    if(cur===-1 && moves.length===1) showAnalysisView();
+  }
+  if(j.status==='running'){
+    showStatus(`analysing ${j.progress}  (${j.moves.length}/${j.total} moves)`);
+    const sb=$id('stopBtn'); sb.classList.remove('hidden');
+    sb.onclick=()=>{sb.disabled=true;fetch('/api/job/'+id+'/stop',{method:'POST'})};
+    setTimeout(()=>poll(id), 1200);
+  } else if(j.status==='error'){ $id('stopBtn').classList.add('hidden'); setInputsLocked(false); showError(j.error); }
+  else { // done or stopped
+    setInputsLocked(false);
+    review=j.review; hideStatus();
+    $id('stopBtn').classList.add('hidden'); $id('stopBtn').disabled=false;
+    $id('review').innerHTML = j.status==='stopped'
+      ? '<span class="small">analysis stopped early — showing the moves completed so far</span>'
+      : md(review);
+    renderMoves(); showAnalysisView();
+  }
+}
+
+/* ---------- browser-side game fetching (CORS-friendly APIs) ---------- */
+$id('loadGames').onclick = async () => {
+  const user=$id('userInput').value.trim(), site=$id('siteSel').value, box=$id('gamelist');
+  if(!user) return;
+  box.innerHTML='<span class="small">loading…</span>';
+  try{
+    let games=[];
+    if(site==='chesscom'){
+      const a = await (await fetch(`https://api.chess.com/pub/player/${user.toLowerCase()}/games/archives`)).json();
+      if(!a.archives||!a.archives.length) throw new Error('no archives found');
+      for(const url of a.archives.slice(-2).reverse()){          // newest 2 months
+        const m = await (await fetch(url)).json();
+        games.push(...(m.games||[]).reverse());
+        if(games.length>=20) break;
+      }
+      games = games.slice(0,20).map(g=>{
+        const isW = g.white.username.toLowerCase()===user.toLowerCase();
+        const mine = isW?g.white:g.black, theirs = isW?g.black:g.white;
+        const res = mine.result==='win'?'W':(theirs.result==='win'?'L':'D');
+        const acc = g.accuracies ? (isW?g.accuracies.white:g.accuracies.black) : null;
+        return {pgn:g.pgn, white:g.white.username, black:g.black.username, res,
+          acc: acc!=null ? acc.toFixed(1)+'%' : null,
+          meta:`${g.time_class||''} · ${new Date(g.end_time*1000).toLocaleDateString()}`,
+          result:(g.pgn.match(/\[Result "(.*?)"\]/)||[])[1]||''};
+      });
+    } else {
+      const t = await (await fetch(`https://lichess.org/api/games/user/${user}?max=20`,
+        {headers:{Accept:'application/x-chess-pgn'}})).text();
+      games = t.split(/\n\n\n/).filter(x=>x.trim()).map(p=>{
+        const w=(p.match(/\[White "(.*?)"\]/)||[])[1]||'?', b=(p.match(/\[Black "(.*?)"\]/)||[])[1]||'?';
+        const result=(p.match(/\[Result "(.*?)"\]/)||[])[1]||'';
+        const isW=w.toLowerCase()===user.toLowerCase();
+        const res = result==='1/2-1/2'?'D':(result==='1-0'?(isW?'W':'L'):result==='0-1'?(isW?'L':'W'):'');
+        return {pgn:p, white:w, black:b, res, acc:null,
+          meta:(p.match(/\[Date "(.*?)"\]/)||[])[1]||'', result};
+      });
+    }
+    if(!games.length){box.innerHTML='<span class="small">no games found</span>';return}
+    box.innerHTML='';
+    games.forEach(g=>{
+      const div=document.createElement('div'); div.className='gamerow';
+      const chip = g.res ? `<span class="res res-${g.res.toLowerCase()}">${g.res==='W'?'WIN':g.res==='L'?'LOSS':'DRAW'}</span>` : `<b>${g.result}</b>`;
+      div.innerHTML=`<span>${esc(g.white)} vs ${esc(g.black)}${chip}</span>`+
+        `<span class="meta">${g.acc?`<span class="acc">${g.acc} acc</span> · `:''}${esc(g.meta)}</span>`;
+      div.onclick=()=>{
+        $id('pgnText').value=g.pgn;
+        $id('p-games').classList.add('hidden');          // collapse the picker
+        startAnalysis(g.pgn,null);
+        setTimeout(()=>$id('status').scrollIntoView({behavior:'smooth'}),100);
+      };
+      box.appendChild(div);
+    });
+  }catch(e){ box.innerHTML=`<span class="err">Couldn't fetch games: ${esc(e.message)}. You can always download the PGN manually and use Upload.</span>`; }
+};
+
+/* ---------- analysis view ---------- */
+function showAnalysisView(){
+  $id('analysis').classList.remove('hidden');
+  // orient the board to the coached side: explicit "I played..." choice (via job),
+  // falling back to matching the username against the PGN headers
+  const side = coachSide || localStorage_side();
+  if(!board) board = Chessboard('board',{position:'start',pieceTheme:PIECES,showNotation:true});
+  board.orientation(side==='black' ? 'black' : 'white');
+  $id('gameTitle').textContent = `${headers.White||'?'} vs ${headers.Black||'?'}  ${headers.Result||''}`;
+  goTo(moves.length?0:-1);
+}
+function localStorage_side(){
+  const u=$id('userInput').value.trim().toLowerCase();
+  if(u && (headers.Black||'').toLowerCase()===u) return 'black';
+  return 'white';
+}
+function renderMoves(){
+  const box=$id('movelist'); box.innerHTML='';
+  // column headers: player names when we have them, else White/Black
+  const wName=headers.White&&headers.White!=='?'?headers.White:'White';
+  const bName=headers.Black&&headers.Black!=='?'?headers.Black:'Black';
+  // note: on a dark theme the FILLED king ♚ renders light (looks white) and the
+  // outline ♔ renders dark — so visually ♚=White, ♔=Black
+  [['',''],[wName,'♚ '],[bName,'♔ ']].forEach(([t,icon])=>{
+    const h=document.createElement('div'); h.className='mvhead';
+    h.textContent=t?icon+t:''; h.title=t; box.appendChild(h);
+  });
+  const cell=(m,i)=>{
+    const d=document.createElement('div');
+    if(!m){d.className='mv empty';return d}
+    d.className='mv'+(i===cur?' sel':'');
+    d.innerHTML=`<span>${m.critical?'⚡':''}<b>${m.san}</b></span>${badge(m.cls)}`;
+    d.onclick=()=>goTo(i);
+    return d;
+  };
+  // group into full-move rows: number | White's move | Black's move
+  for(let i=0;i<moves.length;){
+    const num=document.createElement('div'); num.className='mvnum';
+    num.textContent=moves[i].n+'.';
+    box.appendChild(num);
+    if(moves[i].side==='White'){
+      box.appendChild(cell(moves[i],i));
+      if(moves[i+1]&&moves[i+1].side==='Black'){box.appendChild(cell(moves[i+1],i+1));i+=2}
+      else{box.appendChild(cell(null));i+=1}
+    }else{ // game fragment starting with a Black move
+      box.appendChild(cell(null));
+      box.appendChild(cell(moves[i],i));
+      i+=1;
+    }
+  }
+  const sel=box.querySelector('.mv.sel'); if(sel) sel.scrollIntoView({block:'nearest'});
+}
+function goTo(i){
+  if(!moves.length) return;
+  cur=Math.max(0,Math.min(moves.length-1,i));
+  const m=moves[cur];
+  board.position(m.fen_after);
+  document.querySelectorAll('#board .square-55d63').forEach(s=>s.classList.remove('hl-from','hl-to'));
+  setTimeout(()=>{ // after board animation, highlight move squares
+    document.querySelector(`#board .square-${m.from}`)?.classList.add('hl-from');
+    document.querySelector(`#board .square-${m.to}`)?.classList.add('hl-to');
+  },120);
+  $id('evalwhite').style.height = evalPct(m.eval)+'%';
+  renderMoves();
+  const isOpp = coachSide && m.side.toLowerCase()!==coachSide;
+  const tstr = m.think_s!=null ? ` · ⏱ ${m.think_s<10?m.think_s.toFixed(1):Math.round(m.think_s)}s` : '';
+  $id('explTitle').textContent = `${m.side==='White'?m.n+'.':m.n+'…'} ${m.san} — ${m.cls} (${evalLabel(m.eval)})${tstr}`
+    + (m.critical?' ⚡ critical moment':'') + (isOpp?' · opponent':'');
+  let html;
+  if(m.expl){
+    html = (isOpp?`<span class="opplabel">What your opponent is up to</span>`:'') + md(m.expl);
+  } else if(['best','good'].includes(m.cls)){
+    html = `<span class="small">Quiet move — the engine has no complaint (<b>${m.cls}</b>). Ask the coach chat below if you're curious about it.</span>`;
+  } else {
+    html = `<span class="small">No coach note for this move (verdict: <b>${m.cls}</b>${m.best&&m.best!==m.san?`, best was <b>${esc(m.best)}</b>`:''}). Ask the coach chat below for details.</span>`;
+  }
+  if(!isOpp && m.candidates && m.candidates.length){
+    const alts = pickAlternatives(m);
+    if(alts.length){
+      html += `<div class="sect">Alternatives</div>` + alts.map(c=>
+        `<div class="lineitem"><b>${esc(c.san)}</b><span class="ev">${esc(c.score)}</span>`+
+        `<span class="pv">${esc(c.line)}</span>`+
+        (c.idea?`<span class="idea">↳ ${esc(c.idea)}</span>`:'')+`</div>`
+      ).join('');
+    }
+  }
+  if(!isOpp && m.refutation)
+    html += `<div class="sect">Refutation</div><div class="lineitem"><span class="pv">${esc(m.refutation)}</span></div>`;
+  if(m.opening&&m.opening.length)
+    html += `<div class="sect">Opening book</div><div class="lineitem"><span class="pv">${m.opening.map(esc).join('<br>')}</span></div>`;
+  $id('explain').innerHTML = html;
+}
+function pickAlternatives(m){
+  // Decide which engine lines are worth showing (cp = mover's perspective):
+  //  - played move is never repeated (its analysis is the explanation above)
+  //  - played ≈ best  -> nothing to show
+  //  - one dominant alternative ("only move") -> show just that
+  //  - otherwise -> up to 3 alternatives meaningfully better than the played move
+  const played = m.candidates.find(c=>c.san===m.san);
+  let alts = m.candidates.filter(c=>c.san!==m.san).sort((a,b)=>b.cp-a.cp);
+  if(!alts.length) return [];
+  const bestCp = Math.max(alts[0].cp, played?played.cp:-Infinity);
+  if(played && bestCp - played.cp <= 20) return [];              // played the best move
+  if(alts.length>1 && alts[0].cp - alts[1].cp >= 150) return [alts[0]]; // only move
+  const floor = played ? played.cp + 20 : alts[0].cp - 80;
+  return alts.filter(c=>c.cp>=floor && alts[0].cp - c.cp <= 80).slice(0,3);
+}
+$id('btnFirst').onclick=()=>goTo(0); $id('btnPrev').onclick=()=>goTo(cur-1);
+$id('btnNext').onclick=()=>goTo(cur+1); $id('btnLast').onclick=()=>goTo(moves.length-1);
+$id('btnFlip').onclick=()=>board.flip();
+document.addEventListener('keydown',e=>{
+  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
+  if(e.key==='ArrowLeft')goTo(cur-1); if(e.key==='ArrowRight')goTo(cur+1);
+});
+
+/* ---------- status ---------- */
+function showStatus(t){$id('status').classList.remove('hidden');$id('progressText').textContent=t;$id('errorText').textContent='';}
+function showError(t){$id('status').classList.remove('hidden');$id('progressText').textContent='';$id('errorText').textContent=t;}
+function hideStatus(){$id('status').classList.add('hidden');}
+
+/* ---------- board editor ---------- */
+function initEditor(){
+  editorBoard = Chessboard('editorBoard',{position:'start',pieceTheme:PIECES,
+    draggable:true,dropOffBoard:'trash',sparePieces:true});
+}
+$id('edStart').onclick=()=>editorBoard.start();
+$id('edClear').onclick=()=>editorBoard.clear();
+$id('edAnalyze').onclick=async()=>{
+  const fen = `${editorBoard.fen()} ${$id('edTurn').value} - - 0 1`;
+  showStatus('analysing position…');
+  const r = await fetch('/api/position',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({fen})});
+  const d = await r.json();
+  if(d.error){showError(d.error);return}
+  hideStatus(); mode='position'; posData={...d, fen};
+  moves=[]; chat=[]; $id('chatlog').innerHTML='';
+  $id('analysis').classList.remove('hidden');
+  if(!board) board=Chessboard('board',{position:'start',pieceTheme:PIECES,showNotation:true});
+  board.position(fen.split(' ')[0]);
+  $id('gameTitle').textContent=`Custom position — ${d.turn} to move`;
+  $id('movelist').innerHTML='<span class="small">position mode — no move list</span>';
+  $id('explTitle').textContent='Position assessment';
+  $id('explain').innerHTML = md(d.commentary) +
+    `<div class="cands"><b>Engine lines:</b><br>`+d.lines.map(c=>`${esc(c.san)} (${esc(c.score)}): ${esc(c.line)}`).join('<br>')+`</div>`;
+  $id('review').innerHTML='<span class="small">n/a for custom positions</span>';
+  $id('evalwhite').style.height = evalPct(d.lines[0]?.score||'0')+'%';
+};
+
+/* ---------- coach chat ---------- */
+function chatContext(){
+  if(mode==='position' && posData){
+    return `Custom position FEN: ${posData.fen}\nEngine lines:\n`+
+      posData.lines.map(c=>`${c.san} (${c.score}): ${c.line}`).join('\n')+
+      `\nPosition facts:\n`+posData.features.join('\n');
+  }
+  if(cur<0||!moves[cur]) return '';
+  const m=moves[cur];
+  let ctx=`Game: ${headers.White} vs ${headers.Black}, ${headers.Result}.\n`+
+    `Currently viewing move ${m.n} (${m.side}): ${m.san} — verdict ${m.cls}, eval ${m.eval} (White's perspective).\n`+
+    `FEN after the move: ${m.fen_after}\nEngine candidates before it:\n`+
+    m.candidates.map(c=>`${c.san} (${c.score}): ${c.line}`).join('\n');
+  if(m.refutation) ctx+=`\nRefutation of the played move: ${m.refutation}`;
+  if(m.expl) ctx+=`\nCoach note for this move: ${m.expl}`;
+  if(review) ctx+=`\nWhole-game review:\n${review}`;
+  return ctx;
+}
+async function sendChat(){
+  const inp=$id('chatInput'), text=inp.value.trim(); if(!text) return;
+  inp.value='';
+  chat.push({role:'user',content:text});
+  addMsg('user',text);
+  const think=addMsg('think','coach is thinking…');
+  const r = await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({messages:chat,context:chatContext()})});
+  const d = await r.json(); think.remove();
+  if(d.error){addMsg('coach','⚠ '+d.error);return}
+  chat.push({role:'assistant',content:d.reply});
+  addMsg('coach',d.reply);
+}
+function addMsg(cls,text){
+  const div=document.createElement('div');div.className='msg '+cls;div.textContent=text;
+  $id('chatlog').appendChild(div);$id('chatlog').scrollTop=1e9;return div;
+}
+$id('chatSend').onclick=sendChat;
+$id('chatInput').addEventListener('keydown',e=>{if(e.key==='Enter')sendChat()});
+</script>
+</body>
+</html>
