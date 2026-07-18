@@ -129,6 +129,7 @@ def build_prompt(
     opening_name: str = "",     # identified opening — carried through the whole game
     time_note: str = "",        # "Black spent 2 seconds on this move (0:41 remaining)..."
     elo: int | None = None,     # player rating — tailors depth and lesson targeting
+    player_context: str = "",   # profile summary from previous games
 ) -> str:
     """Assemble the grounded evidence block the LLM narrates from."""
     parts: list[str] = []
@@ -150,6 +151,13 @@ def build_prompt(
             "pre-move blunder check on checks, captures, and threats) rather than expecting "
             "long calculation."
         )
+    if player_context:
+        parts.append(
+            "What you know about this player from their previous games (their coach "
+            "profile): " + player_context + "\nWhen this move repeats one of their known "
+            "recurring issues, point out the pattern explicitly — that connection is more "
+            "valuable than the move itself."
+        )
     if elo:
         parts.append(
             f"The player is rated about {elo}. Pitch your explanation for that level: at "
@@ -162,10 +170,16 @@ def build_prompt(
     if opening_name:
         parts.append(
             f"Opening as of this move: {opening_name} (identified per-position from the "
-            "Lichess masters database; the name refines as the variation develops). Where "
+            "Lichess masters database; the name refines as the variation develops). Use "
+            "EXACTLY this name — never invent, rename, or guess a different variation. Where "
             "relevant, relate your explanation to this opening's typical plans — its usual "
             "development scheme, pawn breaks, and where each side castles — and say whether "
             "this move fits or abandons those plans."
+        )
+    else:
+        parts.append(
+            "The opening has NOT been identified. Do not name, guess, or refer to any "
+            "specific opening — discuss only what is on the board."
         )
     parts.append(f"Position before (FEN): {analysis.fen_before}")
 
@@ -180,8 +194,9 @@ def build_prompt(
         parts.append(f"  {i}. {line.move_san} [{desc}]  eval {line.score_str}  line: {line.pv_text}")
 
     if analysis.played_san != analysis.best_san:
-        parts.append(f"\nPlayed {analysis.played_san} instead of best move {analysis.best_san}; "
-                     f"this concedes roughly {analysis.cp_loss / 100:.1f} pawns of evaluation.")
+        loss = ("this allows a forced mate" if analysis.cp_loss >= 90000
+                else f"this concedes roughly {analysis.cp_loss / 100:.1f} pawns of evaluation")
+        parts.append(f"\nPlayed {analysis.played_san} instead of best move {analysis.best_san}; {loss}.")
     else:
         parts.append(f"\n{analysis.played_san} was the engine's top choice.")
 
@@ -242,6 +257,59 @@ def build_prompt(
     return "\n".join(parts)
 
 
+PLAYER_SUMMARY_SYSTEM = """You are a chess coach writing a progress review FOR your \
+student, addressed directly TO them. Always say "you" and "your" — never their name in \
+third person, never "the player". Write a compact review (150-250 words) covering: your \
+typical openings and how you score in them, your 2-4 most persistent weaknesses (be \
+specific: piece-hanging, time trouble, bad trades, king safety, specific openings), any \
+clear strengths, and what to train next. Ground every claim in the statistics and \
+reviews given — do not invent patterns. This text is also fed to future coaching \
+sessions as context, so make every sentence carry information."""
+
+
+def build_player_summary_prompt(stats: dict, reviews: list[str], profile: dict | None = None) -> str:
+    parts = []
+    if profile:
+        elos = ", ".join(f"{k.replace('elo_', '')} {v}" for k, v in profile.items()
+                         if k.startswith("elo_") and v)
+        parts.append(
+            f"Player: {profile.get('name', 'the player')}. "
+            + (f"Actual chess.com ratings: {elos}. " if elos else "")
+            + (f"Self-described level: {profile.get('level')}. " if profile.get("level") else "")
+            + "Use ONLY these ratings when referring to their strength — never estimate, "
+              "invent, or upgrade a rating class. Opening names may come ONLY from the "
+              "statistics below, never from memory of the reviews."
+        )
+    parts.append("Verified statistics across analyzed games:")
+    parts.append(f"  Games: {stats.get('games', 0)}, W-L-D: {stats.get('wins', 0)}-"
+                 f"{stats.get('losses', 0)}-{stats.get('draws', 0)}")
+    if stats.get("avg_acpl") is not None:
+        parts.append(f"  Average centipawn loss: {stats['avg_acpl']} "
+                     f"(lower is better; ~20 strong club, ~80 beginner)")
+    parts.append(f"  Blunders per game: {stats.get('blunders_per_game', '?')}, "
+                 f"mistakes per game: {stats.get('mistakes_per_game', '?')}")
+    for o in stats.get("openings", []):
+        parts.append(f"  Opening: {o['name']} — {o['games']} games, "
+                     f"{o['w']}W/{o['l']}L/{o['d']}D, avg cp loss {o['acpl']}")
+    parts.append(
+        "\nRecent post-game reviews (verified, newest first). When you cite evidence, "
+        "refer to the GAME it came from — e.g. \"your game against zztobias\" or \"as "
+        "Black vs Infant001\" — NEVER by review number; the player cannot see these "
+        "numbers.")
+    for r in reviews:
+        if isinstance(r, dict):
+            side = (r.get("user_side") or "").capitalize()
+            opp = r.get("black") if side == "White" else r.get("white")
+            head = (f"game vs {opp}" + (f" (as {side}" if side else "(")
+                    + f", {r.get('result', '')}"
+                    + (f", {r.get('opening')}" if r.get("opening") else "") + ")")
+            parts.append(f"--- {head} ---\n{r.get('review', '')}")
+        else:
+            parts.append(f"---\n{r}")
+    parts.append("\nWrite the player profile.")
+    return "\n".join(parts)
+
+
 def build_ideas_prompt(candidates, game_so_far: str, fen: str, side: str) -> str:
     """Minimal follow-up used when the main call failed to produce line ideas."""
     parts = [
@@ -269,12 +337,17 @@ def build_game_review_prompt(
     side_filter: str | None,
     elo: int | None = None,
     time_class: str = "",
+    player_context: str = "",
 ) -> str:
     parts: list[str] = []
     w, b = headers.get("White", "White"), headers.get("Black", "Black")
     parts.append(f"Game: {w} vs {b}, result {headers.get('Result', '?')}.")
     if opening_name:
-        parts.append(f"Opening (identified from the Lichess masters database): {opening_name}.")
+        parts.append(f"Opening (identified from the opening database): {opening_name}. "
+                     "Use EXACTLY this name; never substitute a different opening.")
+    else:
+        parts.append("The opening was NOT identified. Do not name or guess any opening — "
+                     "refer to it only as 'the opening'.")
     if side_filter:
         parts.append(f"You are coaching {side_filter.capitalize()}. Focus the review and lessons on their play.")
     if time_class:
@@ -284,6 +357,10 @@ def build_game_review_prompt(
         parts.append(f"The coached player is rated about {elo}; aim the takeaways at what "
                      "would take them to the next level. If the record shows big errors "
                      "played in very few seconds, make time discipline one of the takeaways.")
+    if player_context:
+        parts.append("Coach profile from their previous games: " + player_context +
+                     "\nIf this game repeats known patterns, say so; if it shows improvement "
+                     "on a known weakness, acknowledge it.")
 
     parts.append("\nMove-by-move record (evals are from White's perspective):")
     parts.extend("  " + r for r in move_records)

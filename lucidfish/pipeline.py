@@ -21,7 +21,7 @@ import chess.pgn
 from .config import Config
 from .engine import EngineAnalyzer, MoveAnalysis, build_move_analysis, describe_move
 from . import features as feat
-from .opening import OpeningExplorer
+from .opening import OpeningExplorer, local_opening_name
 from .llm import (OllamaProvider, SYSTEM_PROMPT, GAME_REVIEW_SYSTEM,
                   build_prompt, build_game_review_prompt, build_ideas_prompt)
 
@@ -49,6 +49,8 @@ class GameReport:
     headers: dict
     moves: list[AnnotatedMove] = field(default_factory=list)
     review: str = ""            # whole-game narrative: opening, flow, lessons
+    opening: str = ""           # most specific opening identified
+    time_class: str = ""        # bullet/blitz/rapid/classical/daily
 
 
 def _white_pov_eval(a: MoveAnalysis, mover_is_white: bool) -> str:
@@ -145,6 +147,7 @@ def analyze_game(
     progress=None,                    # optional callback(move_number, side, san)
     on_move=None,                     # optional callback(AnnotatedMove) after each move completes
     should_stop=None,                 # optional callable() -> bool; True aborts cleanly with partial results
+    player_context: str = "",         # profile summary of this player from previous games
 ) -> GameReport:
     game = chess.pgn.read_game(io.StringIO(pgn_text))
     if game is None:
@@ -178,6 +181,7 @@ def analyze_game(
                 board = game.board()
                 root = game.board()
                 moves_so_far: list[chess.Move] = []
+                sans_so_far: list[str] = []
                 candidates = engine.top_lines(board)
                 for ply, node in enumerate(game.mainline()):
                     if stop():
@@ -204,10 +208,17 @@ def analyze_game(
                         opening_lines = explorer.summary_lines(info)
                         if info.name:
                             opening_name_holder[0] = f"{info.name} ({info.eco})"
+                        elif not opening_name_holder[0] or opening_name_holder[0].endswith("*"):
+                            # explorer gave no name (often unreachable from Python on some
+                            # networks) → built-in book fallback, marked with a trailing *
+                            local = local_opening_name(sans_so_far)
+                            if local:
+                                opening_name_holder[0] = local + "*"
 
                     game_so_far = root.variation_san(moves_so_far) if moves_so_far else "(game start)"
                     mover_is_white = board.turn == chess.WHITE
 
+                    sans_so_far.append(board.san(move))
                     board.push(move)
                     f_after = feat.extract(board)
                     candidates = lines_after
@@ -291,7 +302,8 @@ def analyze_game(
                               opponent_of=side_filter.capitalize() if skip_llm_side else None,
                               opening_name=item["opening_name"],
                               time_note=time_note,
-                              elo=cfg.user_elo)
+                              elo=cfg.user_elo,
+                              player_context=player_context if not skip_llm_side else "")
         explanation, line_ideas = _split_line_ideas(llm.generate(SYSTEM_PROMPT, prompt))
         if not skip_llm_side:   # opponent panels don't show engine lines, skip the cost
             line_ideas = _ensure_line_ideas(llm, analysis, item["game_so_far"], line_ideas, side)
@@ -332,14 +344,17 @@ def analyze_game(
         records.append(rec)
         if m.cp_loss >= cfg.analysis.mistake_cp:
             spent = f" (played in {m.think_s:.0f}s)" if m.think_s is not None else ""
+            loss = ("allowed a forced mate" if m.cp_loss >= 90000
+                    else f"gave up ~{m.cp_loss / 100:.1f} pawns of evaluation")
             swings.append((m.cp_loss,
-                           f"{prefix} {m.san} ({m.side}) gave up ~{m.cp_loss / 100:.1f} pawns "
-                           f"of evaluation; {m.best_san} was better.{spent}"))
+                           f"{prefix} {m.san} ({m.side}) {loss}; {m.best_san} was better.{spent}"))
     swings = [text for _, text in sorted(swings, reverse=True)[:5]]
     _, _, review_time_class = _parse_time_control(report.headers.get("TimeControl", ""))
     review_prompt = build_game_review_prompt(
         report.headers, records, opening_name_holder[0], swings, side_filter,
-        elo=cfg.user_elo, time_class=review_time_class)
+        elo=cfg.user_elo, time_class=review_time_class, player_context=player_context)
     report.review = llm.generate(GAME_REVIEW_SYSTEM, review_prompt)
+    report.opening = opening_name_holder[0]
+    report.time_class = review_time_class
 
     return report

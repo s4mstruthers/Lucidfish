@@ -24,10 +24,65 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
 from . import features as feat
+from . import store
 from .config import Config
 from .engine import EngineAnalyzer
-from .llm import COACH_CHAT_SYSTEM, OllamaProvider
-from .pipeline import analyze_game
+from .llm import (COACH_CHAT_SYSTEM, SYSTEM_PROMPT, PLAYER_SUMMARY_SYSTEM,
+                  OllamaProvider, _candidate_desc, build_player_summary_prompt)
+from .pipeline import analyze_game, _split_line_ideas
+
+store.init()
+
+
+def _active() -> dict | None:
+    return store.get_profile(store.active_id())
+
+
+def _active_summary() -> str:
+    p = _active()
+    return (p or {}).get("summary") or ""
+
+
+def _refresh_player_summary(pid: int) -> None:
+    """Re-write the LLM coach profile from current stats + recent reviews."""
+    stats = store.aggregate_stats(pid)
+    if stats.get("games", 0) < 2:
+        return
+    try:
+        summary = OllamaProvider(Config().llm).generate(
+            PLAYER_SUMMARY_SYSTEM,
+            build_player_summary_prompt(stats, store.recent_reviews(pid),
+                                        profile=store.get_profile(pid)))
+        store.set_summary(pid, summary)
+    except Exception:
+        pass
+
+
+def _line_steps(fen: str, sans: list[str]) -> list[dict]:
+    """Turn a SAN line into playable steps: [{san, from, to, fen-after}] so the
+    frontend can walk a variation on the board without a chess library."""
+    board = chess.Board(fen)
+    steps = []
+    try:
+        for san in sans:
+            mv = board.parse_san(san)
+            step = {"san": san, "from": chess.square_name(mv.from_square),
+                    "to": chess.square_name(mv.to_square)}
+            board.push(mv)
+            step["fen"] = board.fen()
+            steps.append(step)
+    except Exception:
+        pass  # a malformed tail just shortens the preview
+    return steps
+
+
+def _san_squares(fen: str, san: str) -> tuple[str, str]:
+    try:
+        b = chess.Board(fen)
+        mv = b.parse_san(san)
+        return chess.square_name(mv.from_square), chess.square_name(mv.to_square)
+    except Exception:
+        return "", ""
 
 app = FastAPI(title="Lucidfish")
 STATIC = Path(__file__).parent / "static"
@@ -42,6 +97,8 @@ class AnalyzeReq(BaseModel):
 
 class PositionReq(BaseModel):
     fen: str
+    perspective: str | None = None   # "white" / "black" — whose plans to coach
+    level: str | None = None         # beginner / casual / club / advanced
 
 
 class ChatReq(BaseModel):
@@ -88,9 +145,15 @@ def _serialize_move(m) -> dict:
         "critical": m.critical,
         "think_s": m.think_s,
         "clock_s": m.clock_s,
+        "best_from": _san_squares(m.analysis.fen_before, m.best_san)[0],
+        "best_to": _san_squares(m.analysis.fen_before, m.best_san)[1],
+        "refutation_steps": _line_steps(
+            # refutation starts from the position AFTER the played move
+            b.fen(), m.analysis.refutation_san) if m.analysis.refutation_san else [],
         "candidates": [
             {"san": l.move_san, "score": _white_pov_score(l, m.side == "White"), "line": l.pv_text,
              "idea": m.line_ideas.get(l.move_san, ""),
+             "steps": _line_steps(m.analysis.fen_before, l.pv_san[:8]),
              # numeric, from the MOVER's perspective (higher = better for whoever moved)
              "cp": l.score_cp if l.score_cp is not None
                    else (100000 if (l.mate_in or 0) > 0 else -100000)}
@@ -123,9 +186,16 @@ def analyze(req: AnalyzeReq):
                 progress=lambda n, s, san: job.update(progress=f"move {n} ({s}): {san}"),
                 on_move=lambda m: job["moves"].append(_serialize_move(m)),
                 should_stop=lambda: job.get("stop", False),
+                player_context=_active_summary(),
             )
             job["review"] = report.review
             job["status"] = "stopped" if job.get("stop") else "done"
+            pid = store.active_id()
+            if job["status"] == "done" and pid:   # grow the profile with every analysis
+                store.save_game(pid, req.pgn, job["headers"], req.side, req.elo,
+                                report.opening, job["review"], job["moves"],
+                                report.time_class, replace=True)   # re-analysis updates the stored copy
+                threading.Thread(target=_refresh_player_summary, args=(pid,), daemon=True).start()
         except Exception as e:  # surface any failure to the UI instead of dying silently
             job["status"] = "error"
             job["error"] = str(e)
@@ -168,25 +238,169 @@ def analyze_position(req: PositionReq):
     features = f.summary_lines()
 
     side = "White" if board.turn == chess.WHITE else "Black"
+    persp = (req.perspective or side.lower()).capitalize()
+    level_note = {
+        "beginner": "a beginner — explain fundamentals plainly, avoid long lines",
+        "casual": "a casual player — fundamentals plus simple plans, short lines",
+        "club": "a club player — concrete plans, tactics up to 2-3 moves deep",
+        "advanced": "an advanced player — be concrete and positional, deeper lines are fine",
+    }.get((req.level or (_active() or {}).get("level") or "").lower(), "")
+
     prompt = "\n".join([
         f"Position (FEN): {req.fen}. {side} to move.",
-        "Engine candidate moves (best first):",
-        *(f"  {i}. {l.move_san}  eval {l.score_str}  line: {l.pv_text}"
+        f"You are coaching the {persp} player: assess the position from {persp}'s "
+        f"perspective — their plans, their problems, what they should aim for.",
+        (f"The player is {level_note}." if level_note else ""),
+        "Engine candidate moves (best first). The [brackets] state what each move "
+        "physically is — never contradict them:",
+        *(f"  {i}. {l.move_san} [{_candidate_desc(req.fen, l.move_san)}]  "
+          f"eval {l.score_str}  line: {l.pv_text}"
           for i, l in enumerate(lines, 1)),
         "Position facts:",
         *(f"  {x}" for x in features),
-        "\nGive a short assessment of this position and the plans for both sides, "
-        "then explain why the engine's top move makes sense.",
+        "\nReply in EXACTLY this format, both sections mandatory:",
+        "EXPLANATION:",
+        f"<assessment of the position from {persp}'s perspective and the main plans, "
+        "then why the engine's top move makes sense>",
+        "LINE IDEAS:",
+        f"<candidate SAN>: <one short sentence on what that line achieves for {side}>",
+        "(one such line per candidate above)",
     ])
-    from .llm import SYSTEM_PROMPT
-    commentary = OllamaProvider(cfg.llm).generate(SYSTEM_PROMPT, prompt)
+    commentary, ideas = _split_line_ideas(OllamaProvider(cfg.llm).generate(SYSTEM_PROMPT, prompt))
 
     return {
         "lines": [{"san": l.move_san, "score": _white_pov_score(l, board.turn == chess.WHITE),
-                   "line": l.pv_text} for l in lines],
+                   "line": l.pv_text, "idea": ideas.get(l.move_san, ""),
+                   "steps": _line_steps(req.fen, l.pv_san[:8])} for l in lines],
         "features": features,
         "commentary": commentary,
         "turn": side,
+        "perspective": persp,
+    }
+
+
+class ImportReq(BaseModel):
+    games: list[dict]   # [{pgn, side, elo}]
+    force: bool = False   # re-analyze games that are already in the profile
+
+
+IMPORT_JOB: dict = {"status": "idle", "done": 0, "total": 0, "current": "", "errors": 0, "skipped": 0}
+
+
+@app.post("/api/profile/import")
+def profile_import(req: ImportReq):
+    if IMPORT_JOB["status"] == "running":
+        return JSONResponse({"error": "an import is already running"}, status_code=409)
+    pid = store.active_id()
+    if not pid:
+        return JSONResponse({"error": "create a profile first"}, status_code=400)
+    IMPORT_JOB.update(status="running", done=0, total=len(req.games), current="", errors=0, skipped=0)
+
+    def run():
+        summary = _active_summary()
+        for g in req.games:
+            try:
+                if not req.force and store.has_game(pid, g["pgn"]):
+                    IMPORT_JOB["skipped"] += 1
+                    IMPORT_JOB["done"] += 1
+                    continue
+                IMPORT_JOB["current"] = "analysing game %d/%d" % (IMPORT_JOB["done"] + 1, IMPORT_JOB["total"])
+                cfg = Config()
+                cfg.user_elo = g.get("elo")
+                moves_acc: list[dict] = []
+                report = analyze_game(
+                    g["pgn"], cfg, side_filter=g.get("side"),
+                    on_move=lambda m: moves_acc.append(_serialize_move(m)),
+                    player_context=summary)
+                store.save_game(pid, g["pgn"], dict(report.headers), g.get("side"), g.get("elo"),
+                                report.opening, report.review, moves_acc, report.time_class,
+                                replace=req.force)
+            except Exception:
+                IMPORT_JOB["errors"] += 1
+            IMPORT_JOB["done"] += 1
+        IMPORT_JOB["current"] = "writing player profile…"
+        _refresh_player_summary(pid)
+        IMPORT_JOB["status"] = "done"
+
+    threading.Thread(target=run, daemon=True).start()
+    return {"ok": True}
+
+
+@app.get("/api/profile/import_status")
+def profile_import_status():
+    return IMPORT_JOB
+
+
+class ProfileReq(BaseModel):
+    name: str
+    chesscom_user: str = ""
+    level: str = ""
+    elo_bullet: int | None = None
+    elo_blitz: int | None = None
+    elo_rapid: int | None = None
+
+
+@app.get("/api/profiles")
+def profiles():
+    return {"profiles": store.list_profiles(), "active": store.active_id()}
+
+
+@app.post("/api/profiles")
+def create_profile(req: ProfileReq):
+    try:
+        pid = store.create_profile(**req.dict())
+    except Exception:
+        return JSONResponse({"error": "a profile with that name already exists"}, status_code=400)
+    return {"id": pid}
+
+
+@app.post("/api/profiles/{pid}/activate")
+def activate_profile(pid: int):
+    if store.get_profile(pid) is None:
+        return JSONResponse({"error": "unknown profile"}, status_code=404)
+    store.set_active(pid)
+    return {"ok": True}
+
+
+@app.post("/api/profiles/{pid}")
+def update_profile(pid: int, req: ProfileReq):
+    if store.get_profile(pid) is None:
+        return JSONResponse({"error": "unknown profile"}, status_code=404)
+    store.update_profile(pid, **req.dict())
+    return {"ok": True}
+
+
+@app.post("/api/profile/refresh_summary")
+def refresh_summary():
+    pid = store.active_id()
+    if not pid:
+        return JSONResponse({"error": "no active profile"}, status_code=400)
+    _refresh_player_summary(pid)
+    return {"summary": (store.get_profile(pid) or {}).get("summary", "")}
+
+
+@app.get("/api/profile")
+def profile():
+    pid = store.active_id()
+    p = store.get_profile(pid)
+    if p is None:
+        return {"profile": None}
+    return {
+        "profile": p,
+        "stats": store.aggregate_stats(pid),
+        "games": store.list_games(pid),
+    }
+
+
+@app.get("/api/profile/game/{game_id}")
+def profile_game(game_id: int):
+    g = store.get_game(game_id)
+    if g is None:
+        return JSONResponse({"error": "unknown game"}, status_code=404)
+    return {
+        "headers": {"White": g["white"], "Black": g["black"], "Result": g["result"]},
+        "moves": g["moves"], "review": g["review"], "side": g["user_side"],
+        "opening": g["opening"],
     }
 
 
@@ -194,6 +408,9 @@ def analyze_position(req: PositionReq):
 def coach_chat(req: ChatReq):
     cfg = Config()
     system = COACH_CHAT_SYSTEM
+    summary = _active_summary()
+    if summary:
+        system += "\n\n--- Coach profile of this player from their previous games ---\n" + summary
     if req.context:
         system += "\n\n--- Verified context for what the player is looking at ---\n" + req.context
     try:
