@@ -131,3 +131,24 @@ def test_reanalyse_a_stored_game_replaces_it(client):
     games = client.get("/api/profile").json()["games"]
     assert len(games) == 1 and games[0]["white"] == "A"          # replaced, not duplicated
     assert client.post("/api/profile/game/999999/reanalyse", headers=H).status_code == 404
+
+
+@needs_engine
+def test_done_is_reported_only_after_the_game_is_saved(client, monkeypatch):
+    real_save = store.save_game
+
+    def slow_save(*args, **kwargs):
+        time.sleep(0.6)            # widen the window a page poll could fall into
+        return real_save(*args, **kwargs)
+
+    monkeypatch.setattr(store, "save_game", slow_save)
+    job = client.post("/api/analyze", json={"pgn": SHORT_PGN, "side": "white"}, headers=H).json()["job_id"]
+    deadline = time.time() + 120
+    while time.time() < deadline:
+        view = client.get(f"/api/job/{job}").json()
+        if view["status"] == "done":
+            break
+        time.sleep(0.05)
+    assert view["status"] == "done"
+    assert view["game_id"], "reported done before the game was saved"
+    assert client.get("/api/profile").json()["games"]

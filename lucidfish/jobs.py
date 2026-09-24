@@ -464,19 +464,25 @@ class AnalysisQueue:
             job.review, job.accuracy, job.opening, job.coach = (report.review, report.accuracy,
                                                                  report.opening, report.coach)
             job.warnings = report.warnings
-            job.status = "stopped" if job.stop else "done"
             moves = list(job.moves)
-        if job.status != "done":
-            return
-        review_start = job.review_started or end
-        self.timings.record(cfg, job.total, review_start - job.started, end - review_start)
-        if profile:
-            job.game_id = store.save_game(profile["id"], job.pgn, report.headers, job.side, job.elo,
+            completed = not job.stop
+            if completed:
+                job.label = "Saving…"
+        game_id = None
+        if completed:
+            review_start = job.review_started or end
+            self.timings.record(cfg, job.total, review_start - job.started, end - review_start)
+            if profile:
+                game_id = store.save_game(profile["id"], job.pgn, report.headers, job.side, job.elo,
                                           report.opening, report.review, moves, report.time_class,
                                           report.accuracy, replace=job.replace)
-            if job.game_id and cfg.llm.enabled:
-                with self._cond:
-                    self._touched.add(profile["id"])
+                if game_id and cfg.llm.enabled:
+                    with self._cond:
+                        self._touched.add(profile["id"])
+        # Only now is the result final: a page that sees "done" can rely on the game being saved.
+        with job.lock:
+            job.game_id = game_id
+            job.status = "done" if completed else "stopped"
 
     # ---------------------------------------------------------- prefetch
 
