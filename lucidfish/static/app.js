@@ -2657,6 +2657,94 @@ function saveTrainRecords(rec) {
   try { localStorage.setItem(trainKey(), JSON.stringify(rec)); } catch { /* see above */ }
 }
 
+/* ---------------------------------------------------------------- back up / move your progress */
+
+/* Progress lives in this browser. "Save my progress" downloads it as a small file (puzzle levels and due dates,
+ * today's count, Train settings, and in a shared copy your drawings); "Load progress" merges such a file back,
+ * e.g. on another computer or browser. For each puzzle the most recently practised version wins, so an old
+ * backup never undoes newer practice. */
+const DRAWINGS_PREFIX = "lucidfish-shared-drawings-";
+
+function progressFile() {
+  const read = (key, fallback) => { try { return JSON.parse(localStorage.getItem(key) || "null") ?? fallback; } catch { return fallback; } };
+  const drawings = {};
+  if (EXPORT) {
+    for (const g of EXPORT.games) {
+      const d = read(`${DRAWINGS_PREFIX}${g.fingerprint || g.id}`, null);
+      if (d && Object.keys(d).length) drawings[g.fingerprint || g.id] = d;
+    }
+  }
+  const p = EXPORT ? EXPORT.profile : state.profile;
+  return { lucidfish: "progress", version: 1, saved: new Date().toISOString(), profile: { id: p?.id, name: p?.name || "" },
+    records: trainRecords(), newToday: read(`${trainKey()}-new`, {}), settings: read("lucidfish-train-settings", null),
+    drawings };
+}
+
+function saveProgress() {
+  const data = progressFile();
+  const n = Object.keys(data.records).length;
+  const name = (data.profile.name || "profile").replace(/[^\w .-]+/g, "").trim() || "profile";
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: "application/json" }));
+  a.download = `Lucidfish progress - ${name} - ${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  toast(`Saved your progress on ${n} puzzle${n === 1 ? "" : "s"}.`);
+}
+
+const validRecord = (r) => r && Number.isInteger(r.box) && r.box >= 0 && r.box <= 5 && Number.isFinite(r.due)
+  && Number.isInteger(r.seen) && Number.isInteger(r.right);
+
+/** Merge a saved progress file into this browser's. Returns what happened, for the message. */
+function mergeProgress(data) {
+  if (!data || data.lucidfish !== "progress" || typeof data.records !== "object") throw new Error("That isn't a Lucidfish progress file.");
+  const rec = trainRecords();
+  let added = 0, updated = 0, kept = 0;
+  for (const [id, r] of Object.entries(data.records)) {
+    if (!validRecord(r)) continue;
+    const mine = rec[id];
+    if (!mine) { rec[id] = r; added += 1; }
+    else if ((r.last || 0) > (mine.last || 0)) { rec[id] = r; updated += 1; }
+    else kept += 1;
+  }
+  saveTrainRecords(rec);
+  try {
+    const today = new Date().toDateString(), theirs = data.newToday || {};
+    if (theirs.date === today && Number.isInteger(theirs.count) && theirs.count > newToday()) {
+      localStorage.setItem(`${trainKey()}-new`, JSON.stringify({ date: today, count: theirs.count }));
+    }
+    if (data.settings && !localStorage.getItem("lucidfish-train-settings")) saveTrainSettings(data.settings);
+    if (EXPORT) {
+      for (const [game, positions] of Object.entries(data.drawings || {})) {
+        const key = `${DRAWINGS_PREFIX}${game}`;
+        const mine = JSON.parse(localStorage.getItem(key) || "{}");
+        localStorage.setItem(key, JSON.stringify({ ...positions, ...mine }));   // yours win where both drew
+      }
+    }
+  } catch { /* storage unavailable: the puzzle progress above still applies for this visit */ }
+  return { added, updated, kept };
+}
+
+async function loadProgress(file) {
+  let data;
+  try { data = JSON.parse(await file.text()); } catch { toast("That file couldn't be read as a progress file.", true); return; }
+  const here = (EXPORT ? EXPORT.profile : state.profile)?.name || "";
+  if (data?.profile?.name && here && data.profile.name !== here
+      && !confirm(`This progress was saved for "${data.profile.name}". Load it into "${here}" anyway?`)) return;
+  let r;
+  try { r = mergeProgress(data); } catch (e) { toast(e.message, true); return; }
+  toast(`Loaded: ${r.added} new puzzle${r.added === 1 ? "" : "s"}, ${r.updated} updated`
+    + (r.kept ? `, ${r.kept} kept as they were (practised more recently here)` : "") + ".");
+  renderTrainPage();
+}
+
+$("trainSaveProgress").addEventListener("click", saveProgress);
+$("trainLoadFile").addEventListener("change", (e) => {
+  const f = e.target.files?.[0];
+  e.target.value = "";
+  if (f) loadProgress(f);
+});
+
 async function loadTrainItems() {
   try { train.items = (await api("/api/train")).items || []; } catch { train.items = train.items || []; }
   return train.items;

@@ -139,12 +139,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 button:disabled { opacity: .5; cursor: default; filter: none; }
 button.secondary { background: var(--surface-2); color: var(--text); border-color: var(--border); }
 button.secondary:hover { background: var(--surface-3); }
-button.ghost { background: none; color: var(--muted); border-color: transparent; padding: 7px 10px; }
-button.ghost:hover { color: var(--text); background: var(--surface-2); }
+button.ghost, .btn.ghost { background: none; color: var(--muted); border-color: transparent; padding: 7px 10px; }
+button.ghost:hover, .btn.ghost:hover { color: var(--text); background: var(--surface-2); }
 button.danger { background: none; color: var(--c-blunder); border-color: color-mix(in srgb, var(--c-blunder) 45%, transparent); }
 button.danger:hover { background: color-mix(in srgb, var(--c-blunder) 10%, transparent); }
 button.icon { padding: 7px 9px; min-width: 36px; }
-button.sm { padding: 4px 10px; font-size: .82rem; }
+button.sm, .btn.sm { padding: 4px 10px; font-size: .82rem; }
 
 input, select, textarea {
   font: inherit; font-size: .93rem; color: var(--text);
@@ -677,6 +677,7 @@ body.no-select, body.no-select * { user-select: none !important; -webkit-user-se
 .tl-bar .tl-mastered { background: var(--c-best); }
 .train-how { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
 .puzzle-tags { gap: 6px; margin: -4px 0 10px; }
+.train-backup { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border); gap: 8px; flex-wrap: wrap; }
 .chip.imp-3 { background: color-mix(in srgb, var(--c-blunder) 14%, transparent); color: var(--c-blunder); font-weight: 700; }
 .chip.imp-2 { background: color-mix(in srgb, var(--c-mistake) 14%, transparent); color: var(--c-mistake); font-weight: 700; }
 .chip.imp-1 { background: color-mix(in srgb, var(--c-inaccuracy) 16%, transparent); color: var(--c-inaccuracy); font-weight: 700; }

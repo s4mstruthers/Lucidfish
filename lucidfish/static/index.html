@@ -284,6 +284,13 @@
         <label class="check" id="trainBulletWrap"><input type="checkbox" id="trainBullet"> Include bullet games</label>
       </div>
       <p class="small" id="trainNote" style="margin:12px 0 0"></p>
+      <div class="row small train-backup">
+        <span class="muted">Your progress is saved in this browser.</span>
+        <div class="spacer"></div>
+        <button class="ghost sm" id="trainSaveProgress" title="Download your progress as a file: a backup, or to carry it to another computer or browser">💾 Save my progress</button>
+        <label class="btn ghost sm" for="trainLoadFile" title="Add progress saved earlier (e.g. on another computer). The most recently practised version of each puzzle is kept.">📂 Load progress…</label>
+        <input type="file" id="trainLoadFile" accept=".json,application/json" class="hidden">
+      </div>
     </div>
     <div class="card">
       <div class="card-head"><h2>How it works</h2></div>
@@ -300,7 +307,9 @@
           Miss it and it drops back to the start, comes back at the end of the session, and again tomorrow.</li>
         <li>After a puzzle you can read the coach's note, play out the lines, or press 🔍 Explore to try your own ideas
           against the engine.</li>
-        <li>Your progress is saved in this browser.</li>
+        <li>Your progress is saved in this browser. Use <b>💾 Save my progress</b> to keep a backup or to carry it to
+          another computer or browser, and <b>📂 Load progress</b> there. Loading merges: for each puzzle the most
+          recently practised version is kept, so an old backup never undoes newer practice.</li>
       </ul>
     </div>
   </section>
