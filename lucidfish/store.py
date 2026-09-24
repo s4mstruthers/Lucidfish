@@ -82,6 +82,8 @@ _MIGRATIONS = [
     ("games", "chapters_json", "TEXT"),
     ("games", "annotations_json", "TEXT"),
     ("profiles", "ratings_json", "TEXT"),
+    ("games", "good_moves", "INTEGER"),
+    ("games", "great_moves", "INTEGER"),
 ]
 
 # (The elo_* columns hold ratings typed into older versions; they are migrated into ratings_json.)
@@ -130,6 +132,7 @@ def init() -> None:
             # after the migrations, so databases from older versions have the column
             conn.execute("CREATE INDEX IF NOT EXISTS games_profile ON games(profile_id, id)")
             _backfill_ratings(conn)
+            _backfill_move_counts(conn)
     finally:
         conn.close()
     _initialised.add(path)
@@ -143,6 +146,22 @@ def _backfill_ratings(conn: sqlite3.Connection) -> None:
         for g in conn.execute("SELECT pgn, user_side, time_class FROM games WHERE profile_id=?", (p["id"],)):
             ratings.from_game(found, ratings.pgn_headers(g["pgn"] or ""), g["user_side"], g["time_class"] or "")
         conn.execute("UPDATE profiles SET ratings_json=? WHERE id=?", (json.dumps(found), p["id"]))
+
+
+def _move_counts(moves: list[dict], user_side: str | None) -> dict[str, int]:
+    """How many of the player's moves were best, good, and "great" (the only good move at a critical moment)."""
+    mine = [m for m in moves if not user_side or m.get("side", "").lower() == user_side.lower()]
+    return {"best": sum(m.get("cls") == "best" for m in mine), "good": sum(m.get("cls") == "good" for m in mine),
+            "great": sum(bool(m.get("critical")) and m.get("cls") in ("best", "good") for m in mine)}
+
+
+def _backfill_move_counts(conn: sqlite3.Connection) -> None:
+    """Games analysed before the good-move counts were kept."""
+    conn.row_factory = sqlite3.Row
+    for g in conn.execute("SELECT id, user_side, moves_json FROM games WHERE good_moves IS NULL").fetchall():
+        n = _move_counts(json.loads(g["moves_json"] or "[]"), g["user_side"])
+        conn.execute("UPDATE games SET best_moves=?, good_moves=?, great_moves=? WHERE id=?",
+                     (n["best"], n["good"], n["great"], g["id"]))
 
 
 def _profile_row(r: sqlite3.Row) -> dict:
@@ -260,6 +279,8 @@ def save_game(profile_id: int, pgn: str, headers: dict, user_side: str | None,
     def n(cls: str) -> int:
         return sum(1 for m in mine if m["cls"] == cls)
 
+    counts = _move_counts(moves, user_side)
+
     verb = "INSERT OR REPLACE" if replace else "INSERT"
     with _db(write=True) as c:
         try:
@@ -267,14 +288,15 @@ def save_game(profile_id: int, pgn: str, headers: dict, user_side: str | None,
                 f"""{verb} INTO games (profile_id, fingerprint, pgn, white, black, result,
                                       date, time_class, user_side, user_elo, opening, review,
                                       moves_json, acpl, accuracy, blunders, mistakes,
-                                      inaccuracies, best_moves, insights, chapters_json)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                      inaccuracies, best_moves, good_moves, great_moves, insights,
+                                      chapters_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (profile_id, fingerprint(pgn), pgn,
                  headers.get("White", "?"), headers.get("Black", "?"),
                  headers.get("Result", ""), headers.get("Date", ""),
                  time_class, user_side, user_elo, opening, review,
                  json.dumps(moves, separators=(",", ":")), acpl, acc,
-                 n("blunder"), n("mistake"), n("inaccuracy"), n("best"),
+                 n("blunder"), n("mistake"), n("inaccuracy"), counts["best"], counts["good"], counts["great"],
                  json.dumps(game_insights(moves, user_side, headers.get("Result", ""), time_class),
                             separators=(",", ":")),
                  json.dumps(chapters or [], separators=(",", ":"))))
@@ -293,7 +315,8 @@ def list_games(profile_id: int) -> list[dict]:
     with _db() as c:
         rows = c.execute(
             """SELECT id, fingerprint, white, black, result, date, time_class, user_side,
-                      user_elo, opening, acpl, accuracy, blunders, mistakes, inaccuracies, analyzed_at
+                      user_elo, opening, acpl, accuracy, blunders, mistakes, inaccuracies,
+                      best_moves, good_moves, great_moves, analyzed_at
                FROM games WHERE profile_id=? ORDER BY id DESC""", (profile_id,)).fetchall()
     return [dict(r) for r in rows]
 

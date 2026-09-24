@@ -1128,9 +1128,15 @@ function gameRow(g) {
     : `${esc(g.white)} <span class="g-vs">vs</span> ${esc(g.black)}`;
   const colour = g.user_side ? `<span class="g-colour ${g.user_side}" title="You played ${g.user_side}"></span>` : "";
   const meta = [g.opening, cap(g.time_class), played ? fmtDate(played) : ""].filter(Boolean).join(" · ");
-  const errs = [["blunder", g.blunders], ["mistake", g.mistakes], ["inaccuracy", g.inaccuracies]]
-    .map(([c, n]) => `<span class="g-err${n ? "" : " zero"}" title="${n || 0} ${LABELS[c].toLowerCase()}${n === 1 ? "" : "s"}">`
-      + `${badge(c)}<span>${n || 0}</span></span>`).join("");
+  const count = (b, n, what) => `<span class="g-err${n ? "" : " zero"}" title="${n || 0} ${what}">${b}<span>${n || 0}</span></span>`;
+  const plural = (n, word) => (n === 1 ? word : word.endsWith("y") ? `${word.slice(0, -1)}ies` : `${word}s`);
+  const good = g.best_moves == null ? "" : count(`<span class="badge b-great">⚡</span>`, g.great_moves,
+    `${plural(g.great_moves, "great move")}: the only good move at a critical moment`)
+    + count(badge("best"), g.best_moves, `${plural(g.best_moves, "best move")} (the engine's top choice)`)
+    + count(badge("good"), g.good_moves, `${plural(g.good_moves, "good move")} (close to the best)`)
+    + `<span class="g-sep" aria-hidden="true"></span>`;
+  const errs = good + [["blunder", g.blunders], ["mistake", g.mistakes], ["inaccuracy", g.inaccuracies]]
+    .map(([c, n]) => count(badge(c), n, plural(n, LABELS[c].toLowerCase()))).join("");
   return `<div class="g-row" data-gid="${g.id}" tabindex="0" role="button"
       title="${esc(analysed ? `Analysed ${fmtDate(analysed)}` : "")}">
     <div class="g-result">${resultChip(resultFor(g)) || `<span class="chip">${esc(g.result || "*")}</span>`}</div>
