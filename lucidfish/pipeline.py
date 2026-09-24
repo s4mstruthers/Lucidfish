@@ -1,360 +1,678 @@
 """Pipeline: PGN in → per-move grounded explanations + whole-game review out.
 
-Architecture (two threads, producer/consumer):
-  producer  — Stockfish + feature extraction + opening lookup, one position ahead
-  consumer  — LLM narration of the producer's evidence
-Engine (CPU) and LLM (GPU) are independent, so overlapping them makes total time
-≈ max(engine, llm) instead of engine + llm.
+Architecture (producer / narrators):
+  producer   — Stockfish + features + tactics + opening lookup, running ahead
+  narrators  — LLM calls: one worker for local models (a second request would
+               only compete for the same GPU), several for cloud APIs
+Engine (CPU) and LLM (GPU or network) are independent, so overlapping them
+makes the total time ≈ max(engine, llm) instead of engine + llm. Results are
+always delivered in move order.
+
+The LLM is optional and failure-tolerant: without one (or if it stops
+responding) the analysis completes with engine verdicts only, plus a warning.
 """
 
 from __future__ import annotations
 
 import io
 import queue
-import re
 import threading
+from collections import deque
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import wait as wait_futures
 from dataclasses import dataclass, field
 
 import chess
 import chess.pgn
 
-from .config import Config
-from .engine import EngineAnalyzer, MoveAnalysis, build_move_analysis, describe_move
 from . import features as feat
+from . import tactics
+from .config import Config
+from .engine import EngineAnalyzer, Line, MoveAnalysis, build_move_analysis
+from .llm import LLMError, LLMProvider, make_provider
 from .opening import OpeningExplorer, local_opening_name
-from .llm import (OllamaProvider, SYSTEM_PROMPT, GAME_REVIEW_SYSTEM,
-                  build_prompt, build_game_review_prompt, build_ideas_prompt)
+from .prompts import (
+    GAME_REVIEW_SYSTEM,
+    EvidenceIndex,
+    build_game_review_prompt,
+    build_ideas_prompt,
+    build_move_prompt,
+    build_system_prompt,
+    correction_prompt,
+    game_so_far_text,
+    norm_san,
+    split_sections,
+    time_note,
+)
+from .scoring import eval_text, game_accuracy, win_percent
+
+ERRORS = ("inaccuracy", "mistake", "blunder")
+VERIFY_EXTRA_DEPTH = 4   # extra plies when double-checking a verdict before reporting it
+DETAIL_LEVELS = ("key", "standard", "full")
+# Output caps for local models (a safety net against rambling, not a target).
+_MAX_TOKENS = {"full": 900, "brief": 300, "opponent": 250, "ideas": 300}
+
+Progress = Callable[[str, int, int, str], None]   # (stage, done, total, label)
 
 
 @dataclass
 class AnnotatedMove:
+    ply: int                        # 0-based index in the game
     move_number: int
     side: str                       # "White" / "Black"
     san: str
+    uci: str
     classification: str
     cp_loss: int
     best_san: str
-    eval_str: str                   # eval after the move, White's perspective
-    explanation: str = ""           # empty for quiet moves unless explain_all
-    line_ideas: dict = field(default_factory=dict)  # candidate SAN -> one-sentence idea
+    eval_str: str                   # after the move, White's perspective ('+0.35', '#3', '1-0')
+    win_white: float                # White's winning chances after the move (0-100)
+    accuracy: float                 # this move's accuracy (0-100)
+    fen_before: str
+    fen_after: str
+    explanation: str = ""
+    line_ideas: dict = field(default_factory=dict)   # candidate SAN -> one-sentence idea
     opening: list[str] = field(default_factory=list)  # book stats shown without LLM cost
     critical: bool = False          # game-deciding moment (only-move found)
+    tags: list[str] = field(default_factory=list)     # tactical motif labels
+    mate_event: str = ""
     think_s: float | None = None    # seconds spent on this move (from [%clk] annotations)
     clock_s: float | None = None    # clock remaining after the move
+    chess960: bool = False
     analysis: MoveAnalysis | None = None
+
+    def to_dict(self) -> dict:
+        """JSON-safe form used by the web UI, the database and exports."""
+        a = self.analysis
+        board = chess.Board(self.fen_before, chess960=self.chess960)
+        mover_white = self.side == "White"
+        best_sq = _squares(a.best_uci) if a else ("", "")
+        after = chess.Board(self.fen_after, chess960=self.chess960)
+        return {
+            "ply": self.ply, "n": self.move_number, "side": self.side,
+            "san": self.san, "uci": self.uci,
+            "from": self.uci[:2], "to": self.uci[2:4],
+            "cls": self.classification, "best": self.best_san,
+            "best_from": best_sq[0], "best_to": best_sq[1],
+            "eval": self.eval_str, "win": round(self.win_white, 1), "acc": self.accuracy,
+            "cp_loss": self.cp_loss, "expl": self.explanation,
+            "fen_before": self.fen_before, "fen_after": self.fen_after,
+            "refutation": a.refutation_text if a else "",
+            "refutation_steps": _line_steps(after, a.refutation_san) if a and a.refutation_san else [],
+            "opening": self.opening, "critical": self.critical, "tags": self.tags,
+            "mate_event": self.mate_event, "think_s": self.think_s, "clock_s": self.clock_s,
+            "candidates": [
+                {"san": ln.move_san, "score": white_pov_score(ln, mover_white), "line": ln.pv_text,
+                 "idea": self.line_ideas.get(ln.move_san, ""),
+                 "steps": _line_steps(board, ln.pv_san),
+                 "cp": ln.value}      # mover's perspective, clamped (for ranking alternatives)
+                for ln in (a.candidates if a else [])
+            ],
+        }
 
 
 @dataclass
 class GameReport:
     headers: dict
     moves: list[AnnotatedMove] = field(default_factory=list)
-    review: str = ""            # whole-game narrative: opening, flow, lessons
-    opening: str = ""           # most specific opening identified
-    time_class: str = ""        # bullet/blitz/rapid/classical/daily
+    review: str = ""                # whole-game narrative: opening, flow, lessons
+    opening: str = ""               # most specific opening identified
+    time_class: str = ""            # bullet/blitz/rapid/classical/daily
+    accuracy: dict = field(default_factory=lambda: {"white": None, "black": None})
+    warnings: list[str] = field(default_factory=list)
+    coach: str = ""                 # "Ollama (local) · llama3.1:8b", or "" for engine-only
+    engine: str = ""
 
 
-def _white_pov_eval(a: MoveAnalysis, mover_is_white: bool) -> str:
-    cp = a.eval_after_cp
-    if cp is None:
-        return "mate on the board"
-    if not mover_is_white:
-        cp = -cp
-    return f"{cp / 100:+.2f}"
+# ------------------------------------------------------------------ helpers
+
+def white_pov_score(line: Line, mover_is_white: bool) -> str:
+    """Engine lines are scored for the side to move; the UI shows everything from
+    White's perspective (+ = White better), like every chess site."""
+    sign = 1 if mover_is_white else -1
+    if line.mate_in is not None:
+        return eval_text(None, sign * line.mate_in)
+    return eval_text(sign * line.score_cp, None)
 
 
-def _split_line_ideas(text: str) -> tuple[str, dict]:
-    """Split LLM output into (explanation, {candidate_san: idea}).
-
-    Expected format has labelled EXPLANATION / LINE IDEAS sections, but models
-    drift — so fall back gracefully and never lose content.
-    """
-    body = re.sub(r"^\s*\**\s*EXPLANATION:?\s*\**\s*\n?", "", text, flags=re.I)
-    parts = re.split(r"(?:^|\n)\s*\**\s*LINE IDEAS:?\s*\**\s*\n?", body, maxsplit=1, flags=re.I)
-    if len(parts) != 2:
-        return body.strip(), {}
-    ideas = {}
-    for ln in parts[1].splitlines():
-        m = re.match(r"\s*(?:[-*\d.]+\s*)?\**([A-Za-z0-9+#=x-]+?)\**\s*:\s*(.+)", ln)
-        if m:
-            ideas[m.group(1).strip()] = m.group(2).strip()
-    explanation = parts[0].strip()
-    if not explanation and ideas:
-        # Model skipped the prose — synthesise something rather than showing nothing.
-        explanation = "See the engine lines below for the key ideas in this position."
-    return explanation, ideas
+def _squares(uci: str) -> tuple[str, str]:
+    return (uci[:2], uci[2:4]) if uci else ("", "")
 
 
-def _norm_san(s: str) -> str:
-    """Normalise SAN for fuzzy idea matching (models drop/add check symbols)."""
-    return re.sub(r"[+#x=]", "", s).strip()
-
-
-def _ensure_line_ideas(llm, analysis, game_so_far: str, line_ideas: dict, side: str = "the player") -> dict:
-    """Guarantee an idea sentence for each top-3 candidate.
-
-    First fuzzy-match keys the model DID produce (Bb5 vs Bb5+ etc.); if any are
-    still missing, make one minimal follow-up call asking only for those.
-    """
-    # the played move gets its own full explanation — no idea sentence needed for it
-    top = [l for l in analysis.candidates[:3] if l.move_san != analysis.played_san]
-    nmap = {_norm_san(k): v for k, v in line_ideas.items()}
-    for l in top:
-        if l.move_san not in line_ideas and _norm_san(l.move_san) in nmap:
-            line_ideas[l.move_san] = nmap[_norm_san(l.move_san)]
-
-    missing = [l for l in top if l.move_san not in line_ideas]
-    if missing:
+def _line_steps(board: chess.Board, sans: list[str]) -> list[dict]:
+    """A SAN line as playable steps [{san, from, to, fen}] so the frontend can walk
+    a variation on the board without a chess library of its own."""
+    b = board.copy(stack=False)
+    steps = []
+    for san in sans:
         try:
-            resp = llm.generate(SYSTEM_PROMPT,
-                                build_ideas_prompt(missing, game_so_far, analysis.fen_before, side))
-            _, extra = _split_line_ideas("LINE IDEAS:\n" + resp)
-            emap = {_norm_san(k): v for k, v in extra.items()}
-            for l in missing:
-                idea = extra.get(l.move_san) or emap.get(_norm_san(l.move_san))
-                if idea:
-                    line_ideas[l.move_san] = idea
-        except Exception:
-            pass  # ideas are decoration — never fail the move over them
-    return line_ideas
+            mv = b.parse_san(san)
+        except ValueError:
+            break  # a malformed tail just shortens the preview
+        b.push(mv)
+        steps.append({"san": san, "from": chess.square_name(mv.from_square),
+                      "to": chess.square_name(mv.to_square), "fen": b.board_fen()})
+    return steps
 
 
-def _parse_time_control(tc: str) -> tuple[int | None, int, str]:
+def parse_time_control(tc: str) -> tuple[int | None, int, str]:
     """'600+5' -> (600, 5, 'rapid'). Returns (base_s, increment_s, class)."""
-    if not tc or "/" in tc:   # daily/correspondence or unknown
-        return None, 0, "daily" if tc and "/" in tc else ""
+    if not tc or tc in ("-", "?"):
+        return None, 0, ""
+    if "/" in tc:                      # chess.com daily: "1/259200"
+        return None, 0, "daily"
     try:
-        parts = tc.split("+")
-        base = int(parts[0])
-        inc = int(parts[1]) if len(parts) > 1 else 0
+        base_str, _, inc_str = tc.partition("+")
+        base, inc = int(base_str), int(inc_str or 0)
     except ValueError:
         return None, 0, ""
-    cls = ("bullet" if base < 180 else "blitz" if base < 600
-           else "rapid" if base < 1800 else "classical")
+    # Estimated game duration, bucketed like chess.com (whose ratings profiles store).
+    estimated = base + 40 * inc
+    cls = ("bullet" if estimated < 180 else "blitz" if estimated < 600
+           else "rapid" if estimated < 1800 else "classical")
     return base, inc, cls
 
 
-def _fmt_clock(s: float | None) -> str:
-    if s is None:
-        return ""
-    s = int(s)
-    return f"{s // 60}:{s % 60:02d}"
+def parse_game(pgn_text: str) -> tuple[chess.pgn.Game, list[str]]:
+    """Read the first game from PGN text; returns (game, warnings). Raises ValueError."""
+    game = chess.pgn.read_game(io.StringIO(pgn_text))
+    if game is None:
+        raise ValueError("Could not find a chess game in that text. Paste a PGN (the moves, "
+                         "optionally with [Header \"...\"] lines).")
+    variant = game.headers.get("Variant", "Standard").lower()
+    if variant not in ("standard", "chess960", "from position", "fromposition", ""):
+        raise ValueError(f"The '{game.headers['Variant']}' variant is not supported — only standard "
+                         "chess and Chess960.")
+    moves = list(game.mainline_moves())
+    warnings = []
+    if game.errors:
+        if not moves:
+            raise ValueError(f"The PGN could not be read: {game.errors[0]}")
+        warnings.append(f"The PGN has an error after move {(len(moves) + 1) // 2} "
+                        f"({game.errors[0]}); only the moves before it were analysed.")
+    if not moves:
+        raise ValueError("That game has no moves to analyse.")
+    return game, warnings
 
+
+def plan_note(detail: str, coached_side: str | None, side: str, classification: str,
+              critical: bool, has_threat: bool) -> str | None:
+    """Which kind of coach note (if any) a move gets at a given detail level.
+
+    Mistakes and critical moments of the coached side always get a full note.
+    """
+    coached = coached_side is None or side.lower() == coached_side.lower()
+    if coached:
+        if classification in ERRORS or critical or detail == "full":
+            return "full"
+        return "brief" if detail == "standard" else None
+    if detail == "full" or (detail == "standard" and (classification in ERRORS or has_threat)):
+        return "opponent"
+    return None
+
+
+class _Coach:
+    """Thread-safe wrapper that turns repeated or fatal LLM failures into a
+    graceful switch to engine-only analysis."""
+
+    def __init__(self, llm: LLMProvider | None, error: str = ""):
+        self.llm = llm
+        self.error = error
+        self._fails = 0
+        self._lock = threading.Lock()
+
+    @property
+    def available(self) -> bool:
+        return self.llm is not None and not self.error
+
+    def ok(self) -> None:
+        with self._lock:
+            self._fails = 0
+
+    def failed(self, e: Exception) -> None:
+        with self._lock:
+            self._fails += 1
+            if getattr(e, "fatal", False) or self._fails >= 3:
+                self.error = self.error or str(e)
+
+
+def build_coach(cfg: Config) -> tuple[_Coach, list[str]]:
+    if not cfg.llm.enabled:
+        return _Coach(None), []
+    try:
+        return _Coach(make_provider(cfg.llm)), []
+    except LLMError as e:
+        return _Coach(None, str(e)), [f"The AI coach is unavailable ({e}). Showing engine analysis only."]
+
+
+@dataclass
+class _Evidence:
+    ply: int
+    board: chess.Board              # position before the move
+    move: chess.Move
+    analysis: MoveAnalysis
+    f_before: feat.PositionFeatures
+    f_after: feat.PositionFeatures
+    motifs: list[str]
+    critical: bool
+    note: str | None
+    want_ideas: bool
+    motifs_best: list[str]
+    motifs_reply: list[str]
+    reply_line: Line | None
+    opening_lines: list[str]
+    opening_name: str
+    game_so_far: str
+    previous: dict | None
+    think_s: float | None
+    clock_s: float | None
+    time_class: str
+
+
+# ------------------------------------------------------------------ public
 
 def analyze_game(
     pgn_text: str,
     cfg: Config,
     side_filter: str | None = None,   # "white", "black", or None for both
-    progress=None,                    # optional callback(move_number, side, san)
-    on_move=None,                     # optional callback(AnnotatedMove) after each move completes
-    should_stop=None,                 # optional callable() -> bool; True aborts cleanly with partial results
-    player_context: str = "",         # profile summary of this player from previous games
+    progress: Progress | None = None,
+    on_move: Callable[[AnnotatedMove], None] | None = None,
+    should_stop: Callable[[], bool] | None = None,
+    player_context: str = "",         # coach profile of this player from previous games
+    level: str | None = None,         # beginner / casual / club / advanced
+    engine_cache=None,                # engine.EvalCache (e.g. store.EngineCache())
+    explorer: OpeningExplorer | None = None,
 ) -> GameReport:
-    game = chess.pgn.read_game(io.StringIO(pgn_text))
-    if game is None:
-        raise ValueError("Could not parse a game from the PGN input.")
+    game, warnings = parse_game(pgn_text)
+    report = GameReport(headers=dict(game.headers), warnings=warnings)
+    detail = cfg.analysis.detail if cfg.analysis.detail in DETAIL_LEVELS else "standard"
+    side_filter = side_filter.lower() if side_filter else None
+    total = sum(1 for _ in game.mainline_moves())
+    base_s, inc_s, time_class = parse_time_control(game.headers.get("TimeControl", ""))
+    report.time_class = time_class
 
-    report = GameReport(headers=dict(game.headers))
-    llm = OllamaProvider(cfg.llm)
-    work: queue.Queue = queue.Queue(maxsize=4)   # producer stays a few plies ahead
-    opening_name_holder = [""]
-    stop = should_stop or (lambda: False)
+    coach, coach_warnings = build_coach(cfg)
+    report.warnings += coach_warnings
+    if coach.llm:
+        report.coach = coach.llm.describe()
+    system = build_system_prompt(side_filter, cfg.user_elo, level, player_context)
 
-    def _put(item) -> bool:
-        """put that never deadlocks: gives up when a stop is requested."""
-        while True:
-            if stop():
-                return False
+    stop_event = threading.Event()
+
+    def stopped() -> bool:
+        return stop_event.is_set() or bool(should_stop and should_stop())
+
+    work: queue.Queue = queue.Queue(maxsize=8)
+    opening_state = {"name": "", "from_book": False}
+    engine_name: list[str] = []
+
+    def put(item) -> bool:
+        """Blocking put that gives up when a stop is requested (never deadlocks)."""
+        while not stopped():
             try:
-                work.put(item, timeout=0.5)
+                work.put(item, timeout=0.3)
                 return True
             except queue.Full:
                 continue
+        return False
 
-    # ---------------- producer: engine + features + opening book -------------
-    def produce():
-        explorer = OpeningExplorer()
-        base_s, inc_s, time_class = _parse_time_control(game.headers.get("TimeControl", ""))
-        prev_clock = {True: float(base_s) if base_s else None,
-                      False: float(base_s) if base_s else None}
+    # ---------------- producer: engine + features + tactics + opening book ----------
+    def produce() -> None:
+        opener = explorer or OpeningExplorer()
+        prev_clock = {chess.WHITE: float(base_s) if base_s else None,
+                      chess.BLACK: float(base_s) if base_s else None}
         try:
-            with EngineAnalyzer(cfg.engine) as engine:
+            with EngineAnalyzer(cfg.engine, cache=engine_cache) as engine:
+                engine_name.append(engine.name)
                 board = game.board()
-                root = game.board()
-                moves_so_far: list[chess.Move] = []
+                root = board.copy(stack=False)
                 sans_so_far: list[str] = []
                 candidates = engine.top_lines(board)
+                f_before = feat.extract(board)
+                previous: dict | None = None
                 for ply, node in enumerate(game.mainline()):
-                    if stop():
-                        break
-                    move = node.move
-                    # per-move thinking time from [%clk] PGN annotations (chess.com/Lichess)
-                    mover_is_white_now = board.turn == chess.WHITE
-                    clock = node.clock()
-                    think_s = None
-                    if clock is not None and prev_clock[mover_is_white_now] is not None:
-                        think_s = max(0.0, prev_clock[mover_is_white_now] - clock + inc_s)
+                    if stopped():
+                        return
+                    move, mover = node.move, board.turn
+                    side = "White" if mover == chess.WHITE else "Black"
+                    clock, think_s = node.clock(), None
+                    if clock is not None and prev_clock[mover] is not None:
+                        think_s = max(0.0, prev_clock[mover] - clock + inc_s)
                     if clock is not None:
-                        prev_clock[mover_is_white_now] = clock
-                    f_before = feat.extract(board)
+                        prev_clock[mover] = clock
 
                     after = board.copy(stack=False)
                     after.push(move)
                     lines_after = [] if after.is_game_over() else engine.top_lines(after)
-                    analysis = build_move_analysis(board, move, candidates, lines_after, cfg.analysis)
+                    analysis, candidates, lines_after = _verified_analysis(
+                        engine, board, move, after, candidates, lines_after, cfg)
+                    f_after = feat.extract(after)
+                    motifs = tactics.move_motifs(board, move)
+                    threat = bool(tactics.tags_from_motifs(motifs)) or any(
+                        m.startswith("attacks ") for m in motifs)
+
+                    critical = (
+                        len(candidates) >= 2 and analysis.classification in ("best", "good")
+                        and win_percent(candidates[0].value) - win_percent(candidates[1].value)
+                        >= cfg.analysis.critical_gap_win
+                    )
+                    note = plan_note(detail, side_filter, side, analysis.classification, critical, threat)
+                    note = note if coach.available else None
+                    want_ideas = note == "full" and (analysis.classification in ERRORS or analysis.cp_loss > 20)
+                    motifs_best: list[str] = []
+                    motifs_reply: list[str] = []
+                    if note == "full":
+                        if analysis.best_uci and analysis.best_uci != move.uci():
+                            motifs_best = tactics.move_motifs(board, chess.Move.from_uci(analysis.best_uci))
+                        if lines_after and analysis.refutation_san:
+                            motifs_reply = tactics.move_motifs(after, chess.Move.from_uci(lines_after[0].move_uci))
 
                     opening_lines: list[str] = []
                     if ply < cfg.analysis.opening_book_plies:
-                        info = explorer.lookup(board.fen())
-                        opening_lines = explorer.summary_lines(info)
+                        info = opener.lookup(board.fen())
+                        opening_lines = opener.summary_lines(info)
                         if info.name:
-                            opening_name_holder[0] = f"{info.name} ({info.eco})"
-                        elif not opening_name_holder[0] or opening_name_holder[0].endswith("*"):
-                            # explorer gave no name (often unreachable from Python on some
-                            # networks) → built-in book fallback, marked with a trailing *
-                            local = local_opening_name(sans_so_far)
+                            opening_state.update(name=f"{info.name} ({info.eco})", from_book=False)
+                        elif not opening_state["name"] or opening_state["from_book"]:
+                            local = local_opening_name(sans_so_far)  # offline fallback book
                             if local:
-                                opening_name_holder[0] = local + "*"
+                                opening_state.update(name=local, from_book=True)
 
-                    game_so_far = root.variation_san(moves_so_far) if moves_so_far else "(game start)"
-                    mover_is_white = board.turn == chess.WHITE
+                    item = _Evidence(
+                        ply=ply, board=board, move=move, analysis=analysis,
+                        f_before=f_before, f_after=f_after, motifs=motifs, critical=critical,
+                        note=note, want_ideas=want_ideas, motifs_best=motifs_best,
+                        motifs_reply=motifs_reply, reply_line=lines_after[0] if lines_after else None,
+                        opening_lines=opening_lines, opening_name=opening_state["name"],
+                        game_so_far=game_so_far_text(root, sans_so_far) if note else "",
+                        previous=previous, think_s=think_s, clock_s=clock, time_class=time_class,
+                    )
+                    if progress:
+                        progress("engine", ply + 1, total, f"{side} {analysis.played_san}")
+                    if not put(item):
+                        return
+                    previous = {"san": analysis.played_san, "cls": analysis.classification, "side": side}
+                    sans_so_far.append(analysis.played_san)
+                    board, candidates, f_before = after, lines_after, f_after
+            put(None)
+        except Exception as e:  # surface engine failures to the caller
+            put(e)
 
-                    sans_so_far.append(board.san(move))
-                    board.push(move)
-                    f_after = feat.extract(board)
-                    candidates = lines_after
-                    moves_so_far.append(move)
-
-                    if not _put({
-                        "move": move,
-                        "mover_is_white": mover_is_white,
-                        "analysis": analysis, "f_before": f_before, "f_after": f_after,
-                        "opening_lines": opening_lines, "game_so_far": game_so_far,
-                        "opening_name": opening_name_holder[0],
-                        "think_s": think_s, "clock_s": clock, "time_class": time_class,
-                    }):
-                        break
-            _put(None)                            # done (or stopped)
-        except Exception as e:
-            _put(("error", e))
-
-    producer = threading.Thread(target=produce, daemon=True)
-    producer.start()
-
-    # ---------------- consumer: LLM narration --------------------------------
-    while True:
-        if stop():
-            break
-        try:
-            item = work.get(timeout=0.5)
-        except queue.Empty:
-            continue
-        if item is None:
-            break
-        if isinstance(item, tuple) and item[0] == "error":
-            raise item[1]
-
-        analysis: MoveAnalysis = item["analysis"]
-        mover_is_white = item["mover_is_white"]
-        side = "White" if mover_is_white else "Black"
-        pre = chess.Board(analysis.fen_before)
-        move_number = pre.fullmove_number
-
-        if progress:
-            progress(move_number, side, analysis.played_san)
-
-        skip_llm_side = (side_filter is not None and side.lower() != side_filter.lower())
-
-        # "Critical moment": the best move was far stronger than the alternatives,
-        # and the player found it (or nearly) — these decided the game and deserve
-        # an explanation even though nothing went wrong.
-        cands = analysis.candidates
-        critical = (
-            len(cands) >= 2
-            and cands[0].score_cp is not None and cands[1].score_cp is not None
-            and (cands[0].score_cp - cands[1].score_cp) >= cfg.analysis.critical_gap_cp
-            and analysis.classification in ("best", "good")
-        )
-
-        # Errors and critical moments get full forensic notes; quiet good moves get
-        # a brief big-picture note (plan / preparation / prevention).
-        full_note = (
-            cfg.analysis.explain_all
-            or analysis.classification in ("inaccuracy", "mistake", "blunder")
-            or critical
-        )
-
-        # Time context: was this an instant move, or played in time trouble?
-        time_note = ""
-        if item["think_s"] is not None:
-            time_note = (f"{side} spent {item['think_s']:.0f} seconds on this move"
-                         + (f" ({_fmt_clock(item['clock_s'])} remaining)" if item["clock_s"] is not None else "")
-                         + (f", in a {item['time_class']} game" if item["time_class"] else "") + ".")
-
-        explanation, line_ideas = "", {}
-        prompt = build_prompt(move_number, side, analysis,
-                              item["f_before"], item["f_after"],
-                              item["opening_lines"],
-                              move_desc=describe_move(pre, item["move"]) + ".",
-                              game_so_far=item["game_so_far"],
-                              critical=critical,
-                              brief=not full_note,
-                              # opponent's move → short "what are they up to" note
-                              opponent_of=side_filter.capitalize() if skip_llm_side else None,
-                              opening_name=item["opening_name"],
-                              time_note=time_note,
-                              elo=cfg.user_elo,
-                              player_context=player_context if not skip_llm_side else "")
-        explanation, line_ideas = _split_line_ideas(llm.generate(SYSTEM_PROMPT, prompt))
-        if not skip_llm_side:   # opponent panels don't show engine lines, skip the cost
-            line_ideas = _ensure_line_ideas(llm, analysis, item["game_so_far"], line_ideas, side)
-
-        report.moves.append(AnnotatedMove(
-            move_number=move_number,
-            side=side,
-            san=analysis.played_san,
-            classification=analysis.classification,
-            cp_loss=analysis.cp_loss,
-            best_san=analysis.best_san,
-            eval_str=_white_pov_eval(analysis, mover_is_white),
+    # ---------------- narrator: one LLM note per move ---------------------------
+    def narrate(ev: _Evidence) -> AnnotatedMove:
+        a = ev.analysis
+        explanation, ideas = "", {}
+        if ev.note and coach.available:
+            try:
+                explanation, ideas = _write_note(coach.llm, system, ev, side_filter, cfg)
+                coach.ok()
+            except LLMError as e:
+                coach.failed(e)
+        mover_white = ev.board.turn == chess.WHITE
+        after_w = _white_after(a, mover_white)
+        after_board = ev.board.copy(stack=False)
+        after_board.push(ev.move)
+        return AnnotatedMove(
+            ply=ev.ply,
+            move_number=ev.board.fullmove_number,
+            side="White" if mover_white else "Black",
+            san=a.played_san,
+            uci=a.played_uci,
+            classification=a.classification,
+            cp_loss=a.cp_loss,
+            best_san=a.best_san,
+            eval_str=a.game_result or eval_text(*after_w),
+            win_white=a.win_after if mover_white else 100 - a.win_after,
+            accuracy=a.accuracy,
+            fen_before=a.fen_before,
+            fen_after=after_board.fen(),
             explanation=explanation,
-            line_ideas=line_ideas,
-            opening=item["opening_lines"],
-            critical=critical,
-            think_s=item["think_s"],
-            clock_s=item["clock_s"],
-            analysis=analysis,
-        ))
-        if on_move:
-            on_move(report.moves[-1])
+            line_ideas=ideas,
+            opening=ev.opening_lines,
+            critical=ev.critical,
+            tags=_tags(ev.motifs, a.classification),
+            mate_event=a.mate_event,
+            think_s=ev.think_s,
+            clock_s=ev.clock_s,
+            chess960=ev.board.chess960,
+            analysis=a,
+        )
 
-    producer.join()
+    producer = threading.Thread(target=produce, name="lucidfish-engine", daemon=True)
+    producer.start()
+    workers = coach.llm.concurrency if coach.available else 1
+    executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="lucidfish-coach")
+    pending: deque[Future] = deque()
+    producer_done = False
+    try:
+        while not stopped():
+            while pending and pending[0].done():
+                move = pending.popleft().result()
+                report.moves.append(move)
+                if on_move:
+                    on_move(move)
+                if progress:
+                    progress("coach", len(report.moves), total, f"{move.side} {move.san}")
+            if producer_done:
+                if not pending:
+                    break
+                wait_futures([pending[0]], timeout=0.2)
+                continue
+            try:
+                item = work.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if item is None:
+                producer_done = True
+            elif isinstance(item, BaseException):
+                raise item
+            else:
+                pending.append(executor.submit(narrate, item))
+    finally:
+        # Always release the engine, even if narration raised: no orphaned Stockfish.
+        stop_event.set()
+        executor.shutdown(wait=False, cancel_futures=True)
+        producer.join(timeout=30)
 
-    if stop():
+    report.engine = engine_name[0] if engine_name else ""
+    report.opening = opening_state["name"]
+    if report.moves:
+        first = report.moves[0].analysis
+        start = first.win_before if report.moves[0].side == "White" else 100 - first.win_before
+        report.accuracy = game_accuracy([start] + [m.win_white for m in report.moves],
+                                        white_to_move_first=report.moves[0].side == "White")
+    if coach.error and cfg.llm.enabled and not coach_warnings:
+        report.warnings.append(f"The AI coach stopped responding ({coach.error}). Moves after that point "
+                               "show engine analysis only.")
+    if should_stop and should_stop():
         return report   # partial results, no review — the user asked to stop
 
-    # ---------------- whole-game review --------------------------------------
-    if progress:
-        progress("—", "review", "writing post-game review")
+    if coach.available and report.moves:
+        if progress:
+            progress("review", total, total, "writing the post-game review")
+        try:
+            report.review = coach.llm.generate(GAME_REVIEW_SYSTEM, _review_prompt(report, side_filter, cfg,
+                                                                                  player_context))
+        except LLMError as e:
+            report.warnings.append(f"The post-game review could not be written: {e}")
+    return report
+
+
+# ------------------------------------------------------------------ verification
+
+def _verified_analysis(engine: EngineAnalyzer, board: chess.Board, move: chess.Move, after: chess.Board,
+                       candidates: list[Line], lines_after: list[Line], cfg: Config
+                       ) -> tuple[MoveAnalysis, list[Line], list[Line]]:
+    """Build the move's analysis, double-checking the verdicts that matter most.
+
+    Fixed-depth search has a horizon: sacrifices can look like blunders, and
+    the engine's own top choice can turn out to lose one ply later. Before
+    calling a move a mistake/blunder, or "best" despite a collapse, search the
+    relevant position a few plies deeper. Costs a few seconds per game and
+    prevents the worst kind of feedback: a brilliant move labelled a blunder.
+    """
+    analysis = build_move_analysis(board, move, candidates, lines_after, cfg.analysis)
+    if (analysis.classification in ("mistake", "blunder") and analysis.eval_after_mate is None
+            and lines_after):
+        deeper = engine.top_lines(after, extra_depth=VERIFY_EXTRA_DEPTH)
+        if deeper:
+            lines_after = deeper
+            analysis = build_move_analysis(board, move, candidates, lines_after, cfg.analysis)
+    if analysis.suspicious:
+        deeper = engine.top_lines(board, extra_depth=VERIFY_EXTRA_DEPTH)
+        if deeper:
+            candidates = deeper
+            analysis = build_move_analysis(board, move, candidates, lines_after, cfg.analysis)
+    return analysis, candidates, lines_after
+
+
+# ------------------------------------------------------------------ narration
+
+def _tags(motifs: list[str], classification: str) -> list[str]:
+    """UI labels; material deliberately given up by a good move is a sacrifice."""
+    tags = tactics.tags_from_motifs(motifs)
+    if classification in ("best", "good") and "hangs material" in tags:
+        tags = ["sacrifice" if t == "hangs material" else t for t in tags]
+    return tags
+
+
+def _white_after(a: MoveAnalysis, mover_white: bool) -> tuple[int | None, int | None]:
+    cp, mate = a.eval_after_cp, a.eval_after_mate
+    if mover_white:
+        return cp, mate
+    return (-cp if cp is not None else None), (-mate if mate is not None else None)
+
+
+def _write_note(llm: LLMProvider, system: str, ev: _Evidence, side_filter: str | None,
+                cfg: Config) -> tuple[str, dict]:
+    """One grounded note: prompt → parse → fact-check (one retry) → line ideas."""
+    a = ev.analysis
+    prompt = build_move_prompt(
+        board=ev.board, move=ev.move, analysis=a, note_type=ev.note,
+        f_before=ev.f_before, f_after=ev.f_after, coached_side=side_filter, critical=ev.critical,
+        motifs_played=ev.motifs, motifs_best=ev.motifs_best, motifs_reply=ev.motifs_reply,
+        reply_line=ev.reply_line, opening_name=ev.opening_name, opening_lines=ev.opening_lines,
+        game_so_far=ev.game_so_far,
+        time_note=time_note("White" if ev.board.turn == chess.WHITE else "Black",
+                            ev.think_s, ev.clock_s, ev.time_class),
+        previous=ev.previous, want_ideas=ev.want_ideas,
+    )
+    max_tokens = _MAX_TOKENS[ev.note]
+    messages = [{"role": "user", "content": prompt}]
+    text = llm.chat(system, messages, max_tokens=max_tokens)
+    explanation, ideas = split_sections(text)
+
+    if cfg.llm.factcheck and explanation:
+        after = ev.board.copy(stack=False)
+        after.push(ev.move)
+        lines = [(ev.board, ln.pv_san) for ln in a.candidates]
+        if ev.reply_line is not None:
+            lines.append((after, ev.reply_line.pv_san))
+        index = EvidenceIndex(ev.board, ev.move, lines)
+        problems = index.problems(explanation + "\n" + "\n".join(ideas.values()))
+        if problems:
+            retry = llm.chat(system, messages + [{"role": "assistant", "content": text},
+                                                 {"role": "user", "content": correction_prompt(problems)}],
+                             max_tokens=max_tokens)
+            e2, i2 = split_sections(retry)
+            if e2 and len(index.problems(e2 + "\n" + "\n".join(i2.values()))) < len(problems):
+                explanation, ideas = e2, i2 or ideas
+
+    if ev.want_ideas:
+        ideas = _ensure_line_ideas(llm, system, ev, ideas)
+    return explanation, ideas
+
+
+def _ensure_line_ideas(llm: LLMProvider, system: str, ev: _Evidence, ideas: dict) -> dict:
+    """Guarantee an idea sentence for each top-3 alternative candidate.
+
+    First fuzzy-match keys the model did produce (Bb5 vs Bb5+ etc.); if any
+    are still missing, make one minimal follow-up call asking only for those.
+    """
+    a = ev.analysis
+    wanted = [ln for ln in a.candidates[:3] if ln.move_uci != a.played_uci]
+    by_norm = {norm_san(k): v for k, v in ideas.items()}
+    out = {}
+    for ln in wanted:
+        idea = ideas.get(ln.move_san) or by_norm.get(norm_san(ln.move_san))
+        if idea:
+            out[ln.move_san] = idea
+    missing = [ln for ln in wanted if ln.move_san not in out]
+    if missing:
+        try:
+            resp = llm.generate(system, build_ideas_prompt(missing, ev.board, ev.game_so_far),
+                                max_tokens=_MAX_TOKENS["ideas"])
+            _, extra = split_sections("LINE IDEAS:\n" + resp)
+            extra_norm = {norm_san(k): v for k, v in extra.items()}
+            for ln in missing:
+                idea = extra.get(ln.move_san) or extra_norm.get(norm_san(ln.move_san))
+                if idea:
+                    out[ln.move_san] = idea
+        except LLMError:
+            pass  # ideas are decoration — never fail the move over them
+    return out
+
+
+def _review_prompt(report: GameReport, side_filter: str | None, cfg: Config, player_context: str) -> str:
+    from .scoring import describe_eval
     records, swings = [], []
     for m in report.moves:
+        a = m.analysis
         prefix = f"{m.move_number}." if m.side == "White" else f"{m.move_number}..."
-        rec = f"{prefix} {m.san} — {m.classification}, eval {m.eval_str}"
+        cp, mate = _white_after(a, m.side == "White")
+        state = "game over" if a.game_result else describe_eval(cp, mate)
+        rec = f"{prefix} {m.san} — {m.classification}"
         if m.san != m.best_san and m.best_san:
             rec += f" (best was {m.best_san})"
-        records.append(rec)
-        if m.cp_loss >= cfg.analysis.mistake_cp:
-            spent = f" (played in {m.think_s:.0f}s)" if m.think_s is not None else ""
-            loss = ("allowed a forced mate" if m.cp_loss >= 90000
-                    else f"gave up ~{m.cp_loss / 100:.1f} pawns of evaluation")
-            swings.append((m.cp_loss,
-                           f"{prefix} {m.san} ({m.side}) {loss}; {m.best_san} was better.{spent}"))
-    swings = [text for _, text in sorted(swings, reverse=True)[:5]]
-    _, _, review_time_class = _parse_time_control(report.headers.get("TimeControl", ""))
-    review_prompt = build_game_review_prompt(
-        report.headers, records, opening_name_holder[0], swings, side_filter,
-        elo=cfg.user_elo, time_class=review_time_class, player_context=player_context)
-    report.review = llm.generate(GAME_REVIEW_SYSTEM, review_prompt)
-    report.opening = opening_name_holder[0]
-    report.time_class = review_time_class
+        records.append(f"{rec}; after it {state}")
+        if m.classification in ("mistake", "blunder"):
+            spent = f" Played in {m.think_s:.0f}s." if m.think_s is not None else ""
+            event = {"missed_mate": " It missed a forced mate.",
+                     "allowed_mate": " It allowed a forced mate."}.get(m.mate_event, "")
+            swings.append((a.win_loss, f"{prefix} {m.san} ({m.side}) dropped {m.side}'s winning chances "
+                                       f"from {a.win_before:.0f}% to {a.win_after:.0f}%; {m.best_san} was "
+                                       f"better.{event}{spent}"))
+    swings.sort(key=lambda s: -s[0])
+    return build_game_review_prompt(
+        report.headers, records, report.opening, [t for _, t in swings[:5]], side_filter,
+        elo=cfg.user_elo, time_class=report.time_class, player_context=player_context,
+        accuracy=report.accuracy)
 
-    return report
+
+# ------------------------------------------------------------------ positions
+
+def analyze_position(fen: str, cfg: Config, perspective: str | None = None, level: str | None = None,
+                     engine_cache=None) -> dict:
+    """One-shot analysis of a set-up position (board editor mode)."""
+    from .prompts import build_position_prompt
+    board = chess.Board(fen)
+    with EngineAnalyzer(cfg.engine, cache=engine_cache) as engine:
+        lines = engine.top_lines(board)
+    f = feat.extract(board)
+    facts = f.summary_lines()
+    side = "White" if board.turn == chess.WHITE else "Black"
+    persp = (perspective or side).capitalize()
+    result = {
+        "turn": side, "perspective": persp, "features": facts, "commentary": "", "warnings": [],
+        "lines": [{"san": ln.move_san, "score": white_pov_score(ln, board.turn == chess.WHITE),
+                   "line": ln.pv_text, "idea": "", "steps": _line_steps(board, ln.pv_san),
+                   "win": round(win_percent(ln.value) if board.turn == chess.WHITE
+                                else 100 - win_percent(ln.value), 1)}
+                  for ln in lines],
+    }
+    coach, warnings = build_coach(cfg)
+    result["warnings"] += warnings
+    if coach.available and lines:
+        system = build_system_prompt(persp.lower(), cfg.user_elo, level)
+        try:
+            text = coach.llm.generate(system, build_position_prompt(board, lines, facts, persp),
+                                      max_tokens=_MAX_TOKENS["full"])
+            commentary, ideas = split_sections(text)
+            by_norm = {norm_san(k): v for k, v in ideas.items()}
+            result["commentary"] = commentary
+            for entry in result["lines"]:
+                entry["idea"] = ideas.get(entry["san"]) or by_norm.get(norm_san(entry["san"]), "")
+        except LLMError as e:
+            result["warnings"].append(f"The AI coach is unavailable ({e}).")
+    return result

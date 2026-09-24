@@ -1,18 +1,28 @@
-"""CLI: `python -m lucidfish path/to/game.pgn`"""
+"""Command-line interface.
+
+    lucidfish game.pgn                      analyse a PGN file
+    lucidfish --chesscom USER               your latest chess.com game
+    lucidfish --lichess USER --recent 2     your second-latest Lichess game
+    lucidfish --check                       verify Stockfish and the AI coach are set up
+    lucidfish web                           start the web app
+"""
 
 from __future__ import annotations
 
 import argparse
+import io
+import json
 import sys
+from pathlib import Path
 
 from rich.console import Console
 from rich.panel import Panel
+from rich.progress import BarColumn, MofNCompleteColumn, Progress, TextColumn, TimeElapsedColumn
 
-from .config import Config
-from .pipeline import analyze_game
+from . import __version__
 
 BADGES = {
-    "best": "[green]✓ best[/green]",
+    "best": "[green]best[/green]",
     "good": "[green]good[/green]",
     "inaccuracy": "[yellow]?! inaccuracy[/yellow]",
     "mistake": "[dark_orange]? mistake[/dark_orange]",
@@ -20,105 +30,216 @@ BADGES = {
 }
 
 
-def main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(prog="lucidfish", description="Stockfish tells you the best move; Lucidfish tells you why.")
-    p.add_argument("pgn", nargs="?", default=None, help="path to a PGN file (or '-' for stdin)")
-    p.add_argument("--chesscom", metavar="USERNAME", default=None,
-                   help="fetch your most recent chess.com game instead of a PGN file")
-    p.add_argument("--lichess", metavar="USERNAME", default=None,
-                   help="fetch your most recent Lichess game instead of a PGN file")
-    p.add_argument("--recent", type=int, default=1,
-                   help="with --chesscom/--lichess: which recent game (1 = latest, 2 = one before, ...)")
-    p.add_argument("--side", choices=["white", "black"], default=None,
-                   help="only generate explanations for this side's moves")
-    p.add_argument("--depth", type=int, default=None, help="engine search depth (default 18)")
-    p.add_argument("--elo", type=int, default=None,
-                   help="your rating — tailors explanation depth and lessons to your level")
-    p.add_argument("--fast", action="store_true",
-                   help="cap engine at 0.3s/position instead of fixed depth (~3x faster, slightly less precise)")
-    p.add_argument("--model", default=None, help="Ollama model name (default qwen2.5:14b)")
-    p.add_argument("--explain-all", action="store_true", help="explain every move, not just critical ones")
-    p.add_argument("--out", default=None, help="also write a markdown report to this path")
-    args = p.parse_args(argv)
+def build_parser() -> argparse.ArgumentParser:
+    from .config import DEPTH_PRESETS
+    from .llm import PROVIDERS
+    from .pipeline import DETAIL_LEVELS
 
-    cfg = Config()
+    p = argparse.ArgumentParser(
+        prog="lucidfish",
+        description="Stockfish tells you the best move; Lucidfish tells you why.",
+        epilog="Run `lucidfish web` for the browser app. Settings saved in the web app "
+               "(AI provider, model, depth) are used here too; flags override them.")
+    p.add_argument("pgn", nargs="?", default=None, help="PGN file to analyse ('-' reads stdin)")
+    src = p.add_argument_group("game source")
+    src.add_argument("--chesscom", metavar="USER", help="fetch a recent chess.com game")
+    src.add_argument("--lichess", metavar="USER", help="fetch a recent Lichess game")
+    src.add_argument("--recent", type=int, default=1, metavar="N",
+                     help="with --chesscom/--lichess: 1 = latest game, 2 = the one before, ...")
+    coach = p.add_argument_group("coaching")
+    coach.add_argument("--side", choices=["white", "black"], help="coach this side (auto-detected for fetched games)")
+    coach.add_argument("--elo", type=int, help="your rating — tailors explanations to your level")
+    coach.add_argument("--detail", choices=DETAIL_LEVELS,
+                       help="how much the coach writes (default: standard)")
+    coach.add_argument("--explain-all", action="store_true", help="same as --detail full")
+    coach.add_argument("--provider", choices=list(PROVIDERS), help="AI provider (default: ollama)")
+    coach.add_argument("--model", help="model name, e.g. llama3.1:8b or gpt-4.1-mini")
+    coach.add_argument("--no-llm", action="store_true", help="engine analysis only (fast, no AI coach)")
+    eng = p.add_argument_group("engine")
+    eng.add_argument("--preset", choices=list(DEPTH_PRESETS), help="engine strength preset")
+    eng.add_argument("--depth", type=int, help="search depth per position (default 18)")
+    eng.add_argument("--fast", action="store_true", help="0.3 s per position instead of a fixed depth")
+    eng.add_argument("--threads", type=int, help="CPU threads for Stockfish")
+    eng.add_argument("--no-cache", action="store_true", help="ignore stored engine results")
+    out = p.add_argument_group("output")
+    out.add_argument("--out", metavar="FILE.md", help="write a Markdown report")
+    out.add_argument("--pgn-out", metavar="FILE.pgn", help="write an annotated PGN (for Lichess studies, ChessBase, ...)")
+    out.add_argument("--json", metavar="FILE.json", help="write the full analysis as JSON")
+    p.add_argument("--check", action="store_true", help="check that Stockfish and the AI coach work, then exit")
+    p.add_argument("--version", action="version", version=f"lucidfish {__version__}")
+    return p
+
+
+def main(argv: list[str] | None = None) -> int:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["web"]:
+        from .web import main as web_main
+        return web_main(argv[1:])
+
+    args = build_parser().parse_args(argv)
+    console = Console()
+    from .config import DEPTH_PRESETS
+    from .settings import load_config
+
+    cfg = load_config(provider=args.provider, model=args.model)
+    if args.preset:
+        cfg.engine.depth = DEPTH_PRESETS[args.preset]
     if args.depth:
         cfg.engine.depth = args.depth
     if args.fast:
         cfg.engine.movetime_s = 0.3
-        cfg.engine.multipv = 3
-    if args.model:
-        cfg.llm.model = args.model
-    cfg.analysis.explain_all = args.explain_all
+    if args.threads:
+        cfg.engine.threads = args.threads
+    if args.no_cache:
+        cfg.engine.use_cache = False
+    if args.no_llm:
+        cfg.llm.enabled = False
+    if args.explain_all:
+        cfg.analysis.detail = "full"
+    elif args.detail:
+        cfg.analysis.detail = args.detail
     cfg.user_elo = args.elo
 
-    console = Console()
+    if args.check:
+        return _check(cfg, console)
 
-    # No PGN and no explicit fetch flag → fall back to the configured chess.com account.
-    if not args.pgn and not args.chesscom and not args.lichess and cfg.chesscom_user:
-        args.chesscom = cfg.chesscom_user
-
-    username = args.chesscom or args.lichess
-    if args.chesscom or args.lichess:
-        from .fetch import chesscom_recent_pgns, lichess_recent_pgns
-        site = "chess.com" if args.chesscom else "Lichess"
-        console.print(f"Fetching game {args.recent} back from {site} for [bold]{username}[/bold]…")
-        fetch = chesscom_recent_pgns if args.chesscom else lichess_recent_pgns
-        pgn_text = fetch(username, n=args.recent)[args.recent - 1]
-    elif args.pgn:
-        pgn_text = sys.stdin.read() if args.pgn == "-" else open(args.pgn).read()
-    else:
-        p.error("provide a PGN file, or --chesscom/--lichess USERNAME")
-
-    # Auto-detect which colour the user played, so explanations address them.
+    try:
+        pgn_text, username = _load_pgn(args, cfg, console)
+    except (OSError, RuntimeError, ValueError) as e:
+        console.print(f"[red]Error:[/red] {e}")
+        return 1
     if args.side is None and username:
-        import io as _io
-        import chess.pgn as _pgn
-        headers = _pgn.read_headers(_io.StringIO(pgn_text)) or {}
-        if headers.get("White", "").lower() == username.lower():
-            args.side = "white"
-        elif headers.get("Black", "").lower() == username.lower():
-            args.side = "black"
+        args.side = _detect_side(pgn_text, username)
         if args.side:
             console.print(f"You played [bold]{args.side.capitalize()}[/bold] — coaching that side.")
 
-    status = console.status("starting engine…")
-    status.start()
-
-    def progress(move_no, side, san):
-        status.update(f"analysing move {move_no} ({side}): {san}")
-
+    from . import store
+    from .pipeline import analyze_game
+    columns = (TextColumn("[bold]{task.description:<8}"), BarColumn(), MofNCompleteColumn(),
+               TextColumn("{task.fields[label]}"), TimeElapsedColumn())
     try:
-        report = analyze_game(pgn_text, cfg, side_filter=args.side, progress=progress)
-    finally:
-        status.stop()
+        with Progress(*columns, console=console, transient=True) as bar:
+            tasks = {"engine": bar.add_task("engine", total=None, label=""),
+                     "coach": bar.add_task("coach" if cfg.llm.enabled else "moves", total=None, label="")}
 
+            def progress(stage: str, done: int, total: int, label: str) -> None:
+                if stage in tasks:
+                    bar.update(tasks[stage], completed=done, total=total, label=label)
+                elif stage == "review":
+                    bar.update(tasks["coach"], label="writing the post-game review…")
+
+            report = analyze_game(pgn_text, cfg, side_filter=args.side, progress=progress,
+                                  engine_cache=store.EngineCache() if cfg.engine.use_cache else None)
+    except (RuntimeError, ValueError) as e:
+        console.print(f"[red]Error:[/red] {e}")
+        return 1
+    except KeyboardInterrupt:
+        console.print("[yellow]Stopped.[/yellow]")
+        return 130
+
+    _print_report(report, console)
+    moves = [m.to_dict() for m in report.moves]
+    from .export import annotated_pgn, markdown_report
+    for path, render in ((args.out, lambda: markdown_report(report.headers, moves, report.review, report.opening,
+                                                            report.accuracy, args.side)),
+                         (args.pgn_out, lambda: annotated_pgn(pgn_text, moves, report.review, report.accuracy)),
+                         (args.json, lambda: json.dumps({"headers": report.headers, "opening": report.opening,
+                                                         "accuracy": report.accuracy, "review": report.review,
+                                                         "warnings": report.warnings, "moves": moves}, indent=2))):
+        if path:
+            Path(path).write_text(render(), encoding="utf-8")
+            console.print(f"Wrote {path}", soft_wrap=True)
+    return 0
+
+
+def _load_pgn(args, cfg, console: Console) -> tuple[str, str | None]:
+    if not args.pgn and not args.chesscom and not args.lichess:
+        if cfg.chesscom_user:
+            args.chesscom = cfg.chesscom_user
+        elif cfg.lichess_user:
+            args.lichess = cfg.lichess_user
+        else:
+            raise ValueError("Give a PGN file, or --chesscom/--lichess USERNAME. See `lucidfish --help`.")
+    username = args.chesscom or args.lichess
+    if username:
+        from .fetch import FetchError, chesscom_recent_pgns, lichess_recent_pgns
+        site = "chess.com" if args.chesscom else "Lichess"
+        fetch = chesscom_recent_pgns if args.chesscom else lichess_recent_pgns
+        n = max(1, args.recent)
+        console.print(f"Fetching game {n} back from {site} for [bold]{username}[/bold]…")
+        try:
+            games = fetch(username, n=n)
+        except FetchError as e:
+            raise RuntimeError(str(e)) from e
+        if len(games) < n:
+            raise ValueError(f"Only {len(games)} game(s) found for {username}.")
+        return games[n - 1], username
+    if args.pgn == "-":
+        return sys.stdin.read(), None
+    return Path(args.pgn).read_text(encoding="utf-8", errors="replace"), None
+
+
+def _detect_side(pgn_text: str, username: str) -> str | None:
+    import chess.pgn
+    headers = chess.pgn.read_headers(io.StringIO(pgn_text)) or {}
+    if headers.get("White", "").lower() == username.lower():
+        return "white"
+    if headers.get("Black", "").lower() == username.lower():
+        return "black"
+    return None
+
+
+def _print_report(report, console: Console) -> None:
     h = report.headers
-    console.print(Panel(f"[bold]{h.get('White','?')} vs {h.get('Black','?')}[/bold]  "
-                        f"{h.get('Result','')}  {h.get('Date','')}", title="Lucidfish"))
-
-    md_lines = [f"# {h.get('White','?')} vs {h.get('Black','?')} — {h.get('Result','')}", ""]
+    acc = report.accuracy or {}
+    sub = []
+    if report.opening:
+        sub.append(report.opening)
+    if acc.get("white") is not None:
+        sub.append(f"accuracy — White {acc['white']}% · Black {acc['black']}%")
+    sub.append(f"{report.engine or 'engine'} · coach: {report.coach or 'off (engine only)'}")
+    console.print(Panel(f"[bold]{h.get('White', '?')} vs {h.get('Black', '?')}[/bold]  "
+                        f"{h.get('Result', '')}  {h.get('Date', '')}\n[dim]" + "\n".join(sub) + "[/dim]",
+                        title="Lucidfish", border_style="cyan"))
+    for w in report.warnings:
+        console.print(f"[yellow]⚠ {w}[/yellow]")
     for m in report.moves:
-        prefix = f"{m.move_number}." if m.side == "White" else f"{m.move_number}…"
+        prefix = f"{m.move_number}." if m.side == "White" else f"{m.move_number}..."
         badge = BADGES.get(m.classification, m.classification)
-        console.print(f"[bold]{prefix} {m.san}[/bold]  {badge}  eval {m.eval_str}"
-                      + (f"  (best: {m.best_san})" if m.san != m.best_san else ""))
-        md_lines.append(f"## {prefix} {m.san} — {m.classification} (eval {m.eval_str})")
+        extra = f"  (best: {m.best_san})" if m.classification != "best" and m.best_san else ""
+        tags = f"  [magenta]{', '.join(m.tags)}[/magenta]" if m.tags else ""
+        crit = "  [cyan]critical[/cyan]" if m.critical else ""
+        console.print(f"[bold]{prefix} {m.san}[/bold]  {badge}  eval {m.eval_str}{extra}{crit}{tags}")
         if m.explanation:
             console.print(f"   [dim]{m.explanation}[/dim]\n")
-            md_lines.append(m.explanation)
-        md_lines.append("")
-
     if report.review:
         console.print(Panel(report.review, title="Post-game review", border_style="cyan"))
-        md_lines += ["", "# Post-game review", "", report.review, ""]
 
-    if args.out:
-        with open(args.out, "w") as f:
-            f.write("\n".join(md_lines))
-        console.print(f"\nMarkdown report written to {args.out}")
 
-    return 0
+def _check(cfg, console: Console) -> int:
+    """Diagnose the setup: engine, AI coach, storage."""
+    from .config import data_dir
+    from .engine import EngineAnalyzer
+    from .llm import LLMError, make_provider
+    ok = True
+    try:
+        with EngineAnalyzer(cfg.engine) as engine:
+            console.print(f"[green]✔[/green] Engine: {engine.name} ({cfg.engine.path}), "
+                          f"{cfg.engine.threads} threads, depth {cfg.engine.depth}", soft_wrap=True)
+    except RuntimeError as e:
+        ok = False
+        console.print(f"[red]✘ Engine:[/red] {e}")
+    if cfg.llm.enabled:
+        try:
+            result = make_provider(cfg.llm).check()
+            console.print(f"[green]✔[/green] AI coach: {result['message']}")
+        except LLMError as e:
+            ok = False
+            console.print(f"[red]✘ AI coach:[/red] {e}")
+    else:
+        console.print("[yellow]•[/yellow] AI coach: disabled (engine-only mode)")
+    console.print(f"[green]✔[/green] Data folder: {data_dir()}", soft_wrap=True)
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":
