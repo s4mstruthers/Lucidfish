@@ -388,9 +388,12 @@ ones to analyse), **Train** (puzzles from your mistakes) and **Board editor**. Y
 is next to it.
 
 1. **Create a profile** (first launch): your name, level, and chess.com / Lichess usernames.
-   *Look up* fills in your ratings from the site. The coach uses these to pitch explanations
-   at your level. To add another person or switch between profiles, click your name in the
-   top-right corner.
+   Each game is coached at *your rating in that game* (chess.com and Lichess put it in every
+   game file), and the coach is told which site it's from, since Lichess ratings run a few
+   hundred points higher. The profile keeps your newest rating per site and time control by
+   itself, from the games you analyse; *Look up* fetches your current ones. Those are used for
+   games without a rating (e.g. over the board) and the board editor. To add another person or
+   switch between profiles, click your name in the top-right corner.
 2. **Analyse games** (Games → *Analyse new games*): choose chess.com or Lichess to list your
    recent games. Click games to select them (<kbd>Shift</kbd>-click selects a range, or use
    *Select all*), then *Analyze selected*, or *Analyze batch* for your last 5–20 games. The
@@ -509,7 +512,7 @@ lucidfish share --profile Ann --out ~/Dropbox      # save a profile as one web p
 |---|---|
 | `--chesscom USER`, `--lichess USER`, `--recent N` | Fetch a recent game instead of reading a file |
 | `--side white\|black` | Coach this side (detected automatically for fetched games) |
-| `--elo N` | Your rating, to pitch explanations at your level |
+| `--elo N` | Your rating, to pitch explanations at your level (default: your rating in the game, else your profile's) |
 | `--detail key\|standard\|full`, `--explain-all` | How much the coach writes: key moments, commentary on every move, or a full note on every move (`--explain-all` = `full`) |
 | `--provider`, `--model` | AI provider and model (defaults to what you saved in the web app) |
 | `--expert-provider`, `--expert-model` | Second model for notes on mistakes, the review and fact-check rewrites (`none` = off) |
@@ -567,13 +570,19 @@ the evidence is checked in several ways:
   (For example, after White's a-pawn has captured on b4, "your opponent's next move may be
   a5" is rejected: White has no a-pawn left.)
 - **The post-game review is checked too.** The coach is given verified facts about the game
-  as a whole: how it ended (for example, lost on time with a forced mate on the board), which
-  kinds of endgame it reached, if any, and the clock. Afterwards, sentences about an endgame
-  the game never reached ("review king and pawn endings" after a game that ended with queens
-  and rooks on the board) or about time trouble the clocks don't show are removed. Each key
-  takeaway must point at a move or a verified fact, so stock advice ("work on your pawn
-  structure") is dropped. When no takeaway survives, Lucidfish writes them from the facts:
-  the costliest mistakes and what was better.
+  as a whole: the result from your side, how it ended (for example, lost on time with a forced
+  mate on the board), which kinds of endgame it reached, if any, the clock, and verified
+  highlights of what you did well. The written review is then checked against the game:
+  - the result must be right ("mistakes that cost you the game" after a win is an error);
+  - every move must be credited to the side that played it ("your Ne4" when White played it
+    is an error), and a move called a mistake or blunder must have that verdict;
+  - endgames the game never reached ("review king and pawn endings" with queens and rooks on
+    the board) and time trouble the clocks don't show are errors too.
+
+  Errors go back to the coach for one rewrite; anything still wrong is removed. Each key
+  takeaway, and each point under *What went well*, must name a move or a verified fact, so
+  stock advice and empty praise are dropped. Empty sections are written from the facts: the
+  costliest mistakes and what was better, or the verified highlights.
 - **Accuracy percentages** use the formula Lichess publishes, so they are directly comparable.
 
 Limits: at low depth (the *Fast* preset), very deep combinations can still be misjudged, so use

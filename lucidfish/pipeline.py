@@ -687,10 +687,18 @@ def analyze_game(
         if progress:
             progress("review", total, total, "Writing the post-game review…")
         facts = review_check.game_facts(report.moves, report.headers,
-                                        side_filter.capitalize() if side_filter else None, report.opening, base_s)
+                                        side_filter.capitalize() if side_filter else None, report.opening, base_s,
+                                        report.accuracy)
         prompt = _review_prompt(report, side_filter, cfg, player_context, facts.lines)
+
+        def write_review(llm: LLMProvider) -> str:
+            # One rewrite if the review gets facts wrong (the result, whose move, a verdict), then clean up.
+            messages = [{"role": "user", "content": prompt}]
+            text = llm.chat(GAME_REVIEW_SYSTEM, messages)
+            return _verified_text(llm, GAME_REVIEW_SYSTEM, messages, text,
+                                  lambda t: review_check.problems(t, facts), max_tokens=None)
         try:
-            text = coach.hard(lambda llm: llm.generate(GAME_REVIEW_SYSTEM, prompt))
+            text = coach.hard(write_review)
             report.review, _removed = review_check.check_review(text, facts)
         except LLMError as e:
             report.warnings.append(f"The post-game review could not be written: {e}")
