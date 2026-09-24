@@ -18,6 +18,7 @@
   </a>
   <nav class="nav" id="nav" aria-label="Main">
     <button data-page="dashboard" class="active">Dashboard</button>
+    <button data-page="games">My games</button>
     <button data-page="analyze">Analyze games</button>
     <button data-page="editor">Board editor</button>
     <button data-page="game" class="hidden" id="navGame">Current game</button>
@@ -69,8 +70,9 @@
     </div>
     <div class="grid-2">
       <div class="card">
-        <div class="card-head"><h2>Analysed games</h2></div>
-        <div class="list scroll" id="savedGames"></div>
+        <div class="card-head"><h2>Recently analysed</h2><div class="spacer"></div>
+          <button class="ghost sm" id="seeAllGames">See all games →</button></div>
+        <div class="list" id="savedGames"></div>
       </div>
       <div class="card">
         <div class="card-head"><h2>Your openings</h2></div>
@@ -84,6 +86,41 @@
         <input id="reviewChatInput" placeholder="e.g. How do I stop losing on time?" aria-label="Message to your coach">
         <button id="reviewChatSend">Send</button>
       </div>
+    </div>
+  </section>
+
+  <!-- ============================================================ MY GAMES -->
+  <section id="page-games" class="hidden" data-page-section>
+    <div class="page-head">
+      <div>
+        <h1>My games</h1>
+        <p>Every game you've analysed, saved on this computer. Click a game to review it.</p>
+      </div>
+      <div class="spacer"></div>
+      <button id="gamesAnalyze">Analyze more games</button>
+    </div>
+    <div class="card">
+      <div class="games-toolbar">
+        <input type="search" id="gSearch" placeholder="Search opponent, opening or date…" aria-label="Search games" autocomplete="off">
+        <select id="gResult" aria-label="Result">
+          <option value="">All results</option><option value="W">Wins</option><option value="L">Losses</option><option value="D">Draws</option>
+        </select>
+        <select id="gColor" aria-label="Your colour">
+          <option value="">Both colours</option><option value="white">As White</option><option value="black">As Black</option>
+        </select>
+        <select id="gTime" aria-label="Time control"><option value="">All time controls</option></select>
+        <select id="gSort" aria-label="Sort by">
+          <option value="analysed">Recently analysed</option>
+          <option value="played">Date played</option>
+          <option value="acc-desc">Best accuracy first</option>
+          <option value="acc-asc">Worst accuracy first</option>
+          <option value="errors">Most mistakes first</option>
+        </select>
+      </div>
+      <div class="row small" id="gamesQueueStatus"></div>
+      <div class="games-summary" id="gSummary"></div>
+      <div class="games-list" id="gList"></div>
+      <div class="row" style="justify-content:center;margin-top:12px"><button class="secondary hidden" id="gMore">Show more</button></div>
     </div>
   </section>
 
@@ -256,6 +293,7 @@
             <button class="secondary sm" id="exportPgn" title="Annotated PGN for Lichess studies, ChessBase, …">⬇ Annotated PGN</button>
             <button class="secondary sm" id="exportMd">⬇ Report (.md)</button>
             <button class="secondary sm" id="copyFen" title="Copy the FEN of the current position">Copy FEN</button>
+            <button class="secondary sm hidden" id="reanalyseBtn" title="Analyse this game again with your current settings">↻ Re-analyse</button>
             <button class="sm hidden" id="practiceAll" title="Replay the positions where you went wrong and look for a better move">🎯 Practise my mistakes</button>
           </div>
           <div id="gameWarnings"></div>

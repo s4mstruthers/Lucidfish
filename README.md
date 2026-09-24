@@ -63,6 +63,10 @@ The feedback is pitched at your level and linked to the mistakes you keep making
   engine-only analysis.
 - **Your games, one click away.** Pick recent games from chess.com or Lichess by username,
   paste or drop a PGN, or set up any position in the board editor.
+- **All your analysed games in one place.** The *My games* page lists every game you've
+  analysed, with result, accuracy and mistakes at a glance. Search by opponent or opening,
+  filter by result, colour and time control, sort by date or accuracy, and re-analyse a game
+  with new settings.
 - **An analysis queue with live progress.** Queue one game or twenty. A progress bar shows
   how far each game and the whole batch are, how much time is left, and roughly when it
   will be done. Reorder, pause, resume or remove games at any time; the queue survives a
@@ -328,11 +332,17 @@ Start it with `./scripts/start.sh`, `scripts\start.bat`, or `lucidfish web`. It 
    (or *Practise my mistakes* in the game header) and drag a piece on the board. The engine
    judges your move with the same standards as the analysis. *Next mistake* takes you to the
    next one.
-6. **Ask the coach** about the position you're looking at, or about your overall review on the
+6. **My games:** every analysed game is saved to your profile. Open *My games* to search and
+   filter them (e.g. all your losses as Black in blitz, or every Sicilian), see your record and
+   average accuracy for that selection, and click a game to review it. The browser's Back
+   button returns to the list, and each game has its own address, so a reload keeps you on it.
+   *↻ Re-analyse* runs a game again with your current settings (for example after switching
+   on the AI coach) and replaces the old analysis.
+7. **Ask the coach** about the position you're looking at, or about your overall review on the
    dashboard.
-7. **Export** an annotated PGN or a Markdown report (both include the commentary) from the
+8. **Export** an annotated PGN or a Markdown report (both include the commentary) from the
    game header.
-8. **Board editor:** set up any position (or paste a FEN) and ask for an assessment from either
+9. **Board editor:** set up any position (or paste a FEN) and ask for an assessment from either
    side's point of view.
 
 The **dashboard** shows your record, average accuracy, blunders per game, your accuracy in

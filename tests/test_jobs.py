@@ -119,3 +119,15 @@ def test_single_analysis_jumps_the_queue(client):
     client.post("/api/queue/resume", headers=H)
     assert _wait(lambda: client.get(f"/api/job/{job}").json()["status"] == "done")
     client.post("/api/queue/stop_all", headers=H)
+
+
+@needs_engine
+def test_reanalyse_a_stored_game_replaces_it(client):
+    job = client.post("/api/analyze", json={"pgn": SHORT_PGN, "side": "white"}, headers=H).json()["job_id"]
+    assert _wait(lambda: client.get(f"/api/job/{job}").json()["status"] == "done")
+    old_id = client.get("/api/profile").json()["games"][0]["id"]
+    again = client.post(f"/api/profile/game/{old_id}/reanalyse", json={"detail": "key"}, headers=H).json()["job_id"]
+    assert _wait(lambda: client.get(f"/api/job/{again}").json()["status"] == "done")
+    games = client.get("/api/profile").json()["games"]
+    assert len(games) == 1 and games[0]["white"] == "A"          # replaced, not duplicated
+    assert client.post("/api/profile/game/999999/reanalyse", headers=H).status_code == 404

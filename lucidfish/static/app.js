@@ -190,18 +190,49 @@ renderThemeButton();
 
 /* ================================================================ navigation */
 
-function showPage(name) {
+function showPage(name, fromRoute = false) {
   state.page = name;
   document.querySelectorAll("[data-page-section]").forEach((s) => s.classList.toggle("hidden", s.id !== `page-${name}`));
   document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("active", b.dataset.page === name));
   if (name === "dashboard") loadDashboard();
+  if (name === "games") loadDashboard().then(renderGames);
   if (name === "analyze" && !state.recent.length) loadRecentGames();
   if (name === "editor") ensureEditor();
   if (name === "game") { ensureBoard(); setTimeout(() => { board.resize(); refreshBoard(); renderGraph(); }, 0); }
+  if (!fromRoute) syncRoute();
   window.scrollTo({ top: 0 });
 }
 document.querySelectorAll("#nav button").forEach((b) => b.addEventListener("click", () => showPage(b.dataset.page)));
 $("goAnalyze").addEventListener("click", () => showPage("analyze"));
+
+/* Pages and games have addresses (#/games, #/game/12, …), so the browser's Back button
+ * returns to the list you came from and a reload reopens the same game. */
+function routeFor() {
+  if (state.page !== "game") return `#/${state.page}`;
+  const g = state.game;
+  if (g?.gameId) return `#/game/${g.gameId}`;
+  if (g?.jobId) return `#/job/${g.jobId}`;
+  return "#/game";
+}
+function syncRoute(replace = false) {
+  const r = routeFor();
+  if (location.hash === r) return;
+  history[replace ? "replaceState" : "pushState"](null, "", r);
+}
+async function route() {
+  const [, page, id] = location.hash.match(/^#\/(\w+)(?:\/([\w-]+))?$/) || [];
+  if (page === "game" && id) {
+    if (state.game?.gameId === Number(id)) showPage("game", true);
+    else await openStoredGame(Number(id), true);
+  } else if (page === "job" && id) {
+    if (state.game?.jobId === id) showPage("game", true); else openJob(id, "", true);
+  } else if (page === "game" && state.game) {
+    showPage("game", true);
+  } else {
+    showPage(["dashboard", "games", "analyze", "editor"].includes(page) ? page : "dashboard", true);
+  }
+}
+window.addEventListener("popstate", route);
 
 /* ================================================================ health + banners */
 
@@ -280,7 +311,7 @@ $("profileSel").addEventListener("change", async (e) => {
   await loadProfiles();
   state.reviewChat.length = 0; $("reviewChatLog").innerHTML = "";
   state.recent = []; state.selected.clear();
-  loadDashboard();
+  loadDashboard().then(() => { if (state.page === "games") renderGames(); });
   if (state.page === "analyze") loadRecentGames();
 });
 
@@ -414,11 +445,15 @@ function resultChip(r) {
   return r === "W" ? `<span class="chip win">WIN</span>` : r === "L" ? `<span class="chip loss">LOSS</span>` : r === "D" ? `<span class="chip">DRAW</span>` : "";
 }
 
+const RECENT_ON_DASHBOARD = 6;
+
 function renderSavedGames() {
-  const box = $("savedGames");
-  if (!state.savedGames.length) { box.innerHTML = `<div class="empty small">No analysed games yet.</div>`; return; }
+  const box = $("savedGames"), n = state.savedGames.length;
+  $("seeAllGames").classList.toggle("hidden", !n);
+  $("seeAllGames").textContent = n > RECENT_ON_DASHBOARD ? `See all ${n} games →` : "Open My games →";
+  if (!n) { box.innerHTML = `<div class="empty small">No analysed games yet.</div>`; return; }
   box.innerHTML = "";
-  for (const g of state.savedGames) {
+  for (const g of state.savedGames.slice(0, RECENT_ON_DASHBOARD)) {
     const el = document.createElement("div");
     el.className = "item";
     el.innerHTML = `<span class="title">${esc(g.white)} vs ${esc(g.black)}</span>${resultChip(resultFor(g))}
@@ -435,6 +470,8 @@ function renderSavedGames() {
   }
 }
 
+$("seeAllGames").addEventListener("click", () => showPage("games"));
+
 $("refreshSummary").addEventListener("click", async () => {
   const btn = $("refreshSummary");
   btn.disabled = true; $("summaryStatus").textContent = "Your coach is writing…";
@@ -444,6 +481,152 @@ $("refreshSummary").addEventListener("click", async () => {
     $("summaryStatus").textContent = "Updated";
   } catch (e) { $("summaryStatus").textContent = ""; toast(e.message, true); }
   btn.disabled = false;
+});
+
+/* ================================================================ my games */
+
+const gamesView = { limit: 50 };
+
+/** PGN date "2024.05.01" → Date (null when unknown). */
+function playedDate(g) {
+  const m = (g.date || "").match(/^(\d{4})\.(\d{2})\.(\d{2})$/);
+  return m ? new Date(+m[1], +m[2] - 1, +m[3]) : null;
+}
+/** SQLite UTC timestamp "2026-09-24 12:34:56" → Date. */
+function analysedDate(g) {
+  return g.analyzed_at ? new Date(`${g.analyzed_at.replace(" ", "T")}Z`) : null;
+}
+function opponentOf(g) {
+  return g.user_side === "white" ? g.black : g.user_side === "black" ? g.white : null;
+}
+const accClass = (v) => (v >= 90 ? "a-hi" : v >= 75 ? "a-mid" : v >= 60 ? "a-low" : "a-bad");
+
+function filteredGames() {
+  const words = $("gSearch").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const res = $("gResult").value, color = $("gColor").value, tc = $("gTime").value;
+  const list = state.savedGames.filter((g) => {
+    if (res && resultFor(g) !== res) return false;
+    if (color && g.user_side !== color) return false;
+    if (tc && (g.time_class || "") !== tc) return false;
+    if (words.length) {
+      const hay = [g.white, g.black, g.opening, g.date, g.time_class, g.result].join(" ").toLowerCase();
+      if (!words.every((w) => hay.includes(w))) return false;
+    }
+    return true;
+  });
+  const played = (g) => (/^\d{4}\./.test(g.date || "") ? g.date : "");
+  const sorts = {
+    analysed: (a, b) => b.id - a.id,
+    played: (a, b) => played(b).localeCompare(played(a)) || b.id - a.id,
+    "acc-desc": (a, b) => (b.accuracy ?? -1) - (a.accuracy ?? -1),
+    "acc-asc": (a, b) => (a.accuracy ?? 101) - (b.accuracy ?? 101),
+    errors: (a, b) => ((b.blunders || 0) - (a.blunders || 0)) || ((b.mistakes || 0) - (a.mistakes || 0))
+      || ((b.inaccuracies || 0) - (a.inaccuracies || 0)),
+  };
+  return list.sort(sorts[$("gSort").value] || sorts.analysed);
+}
+
+function gameRow(g) {
+  const opp = opponentOf(g), played = playedDate(g), analysed = analysedDate(g);
+  const title = opp ? `<span class="g-vs">vs</span> ${esc(opp)}`
+    : `${esc(g.white)} <span class="g-vs">vs</span> ${esc(g.black)}`;
+  const colour = g.user_side ? `<span class="g-colour ${g.user_side}" title="You played ${g.user_side}"></span>` : "";
+  const meta = [g.opening, cap(g.time_class), played ? fmtDate(played) : ""].filter(Boolean).join(" · ");
+  const errs = [["blunder", g.blunders], ["mistake", g.mistakes], ["inaccuracy", g.inaccuracies]]
+    .map(([c, n]) => `<span class="g-err${n ? "" : " zero"}" title="${n || 0} ${LABELS[c].toLowerCase()}${n === 1 ? "" : "s"}">`
+      + `${badge(c)}<span>${n || 0}</span></span>`).join("");
+  return `<div class="g-row" data-gid="${g.id}" tabindex="0" role="button"
+      title="${esc(analysed ? `Analysed ${fmtDate(analysed)}` : "")}">
+    <div class="g-result">${resultChip(resultFor(g)) || `<span class="chip">${esc(g.result || "*")}</span>`}</div>
+    <div class="g-main"><div class="g-title">${colour}${title}</div><div class="g-meta">${esc(meta)}</div></div>
+    <div class="g-acc">${g.accuracy != null ? `<b class="${accClass(g.accuracy)}">${g.accuracy}%</b>` : "<b>—</b>"}<span>accuracy</span></div>
+    <div class="g-errs">${errs}</div>
+    <div class="g-actions">
+      <button class="ghost icon" data-ga="reanalyse" title="Analyse again with your current settings" aria-label="Re-analyse">↻</button>
+      <button class="ghost icon" data-ga="delete" title="Delete this analysis" aria-label="Delete">🗑</button>
+    </div>
+  </div>`;
+}
+
+function renderGames() {
+  const box = $("gList"), all = state.savedGames;
+  const tcs = [...new Set(all.map((g) => g.time_class).filter(Boolean))];
+  const sel = $("gTime"), chosen = sel.value;
+  sel.innerHTML = `<option value="">All time controls</option>` + tcs.map((t) => `<option value="${esc(t)}">${esc(cap(t))}</option>`).join("");
+  sel.value = tcs.includes(chosen) ? chosen : "";
+  $("gMore").classList.add("hidden");
+  if (!state.profile) {
+    $("gSummary").innerHTML = "";
+    box.innerHTML = `<div class="empty"><div class="big">♞</div>Create a profile so your analysed games are saved here.<br><br>
+      <button data-gempty="profile">Create profile</button></div>`;
+    return;
+  }
+  if (!all.length) {
+    $("gSummary").innerHTML = "";
+    box.innerHTML = `<div class="empty"><div class="big">♞</div>No analysed games yet. Games you analyse are saved here automatically.<br><br>
+      <button data-gempty="analyze">Analyze a game</button></div>`;
+    return;
+  }
+  const list = filteredGames();
+  const count = (r) => list.filter((g) => resultFor(g) === r).length;
+  const accs = list.map((g) => g.accuracy).filter((v) => v != null);
+  $("gSummary").innerHTML = `<span><b>${list.length}</b> ${list.length === all.length ? "" : `of ${all.length} `}game${all.length === 1 ? "" : "s"}</span>`
+    + `<span>${count("W")}W · ${count("L")}L · ${count("D")}D</span>`
+    + (accs.length ? `<span>average accuracy <b>${(accs.reduce((a, b) => a + b, 0) / accs.length).toFixed(1)}%</b></span>` : "");
+  if (!list.length) {
+    box.innerHTML = `<div class="empty small">No games match these filters. <a href="#" data-gempty="clear">Clear filters</a></div>`;
+    return;
+  }
+  box.innerHTML = list.slice(0, gamesView.limit).map(gameRow).join("");
+  if (list.length > gamesView.limit) {
+    $("gMore").classList.remove("hidden");
+    $("gMore").textContent = `Show more (${list.length - gamesView.limit} more)`;
+  }
+}
+
+const rerenderGames = () => { gamesView.limit = 50; renderGames(); };
+$("gSearch").addEventListener("input", debounce(rerenderGames, 120));
+["gResult", "gColor", "gTime", "gSort"].forEach((id) => $(id).addEventListener("change", rerenderGames));
+$("gMore").addEventListener("click", () => { gamesView.limit += 50; renderGames(); });
+$("gamesAnalyze").addEventListener("click", () => showPage("analyze"));
+
+async function reanalyse(id) {
+  const d = await api(`/api/profile/game/${id}/reanalyse`, { method: "POST", body: {} });
+  pollQueue();
+  return d.job_id;
+}
+
+$("gList").addEventListener("click", async (e) => {
+  const empty = e.target.closest("[data-gempty]");
+  if (empty) {
+    e.preventDefault();
+    const what = empty.dataset.gempty;
+    if (what === "profile") openProfile(null);
+    else if (what === "analyze") showPage("analyze");
+    else { $("gSearch").value = ""; ["gResult", "gColor", "gTime"].forEach((id) => { $(id).value = ""; }); rerenderGames(); }
+    return;
+  }
+  const row = e.target.closest(".g-row");
+  if (!row) return;
+  const id = Number(row.dataset.gid);
+  const action = e.target.closest("[data-ga]")?.dataset.ga;
+  if (!action) { openStoredGame(id); return; }
+  try {
+    if (action === "reanalyse") {
+      await reanalyse(id);
+      toast("Added to the front of the queue — the new analysis replaces this one when it's done.");
+    } else if (action === "delete") {
+      if (!confirm("Delete this analysis? The game itself stays on chess.com / Lichess.")) return;
+      await api(`/api/profile/game/${id}`, { method: "DELETE" });
+      state.savedGames = state.savedGames.filter((g) => g.id !== id);
+      renderGames();
+      loadDashboard();
+    }
+  } catch (err) { toast(err.message, true); }
+});
+$("gList").addEventListener("keydown", (e) => {
+  const row = e.target.closest?.(".g-row");
+  if (row && e.target === row && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); openStoredGame(Number(row.dataset.gid)); }
 });
 
 /* ================================================================ recent games */
@@ -608,7 +791,12 @@ async function pollQueue() {
     queue.seen.add(j.id);
     if (!first && j.game_id) saved = true;
   }
-  if (saved) loadDashboard().then(() => { if (state.page === "analyze") markAnalysed(); });
+  if (saved) {
+    loadDashboard().then(() => {
+      if (state.page === "analyze") markAnalysed();
+      if (state.page === "games") renderGames();
+    });
+  }
   renderQueuePill();
   if (!$("queueModal").classList.contains("hidden")) renderQueue();
   const active = d.running || d.queued.length;
@@ -621,7 +809,7 @@ function renderQueuePill() {
   const active = d && (d.running || d.queued.length);
   pill.classList.toggle("hidden", !active);
   const status = $("importStatus");
-  if (!active) { status.innerHTML = ""; return; }
+  if (!active) { status.innerHTML = ""; $("gamesQueueStatus").innerHTML = ""; return; }
   const t = d.totals;
   const which = t.games_total > 1 ? `game ${Math.min(t.games_total, t.games_done + 1)} of ${t.games_total}` : "1 game";
   $("queueText").textContent = d.paused ? `Queue paused · ${t.games_left} waiting`
@@ -631,9 +819,12 @@ function renderQueuePill() {
   status.innerHTML = `<span class="dot ${d.paused ? "warn" : "busy"}"></span> ${t.games_left} game${t.games_left === 1 ? "" : "s"} in the queue`
     + (d.paused ? " (paused)" : ` · about ${fmtDuration(t.seconds_left)} left`)
     + ` <button class="ghost sm" data-open-queue>Manage queue</button>`;
+  $("gamesQueueStatus").innerHTML = status.innerHTML.replace(" in the queue", " still being analysed");
 }
 $("queuePill").addEventListener("click", () => openQueue());
-$("importStatus").addEventListener("click", (e) => { if (e.target.closest("[data-open-queue]")) openQueue(); });
+["importStatus", "gamesQueueStatus"].forEach((id) => $(id).addEventListener("click", (e) => {
+  if (e.target.closest("[data-open-queue]")) openQueue();
+}));
 
 function openQueue() {
   openModal("queueModal");
@@ -784,13 +975,13 @@ async function startAnalysis(pgn, side, rating) {
 }
 
 /** Show a queued or running analysis on the Game page; moves stream in as they're ready. */
-function openJob(jobId, pgn = "") {
+function openJob(jobId, pgn = "", fromRoute = false) {
   clearTimeout(pollTimer);
   state.game = { mode: "game", pgn, jobId, status: "queued", headers: {}, side: null, moves: [], review: "",
     opening: "", accuracy: {}, warnings: [], total: 0, coach: "" };
   resetGameView();
   $("navGame").classList.remove("hidden");
-  showPage("game");
+  showPage("game", fromRoute);
   $("progressCard").classList.remove("hidden");
   // Engine-only mode has nothing for a "Coach" bar to show.
   $("barCoach").closest(".bar-row").classList.toggle("hidden", state.health?.coach?.enabled === false);
@@ -804,7 +995,11 @@ async function poll() {
   if (!g || !g.jobId) return;
   let j;
   try { j = await api(`/api/job/${g.jobId}?since=${g.moves.length}`); }
-  catch (e) { toast(e.message, true); $("progressCard").classList.add("hidden"); g.jobId = null; return; }
+  catch (e) {
+    toast(e.message, true); $("progressCard").classList.add("hidden"); g.jobId = null;
+    if (!g.moves.length && state.game === g) { history.replaceState(null, "", "#/games"); showPage("games", true); }
+    return;
+  }
   if (state.game !== g) return;   // a different game was opened meanwhile
   const firstMoves = !g.moves.length && j.moves.length;
   Object.assign(g, { status: j.status, headers: j.headers, side: j.side, total: j.total, warnings: j.warnings });
@@ -824,7 +1019,8 @@ async function poll() {
     return;
   }
   Object.assign(g, { review: j.review, opening: j.opening, accuracy: j.accuracy, coach: j.coach, jobId: null,
-    pgn: g.pgn || "" });
+    pgn: g.pgn || "", gameId: j.game_id || null });
+  if (state.page === "game") syncRoute(true);   // #/job/… → #/game/12 (the job itself is gone after a restart)
   if (!g.pgn && j.game_id) {
     try { g.pgn = (await api(`/api/profile/game/${j.game_id}`)).pgn; } catch { /* export needs it; not critical */ }
   }
@@ -882,15 +1078,20 @@ $("jumpBtn").addEventListener("click", async () => {
   pollQueue();
 });
 
-async function openStoredGame(id) {
+async function openStoredGame(id, fromRoute = false) {
   let d;
-  try { d = await api(`/api/profile/game/${id}`); } catch (e) { toast(e.message, true); return; }
+  try { d = await api(`/api/profile/game/${id}`); }
+  catch (e) {
+    toast(e.message === "unknown game" ? "That game is no longer saved (it may have been deleted or re-analysed)." : e.message, true);
+    if (fromRoute) { history.replaceState(null, "", "#/games"); showPage("games", true); }
+    return;
+  }
   clearTimeout(pollTimer);
-  state.game = { mode: "game", pgn: d.pgn, headers: d.headers, side: d.side, moves: d.moves, review: d.review,
-    opening: d.opening, accuracy: d.accuracy || {}, warnings: [], total: d.moves.length, status: "done" };
+  state.game = { mode: "game", gameId: d.id, pgn: d.pgn, headers: d.headers, side: d.side, moves: d.moves,
+    review: d.review, opening: d.opening, accuracy: d.accuracy || {}, warnings: [], total: d.moves.length, status: "done" };
   resetGameView();
   $("navGame").classList.remove("hidden");
-  showPage("game");
+  showPage("game", fromRoute);
   renderHeader(); renderReview();
   goTo(d.moves.length ? 0 : -1);
 }
@@ -924,6 +1125,7 @@ function renderHeader() {
     $("exportRow").querySelectorAll("#exportPgn,#exportMd").forEach((b) => b.classList.toggle("hidden", !g.moves.length));
   }
   $("practiceAll").classList.toggle("hidden", !(g.mode === "game" && !g.jobId && myMistakes().length));
+  $("reanalyseBtn").classList.toggle("hidden", !(g.mode === "game" && g.gameId && !g.jobId));
   $("gameWarnings").innerHTML = (g.warnings || []).map((w) =>
     `<div class="banner" style="margin:12px 0 0"><div class="grow small">${esc(w)}</div></div>`).join("");
 }
@@ -1321,6 +1523,11 @@ function practiceAction(action) {
     if (next != null) startPractice(next);
   }
 }
+$("reanalyseBtn").addEventListener("click", async () => {
+  const g = state.game;
+  if (!g?.gameId) return;
+  try { openJob(await reanalyse(g.gameId), g.pgn); } catch (e) { toast(e.message, true); }
+});
 $("practiceAll").addEventListener("click", () => {
   const list = myMistakes();
   if (!list.length) return;
@@ -1758,7 +1965,7 @@ window.addEventListener("resize", debounce(() => {
   loadHealth();
   try {
     const d = await loadProfiles();
-    await loadDashboard();
+    await route();
     if (!d.profiles.length) openProfile(null);
   } catch (e) { toast(e.message, true); }
   // Live queue progress (also picks up games restored from the last session).

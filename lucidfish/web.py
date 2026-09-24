@@ -551,6 +551,26 @@ def delete_game(game_id: int):
     return {"ok": True}
 
 
+class ReanalyseReq(BaseModel):
+    detail: Detail | None = None      # None = the level from Settings
+
+
+@app.post("/api/profile/game/{game_id}/reanalyse")
+def reanalyse_game(game_id: int, req: ReanalyseReq | None = None):
+    """Analyse a stored game again (e.g. with the AI coach on, or a deeper engine); replaces it when done."""
+    g = store.get_game(game_id)
+    if g is None:
+        return _error("unknown game", 404)
+    existing = QUEUE.find_pending(g["pgn"])
+    if existing:
+        QUEUE.move(existing.id, "top")
+        return {"job_id": existing.id}
+    job = jobs.Job(g["pgn"], side=g["user_side"], elo=g["user_elo"], detail=req.detail if req else None,
+                   profile_id=g["profile_id"], source="single", replace=True)
+    QUEUE.add([job], front=True)
+    return {"job_id": job.id}
+
+
 # ================================================================ export
 
 class ExportReq(BaseModel):
