@@ -245,8 +245,11 @@ class AnalysisQueue:
         self._finished: deque[Job] = deque()
         self._jobs: dict[str, Job] = {}
         self._session: list[str] = []          # jobs since the queue was last idle (overall progress)
-        # Profiles with new games, and their time controls (their reviews are refreshed when idle).
+        # Profiles with new games, and their time controls: their coach reviews are rewritten when the queue is
+        # idle (never slowing an analysis down). Remembered across restarts.
         self._touched: dict[int, set[str]] = {}
+        self._refreshing: dict[int, set[str]] = {}
+        self._reviewing: dict | None = None      # the review being written right now
         self._worker: threading.Thread | None = None
         self._prefetch: tuple[threading.Thread, threading.Event] | None = None
         self.paused = False
@@ -366,11 +369,18 @@ class AnalysisQueue:
                 jobs.append(Job(**rec))
             except (TypeError, ValueError):
                 continue
+        due = {int(pid): set(classes) for pid, classes in (saved.get("reviews_due") or {}).items()
+               if str(pid).isdigit() and store.get_profile(int(pid))}
         if jobs:
             with self._cond:
                 self.paused = True
                 self.restored = len(jobs)
+                self._touched.update(due)
             self.add(jobs)
+        elif due:
+            with self._cond:
+                self._touched.update(due)
+            self._ensure_worker()     # reviews left from last time: write them now
         return len(jobs)
 
     def snapshot(self) -> dict:
@@ -394,7 +404,7 @@ class AnalysisQueue:
         done_plies = sum(j.total if j.status in ("done", "stopped", "error") else len(j.moves) for j in counted)
         learned = all(j.learned for j in ([running] if running else []) + queued)
         return {
-            "paused": paused, "restored": restored, "busy": running is not None,
+            "paused": paused, "restored": restored, "busy": running is not None, "reviewing": self._reviewing,
             "running": run_view, "queued": queue_view,
             "finished": [j.summary(now) for j in finished],
             "totals": {
@@ -450,15 +460,13 @@ class AnalysisQueue:
                         job.status, job.started, job.label = "running", time.time(), "Starting the engine…"
                         self._running = job
                         break
-                    if not self._queued and self._touched:
+                    if self._touched and (not self._queued or self.paused):
                         refresh, self._touched = dict(self._touched), {}
+                        self._refreshing = refresh
                         break
                     self._cond.wait(timeout=5)
             if job is None:
-                for pid, classes in refresh.items():
-                    refresh_player_summary(pid)
-                    for tc in sorted(c for c in classes if c):
-                        refresh_player_summary(pid, tc)
+                self._write_reviews(refresh)
                 continue
             self._persist()
             try:
@@ -511,8 +519,7 @@ class AnalysisQueue:
                                           report.opening, report.review, moves, report.time_class,
                                           report.accuracy, replace=job.replace, chapters=report.chapters)
                 if game_id and cfg.llm.enabled:
-                    with self._cond:
-                        self._touched.setdefault(profile["id"], set()).add(report.time_class or "")
+                    self.note_new_game(profile["id"], report.time_class)
                 if game_id:
                     share.sync_profile(profile["id"])   # keep a shared copy up to date, if enabled
         # Only now is the result final: a page that sees "done" can rely on the game being saved.
@@ -586,12 +593,47 @@ class AnalysisQueue:
             if old.id not in self._session:
                 self._jobs.pop(old.id, None)
 
+    # ---------------------------------------------------------- coach reviews
+
+    def note_new_game(self, pid: int, time_class: str) -> None:
+        """A game was saved: rewrite the profile's reviews once the queue is idle (if that's switched on)."""
+        if not store.get_settings().get("auto_review", True):
+            return
+        with self._cond:
+            self._touched.setdefault(pid, set()).add(time_class or "")
+            self._cond.notify_all()
+        self._persist()
+        self._ensure_worker()
+
+    def _write_reviews(self, refresh: dict[int, set[str]]) -> None:
+        try:
+            for pid, classes in refresh.items():
+                for tc in [None, *sorted(c for c in classes if c)]:
+                    with self._cond:
+                        self._reviewing = {"profile_id": pid, "time_class": tc or ""}
+                    refresh_player_summary(pid, tc)
+        finally:
+            with self._cond:
+                self._reviewing, self._refreshing = None, {}
+            self._persist()
+
+    def review_state(self, pid: int | None) -> dict:
+        """For the Home page: is this profile's review waiting to be rewritten, or being written?"""
+        with self._cond:
+            running = self._reviewing if self._reviewing and self._reviewing["profile_id"] == pid else None
+            pending = pid in self._touched or pid in self._refreshing
+        return {"pending": pending, "running": bool(running), "time_class": running["time_class"] if running else ""}
+
     def _persist(self) -> None:
         if self._closed:
             return   # shutting down: keep the state saved by shutdown()
         with self._cond:
             pending = ([self._running] if self._running and not self._running.stop else []) + self._queued
-            state = {"paused": self.paused, "jobs": [j.record() for j in pending]}
+            due: dict[str, list[str]] = {}
+            for src in (self._refreshing, self._touched):
+                for pid, classes in src.items():
+                    due[str(pid)] = sorted(set(due.get(str(pid), [])) | classes)
+            state = {"paused": self.paused, "jobs": [j.record() for j in pending], "reviews_due": due}
         try:
             store.set_json(_QUEUE_KEY, state)
         except Exception:

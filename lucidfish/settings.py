@@ -116,7 +116,7 @@ def validate(values: dict) -> dict:
         if len(model) > 200:
             raise ValueError("Model name is too long.")
         clean["expert_model"] = model
-    for key in ("llm_enabled", "factcheck", "prefetch", "escalate"):
+    for key in ("llm_enabled", "factcheck", "prefetch", "escalate", "auto_review"):
         if key in values:
             clean[key] = bool(values[key])
     ranges = {"depth": (6, 30), "threads": (1, max(1, os.cpu_count() or 1)), "hash_mb": (16, 4096),
@@ -172,6 +172,7 @@ def public_settings() -> dict:
         "expert_model": saved.get("expert_model", ""),
         "expert_active": bool(cfg.expert),
         "prefetch": saved.get("prefetch", True),
+        "auto_review": saved.get("auto_review", True),   # rewrite the coach review after new analyses
         "concurrency": saved.get("concurrency"),
         "detail": cfg.analysis.detail,
         "depth": cfg.engine.depth,

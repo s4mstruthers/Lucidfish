@@ -20,6 +20,7 @@ import hashlib
 import json
 import sqlite3
 import threading
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -85,6 +86,7 @@ _MIGRATIONS = [
     ("games", "good_moves", "INTEGER"),
     ("games", "great_moves", "INTEGER"),
     ("profiles", "summaries_json", "TEXT"),
+    ("profiles", "summary_times_json", "TEXT"),
 ]
 
 TIME_CLASSES = ("bullet", "blitz", "rapid", "classical", "daily")
@@ -197,6 +199,7 @@ def _profile_row(r: sqlite3.Row) -> dict:
     d = dict(r)
     d["ratings"] = json.loads(d.pop("ratings_json", None) or "{}")
     d["summaries"] = json.loads(d.pop("summaries_json", None) or "{}")   # coach review per time control
+    d["summary_times"] = json.loads(d.pop("summary_times_json", None) or "{}")   # when each was written ("" = all)
     for k in ("elo_bullet", "elo_blitz", "elo_rapid"):
         d.pop(k, None)
     return d
@@ -276,11 +279,14 @@ def set_active(pid: int) -> None:
 def set_summary(pid: int, text: str, time_class: str | None = None) -> None:
     """The coach review of all games, or (with `time_class`) of the games in one time control."""
     with _db(write=True) as c:
+        r = c.execute("SELECT summaries_json, summary_times_json FROM profiles WHERE id=?", (pid,)).fetchone()
+        if r is None:
+            return
+        times = json.loads(r["summary_times_json"] or "{}")
+        times[time_class or ""] = round(time.time())
+        c.execute("UPDATE profiles SET summary_times_json=? WHERE id=?", (json.dumps(times), pid))
         if not time_class:
             c.execute("UPDATE profiles SET summary=? WHERE id=?", (text, pid))
-            return
-        r = c.execute("SELECT summaries_json FROM profiles WHERE id=?", (pid,)).fetchone()
-        if r is None:
             return
         summaries = json.loads(r["summaries_json"] or "{}")
         summaries[time_class] = text

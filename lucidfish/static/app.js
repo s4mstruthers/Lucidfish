@@ -1003,6 +1003,27 @@ function setTc(tc) {
 
 /* ================================================================ dashboard */
 
+/** "3 min ago", "yesterday", "5 days ago" for a Unix time. */
+function ago(ts) {
+  const s = Math.max(0, Date.now() / 1000 - ts);
+  if (s < 90) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)} min ago`;
+  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
+  const days = Math.round(s / 86400);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}
+
+/** Next to the coach review: when it was written, or that it's waiting / being rewritten. */
+function renderReviewStatus(d) {
+  if (EXPORT) { $("summaryStatus").textContent = ""; return; }
+  const r = d.review || {}, when = d.profile?.summary_times?.[state.tc || ""];
+  $("summaryStatus").textContent = r.running
+    ? ((r.time_class || "") === (state.tc || "") ? "✍ Your coach is updating this review…" : "✍ Your coach is updating your reviews…")
+    : r.pending ? "Will update when the analysis queue has finished"
+      : when ? `Updated ${ago(when)}` : "";
+  $("summaryStatus").classList.toggle("busy-text", !!r.running);
+}
+
 async function loadDashboard() {
   let d;
   try { d = await api(`/api/profile${state.tc ? `?tc=${state.tc}` : ""}`); } catch (e) { toast(e.message, true); return; }
@@ -1042,6 +1063,7 @@ async function loadDashboard() {
     : s.games >= 2 ? `No ${state.tc} review yet.${EXPORT ? "" : " Press ⟳ Update review to write one."}`
       : `Your ${state.tc} review appears after two analysed ${state.tc} games.`;
   $("summary").innerHTML = review ? md(review) : `<div class="empty small">${esc(waiting)}</div>`;
+  renderReviewStatus(d);
   renderSavedGames();
   loadTrainItems().then(() => renderGoTrain());
   $("openings").innerHTML = (s.openings || []).length
@@ -1497,6 +1519,9 @@ async function pollQueue() {
     queue.seen.add(j.id);
     if (!first && j.game_id) saved = true;
   }
+  const wasReviewing = queue.reviewing;
+  queue.reviewing = !!d.reviewing;
+  if (wasReviewing && !queue.reviewing && state.page === "dashboard" && !saved) loadDashboard();   // the new review
   if (saved) {
     loadDashboard().then(() => {
       if (state.page === "analyze") markAnalysed();
@@ -1507,15 +1532,24 @@ async function pollQueue() {
   if (!$("queueModal").classList.contains("hidden")) renderQueue();
   const active = d.running || d.queued.length;
   const open = !$("queueModal").classList.contains("hidden");
-  queue.timer = setTimeout(pollQueue, d.running ? 1000 : active || open ? 3000 : 20000);
+  queue.timer = setTimeout(pollQueue, d.running ? 1000 : active || open || d.reviewing ? 3000 : 20000);
 }
 
 function renderQueuePill() {
   const d = queue.data, pill = $("queuePill");
   const active = d && (d.running || d.queued.length);
-  pill.classList.toggle("hidden", !active);
+  pill.classList.toggle("hidden", !active && !d?.reviewing);
+  pill.classList.toggle("reviewing", !active && !!d?.reviewing);
   const status = $("importStatus");
-  if (!active) { status.innerHTML = ""; $("gamesQueueStatus").innerHTML = ""; return; }
+  if (!active) {
+    status.innerHTML = ""; $("gamesQueueStatus").innerHTML = "";
+    if (d?.reviewing) {
+      $("queueText").textContent = "Updating your coach review…";
+      $("queueDot").className = "dot busy";
+      $("queueMiniBar").style.width = "0%";
+    }
+    return;
+  }
   const t = d.totals;
   const which = t.games_total > 1 ? `game ${Math.min(t.games_total, t.games_done + 1)} of ${t.games_total}` : "1 game";
   $("queueText").textContent = d.paused ? `Queue paused · ${t.games_left} waiting`
@@ -1527,7 +1561,7 @@ function renderQueuePill() {
     + ` <button class="ghost sm" data-open-queue>Manage queue</button>`;
   $("gamesQueueStatus").innerHTML = status.innerHTML.replace(" in the queue", " still being analysed");
 }
-$("queuePill").addEventListener("click", () => openQueue());
+$("queuePill").addEventListener("click", () => ($("queuePill").classList.contains("reviewing") ? showPage("dashboard") : openQueue()));
 ["importStatus", "gamesQueueStatus"].forEach((id) => $(id).addEventListener("click", (e) => {
   if (e.target.closest("[data-open-queue]")) openQueue();
 }));
@@ -3291,6 +3325,7 @@ async function openSettings(tab = "coach") {
   $("testExpertResult").textContent = "";
   renderExpert();
   $("setPrefetch").checked = s.prefetch !== false;
+  $("setAutoReview").checked = s.auto_review !== false;
   $("setHideAnswers").checked = hideAnswers();
   $("setConcurrency").value = s.concurrency || "";
   $("setDepth").value = s.depth;
@@ -3469,6 +3504,7 @@ $("saveSettings").addEventListener("click", async () => {
   const body = {
     provider: draft.provider, model: $("setModel").value.trim(), llm_enabled: $("setLlmEnabled").checked,
     factcheck: $("setFactcheck").checked, prefetch: $("setPrefetch").checked, detail: draft.detail,
+    auto_review: $("setAutoReview").checked,
     expert_provider: $("setExpertProvider").value, expert_model: $("setExpertModel").value.trim(),
     escalate: $("setEscalate").checked,
     depth: $("setDepth").value, threads: $("setThreads").value, hash_mb: $("setHash").value,
