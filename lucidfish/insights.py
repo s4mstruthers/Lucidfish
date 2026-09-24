@@ -75,6 +75,11 @@ def _patterns(m: dict) -> set[str]:
     return out
 
 
+def mistake_patterns(m: dict) -> set[str]:
+    """Public: why an error happened (pattern ids of PATTERNS)."""
+    return _patterns(m)
+
+
 def _user_result(result: str, side: str | None) -> str:
     if not side or result not in ("1-0", "0-1", "1/2-1/2"):
         return ""
