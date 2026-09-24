@@ -21,9 +21,10 @@ env/
 .ruff_cache/
 .ipynb_checkpoints/
 
-# Secrets / config
+# Secrets / config (the example file is safe to commit)
 .env
 .env.*
+!.env.example
 *.key
 
 # Engine & model binaries (large, download separately)

@@ -1,5 +1,9 @@
-python-chess>=1.10
+# Runtime dependencies (Python 3.10+). Install with: pip install -r requirements.txt
+chess>=1.10          # board logic, PGN parsing, UCI engine control (formerly "python-chess")
 requests>=2.31
-rich>=13.0
-fastapi>=0.110
+rich>=13.0           # terminal output for the CLI
+fastapi>=0.110       # web app backend
 uvicorn>=0.29
+pydantic>=2.0
+keyring>=24          # stores API keys in macOS Keychain / Windows Credential Manager / Secret Service
+anthropic>=1.0       # only used by the Anthropic (Claude) provider

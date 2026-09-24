@@ -99,6 +99,8 @@ def _stockfish_candidates() -> list[Path]:
             Path.home() / "scoop" / "shims",
             Path.home() / "Downloads",
             Path.home() / "Desktop",
+            Path.home(),
+            Path(os.environ.get("SystemDrive", "C:") + "\\"),   # e.g. C:\Stockfish\stockfish*.exe
             data_dir(),
         ]
         found: list[Path] = []

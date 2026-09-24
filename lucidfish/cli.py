@@ -63,7 +63,8 @@ def build_parser() -> argparse.ArgumentParser:
     eng.add_argument("--no-cache", action="store_true", help="ignore stored engine results")
     out = p.add_argument_group("output")
     out.add_argument("--out", metavar="FILE.md", help="write a Markdown report")
-    out.add_argument("--pgn-out", metavar="FILE.pgn", help="write an annotated PGN (for Lichess studies, ChessBase, ...)")
+    out.add_argument("--pgn-out", metavar="FILE.pgn",
+                     help="write an annotated PGN (for Lichess studies, ChessBase, ...)")
     out.add_argument("--json", metavar="FILE.json", help="write the full analysis as JSON")
     p.add_argument("--check", action="store_true", help="check that Stockfish and the AI coach work, then exit")
     p.add_argument("--version", action="version", version=f"lucidfish {__version__}")
