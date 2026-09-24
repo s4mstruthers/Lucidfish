@@ -11,7 +11,7 @@ from collections import Counter
 
 import chess
 
-from . import tactics
+from . import features, tactics
 
 PHASES = ("opening", "middlegame", "endgame")
 ERRORS = ("inaccuracy", "mistake", "blunder")
@@ -27,6 +27,14 @@ PATTERNS = {
     "time_trouble": "Errors in time trouble (under 30 seconds left)",
 }
 _WINNING_MOTIFS = ("wins material", "creates a fork", "creates a pin")
+
+
+def _phase(fen: str | None) -> str:
+    """Phase for moves stored before the analysis recorded it."""
+    try:
+        return features.game_phase(chess.Board(fen)) if fen else ""
+    except ValueError:
+        return ""
 
 
 def _patterns(m: dict) -> set[str]:
@@ -66,7 +74,7 @@ def game_insights(moves: list[dict], user_side: str | None) -> dict:
     phases: dict[str, list[float]] = {}
     patterns: Counter = Counter()
     for m in mine:
-        phase = m.get("phase") or ""
+        phase = m.get("phase") or _phase(m.get("fen_before"))
         if phase in PHASES and m.get("acc") is not None:
             row = phases.setdefault(phase, [0.0, 0, 0])
             row[0] += m["acc"]

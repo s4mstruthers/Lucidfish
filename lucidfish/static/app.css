@@ -393,3 +393,64 @@ legend { font-weight: 700; margin-bottom: 8px; font-size: .95rem; }
 @keyframes slide { from { transform: translateY(8px); opacity: 0; } }
 
 .dropzone.drag { outline: 2px dashed var(--accent); outline-offset: 4px; }
+
+/* ------------------------------------------------------------ queue */
+.queue-pill {
+  display: flex; align-items: center; gap: 8px; position: relative; overflow: hidden;
+  padding: 5px 12px 7px; border-radius: 999px; max-width: 300px;
+  background: var(--accent-soft); color: var(--accent); border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  font-size: .82rem; font-weight: 700;
+}
+.queue-pill:hover { filter: none; background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.queue-pill #queueText { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.queue-pill .mini-bar { position: absolute; left: 10px; right: 10px; bottom: 3px; height: 2px; border-radius: 2px; background: color-mix(in srgb, var(--accent) 20%, transparent); }
+.queue-pill .mini-bar span { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 2px; transition: width .6s; }
+.bar.big { height: 12px; margin-top: 8px; }
+.bar.dual { position: relative; margin: 8px 0 6px; }
+.bar.dual > div { position: absolute; left: 0; top: 0; }
+.bar.dual > .eng { background: color-mix(in srgb, var(--accent) 30%, transparent); }
+.bar.dual > .done { background: var(--accent); }
+.qjob { background: var(--surface-2); border-radius: var(--radius-sm); padding: 12px 14px; }
+.qjob .grow { flex: 1; min-width: 0; }
+.ellipsis { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qrow .qpos { width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; flex: none;
+  background: var(--surface-3); font-size: .75rem; font-weight: 700; color: var(--muted); }
+.qrow button.icon { padding: 3px 7px; min-width: 28px; }
+.qrow .meta { white-space: normal; text-align: right; }
+label.field.inline { flex-direction: row; align-items: center; gap: 8px; }
+
+/* ------------------------------------------------------------ commentary + story */
+.flow {
+  position: relative; margin: 0 0 12px; padding: 10px 14px 10px 16px;
+  border-left: 3px solid var(--c-critical); border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  background: color-mix(in srgb, var(--c-critical) 7%, var(--surface)); font-size: .96rem;
+}
+.flow-label { display: block; font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+  color: var(--c-critical); margin-bottom: 2px; }
+.story { max-height: 460px; overflow-y: auto; padding-right: 4px; display: flex; flex-direction: column; gap: 2px; }
+.story-note { margin: 0 0 8px; }
+.story-phase { position: sticky; top: 0; z-index: 1; background: var(--surface); padding: 8px 4px 4px;
+  font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.story-row { display: grid; grid-template-columns: 96px 1fr; gap: 10px; padding: 6px 8px; border-radius: 8px;
+  border: 1px solid transparent; cursor: pointer; font-size: .9rem; line-height: 1.45; }
+.story-row:hover { border-color: var(--accent); }
+.story-row.sel { background: var(--accent-soft); border-color: var(--accent); }
+.story-row.b .story-move { padding-left: 10px; }
+.story-row.pending { opacity: .5; cursor: default; display: block; }
+.story-move { font-weight: 700; white-space: nowrap; display: flex; align-items: flex-start; gap: 5px; }
+.story-move .badge { transform: scale(.85); }
+.story-move .crit { color: var(--c-critical); }
+.key-nav { font-size: .8rem !important; letter-spacing: -1px; }
+
+/* ------------------------------------------------------------ practice */
+.callout.good { background: color-mix(in srgb, var(--c-best) 12%, var(--surface)); color: var(--text); }
+.callout.bad { background: color-mix(in srgb, var(--c-blunder) 10%, var(--surface)); color: var(--text); }
+
+/* ------------------------------------------------------------ dashboard insights */
+.phase-row { display: grid; grid-template-columns: 96px 1fr 52px 110px; gap: 10px; align-items: center;
+  padding: 7px 0; font-size: .9rem; }
+.phase-row b { text-align: right; }
+.phase-row .bar > div { background: var(--c-best); }
+.phase-row.weak .bar > div { background: var(--c-mistake); }
+.phase-row.weak > span:first-child { font-weight: 700; color: var(--c-mistake); }
+@media (max-width: 560px) { .phase-row { grid-template-columns: 84px 1fr 48px; } .phase-row .small { display: none; } }

@@ -199,7 +199,7 @@ def _mobility(board: chess.Board, color: chess.Color) -> int:
     return b.legal_moves.count()
 
 
-def _phase(board: chess.Board) -> str:
+def game_phase(board: chess.Board) -> str:
     minors_majors = sum(
         len(board.pieces(pt, c))
         for pt in (chess.KNIGHT, chess.BISHOP, chess.ROOK, chess.QUEEN)
@@ -241,7 +241,7 @@ def extract(board: chess.Board) -> PositionFeatures:
             mobility=_mobility(board, color),
         )
     return PositionFeatures(white=sides[chess.WHITE], black=sides[chess.BLACK],
-                            phase=_phase(board), tactical=tactics.position_lines(board))
+                            phase=game_phase(board), tactical=tactics.position_lines(board))
 
 
 def piece_placement(board: chess.Board) -> str:

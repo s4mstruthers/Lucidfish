@@ -73,3 +73,13 @@ def test_analysis_job_streams_moves_and_saves(client):
     assert export.status_code == 200 and "Annotator" in export.text
     games = client.get("/api/profile").json()["games"]
     assert len(games) == 1 and games[0]["white"] == "Paul Morphy"
+
+
+@needs_engine
+def test_practice_move_endpoint(client):
+    fen = "6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1"
+    good = client.post("/api/check_move", json={"fen": fen, "uci": "d1d8"}, headers=H).json()
+    assert good["solved"] and good["san"] == "Rd8#"
+    bad = client.post("/api/check_move", json={"fen": fen, "uci": "a1a8"}, headers=H)
+    assert bad.status_code == 400 and "not legal" in bad.json()["error"]
+    assert client.post("/api/check_move", json={"fen": fen, "uci": "zz"}, headers=H).status_code == 422

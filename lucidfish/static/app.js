@@ -118,6 +118,21 @@ function fmtDate(d) {
   catch { return ""; }
 }
 
+/** "45 s", "12 min", "1 h 20 min" — rounded, because estimates are estimates. */
+function fmtDuration(s) {
+  if (s == null || !Number.isFinite(s)) return "";
+  s = Math.max(0, Math.round(s));
+  if (s < 55) return `${Math.max(5, Math.round(s / 5) * 5)} s`;
+  if (s < 3600) return `${Math.round(s / 60)} min`;
+  const h = Math.floor(s / 3600), m = Math.round((s % 3600) / 60);
+  return m ? `${h} h ${m} min` : `${h} h`;
+}
+function fmtClock(ts) {
+  return ts ? new Date(ts * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";
+}
+const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : "");
+const DETAIL_NAMES = { key: "Key moments", standard: "Commentary", full: "Every move" };
+
 /** chess.com-style time class from a PGN TimeControl header (matches the backend). */
 function timeClass(pgn) {
   const m = pgn.match(/\[TimeControl "(\d+)(?:\+(\d+))?"\]/);
@@ -145,6 +160,8 @@ const state = {
   gameChat: [],
   reviewChat: [],
   dismissed: new Set(),
+  moveView: "moves",     // "moves" grid or "story" transcript
+  practice: null,        // "practise your mistakes" attempt in progress
 };
 
 let board = null;
@@ -354,6 +371,7 @@ async function loadDashboard() {
       + stat("avg centipawn loss", s.avg_acpl) + stat("blunders / game", s.blunders_per_game)
       + stat("mistakes / game", s.mistakes_per_game)
     : "";
+  renderInsights(s);
   $("summary").innerHTML = d.profile.summary
     ? md(d.profile.summary)
     : `<div class="empty small">${s.games ? "Analyse one more game and your coach will write a review of your play." : "Analyse a couple of your games and your coach will write a review of your play here."}</div>`;
@@ -362,6 +380,29 @@ async function loadDashboard() {
     ? s.openings.map((o) => `<div class="item static"><span class="title">${esc(o.name)}</span>
         <span class="meta">${o.games} game${o.games === 1 ? "" : "s"} · ${o.w}W ${o.l}L ${o.d}D${o.acpl != null ? ` · ${o.acpl} ACPL` : ""}</span></div>`).join("")
     : `<div class="empty small">Appears after your first analysis.</div>`;
+}
+
+const perGame = (n) => `${n} mistake${n === 1 ? "" : "s"} per game`;
+
+function renderInsights(s) {
+  $("insightsRow").classList.toggle("hidden", !s.games);
+  if (!s.games) return;
+  const phases = ["opening", "middlegame", "endgame"], pa = s.phase_accuracy || {};
+  $("phaseBars").innerHTML = phases.some((p) => pa[p] != null)
+    ? phases.map((p) => {
+      const v = pa[p];
+      return `<div class="phase-row${s.weakest_phase === p ? " weak" : ""}"><span>${cap(p)}</span>`
+        + `<div class="bar"><div style="width:${v ?? 0}%"></div></div><b>${v != null ? `${v}%` : "—"}</b>`
+        + `<span class="small">${v != null ? perGame(s.phase_errors?.[p] ?? 0) : "not reached yet"}</span></div>`;
+    }).join("")
+      + `<p class="small" style="margin:10px 0 0">Average accuracy of your moves in each phase${s.weakest_phase
+        ? ` — the <b>${esc(s.weakest_phase)}</b> is where you lose the most, so it's the best place to focus.` : "."}</p>`
+    : `<div class="empty small">Appears after your first analysis.</div>`;
+  $("patterns").innerHTML = (s.patterns || []).length
+    ? s.patterns.map((p) => `<div class="item static"><span class="title">${esc(p.label)}</span>`
+      + `<span class="meta">${p.count}× in ${p.games} game${p.games === 1 ? "" : "s"}</span></div>`).join("")
+      + `<p class="small" style="margin:8px 0 0">Found in the moves the engine marked as inaccuracies, mistakes or blunders.</p>`
+    : `<div class="empty small">No recurring mistake types yet.</div>`;
 }
 
 function resultFor(g) {
@@ -485,12 +526,14 @@ async function loadRecentGames() {
   const analysed = new Map(state.savedGames.map((g) => [g.fingerprint, g.id]));
   box.innerHTML = state.recent.length ? "" : `<div class="empty small">No recent games found.</div>`;
   for (const [i, g] of state.recent.entries()) {
-    g.storedId = analysed.get(await sha1(g.pgn.trim()));
+    g.fingerprint = await sha1(g.pgn.trim());
+    g.storedId = analysed.get(g.fingerprint);
     const el = document.createElement("div");
+    g.el = el;
     el.className = "item";
     el.innerHTML = `<input type="checkbox" aria-label="Select game">
       <span class="title">${esc(g.white)} vs ${esc(g.black)}</span>${resultChip(g.result)}
-      ${g.storedId ? `<span class="chip accent">ANALYSED</span>` : ""}
+      <span class="chip accent${g.storedId ? "" : " hidden"}">ANALYSED</span>
       <span class="meta">${g.accuracy != null ? `${Number(g.accuracy).toFixed(1)}% · ` : ""}${esc(g.timeClass)}${g.rating ? ` · ${g.rating}` : ""} · ${fmtDate(g.date)}</span>`;
     const cb = el.querySelector("input");
     cb.addEventListener("click", (e) => {
@@ -506,20 +549,38 @@ async function loadRecentGames() {
   }
 }
 
+/** Refresh the ANALYSED marks after queued games finish (no refetch from the site). */
+function markAnalysed() {
+  const analysed = new Map(state.savedGames.map((g) => [g.fingerprint, g.id]));
+  for (const g of state.recent) {
+    if (!g.fingerprint || !g.el) continue;
+    g.storedId = analysed.get(g.fingerprint);
+    g.el.querySelector(".chip.accent").classList.toggle("hidden", !g.storedId);
+  }
+}
+
 function updateSelection() {
   const n = state.selected.size;
   $("analyzeSelected").disabled = !n;
   $("analyzeSelected").textContent = n ? `Analyze selected (${n})` : "Analyze selected";
 }
 
-/* ================================================================ batch import */
+/* ================================================================ batch → queue */
 
 async function startImport(games) {
   if (!state.profile) { toast("Create a profile first — batch analyses are saved to it.", true); openProfile(null); return; }
   const payload = games.map((g) => ({ pgn: g.pgn, side: g.side, elo: g.rating }));
-  try { await api("/api/profile/import", { method: "POST", body: { games: payload, force: $("redo").checked } }); }
-  catch (e) { toast(e.message, true); return; }
-  pollImport();
+  let d;
+  try {
+    d = await api("/api/queue", { method: "POST", body: { games: payload, force: $("redo").checked,
+      detail: $("batchDetail").value || null } });
+  } catch (e) { toast(e.message, true); return; }
+  const skipped = d.skipped ? ` (${d.skipped} already analysed or queued)` : "";
+  toast(d.added ? `Added ${d.added} game${d.added === 1 ? "" : "s"} to the queue${skipped}.` : `Nothing to add${skipped}.`);
+  if (d.errors.length) toast(d.errors[0], true);
+  state.selected.clear(); updateSelection();
+  document.querySelectorAll("#gameList input[type=checkbox]").forEach((cb) => { cb.checked = false; });
+  pollQueue();
 }
 $("analyzeSelected").addEventListener("click", () => startImport([...state.selected].sort((a, b) => a - b).map((i) => state.recent[i])));
 $("analyzeBatch").addEventListener("click", () => {
@@ -527,23 +588,149 @@ $("analyzeBatch").addEventListener("click", () => {
   startImport(state.recent.slice(0, parseInt($("batchCount").value, 10)));
 });
 
-async function pollImport() {
-  let j;
-  try { j = await api("/api/profile/import_status"); } catch { return; }
-  const box = $("importStatus");
-  const extra = `${j.skipped ? ` · ${j.skipped} already analysed` : ""}${j.errors ? ` · ${j.errors} failed` : ""}`;
-  if (j.status === "running") {
-    box.innerHTML = `<span class="dot busy"></span> ${esc(j.current)} · ${j.done}/${j.total} done${esc(extra)}
-      <button class="ghost sm" id="stopImport">Stop</button>`;
-    $("stopImport").addEventListener("click", () => api("/api/profile/import/stop", { method: "POST" }));
-    setTimeout(pollImport, 2500);
-  } else if (j.status === "done" || j.status === "stopped") {
-    box.textContent = `${j.status === "done" ? "✓ Batch complete" : "Batch stopped"}: ${j.done - j.skipped - j.errors} analysed${extra}`
-      + (j.last_error ? ` — last error: ${j.last_error}` : "");
-    await loadDashboard();
-    if (state.page === "analyze") loadRecentGames();
+/* ================================================================ analysis queue */
+
+const queue = { data: null, timer: null, seq: 0, seen: new Set() };
+
+/** Refresh the queue now and keep polling: every second while a game runs, rarely when idle. */
+async function pollQueue() {
+  clearTimeout(queue.timer);
+  const seq = ++queue.seq;   // only the newest call keeps the polling loop alive
+  let d;
+  try { d = await api("/api/queue"); }
+  catch { if (seq === queue.seq) queue.timer = setTimeout(pollQueue, 5000); return; }
+  if (seq !== queue.seq) return;
+  const first = queue.data === null;
+  queue.data = d;
+  let saved = false;
+  for (const j of d.finished) {
+    if (queue.seen.has(j.id)) continue;
+    queue.seen.add(j.id);
+    if (!first && j.game_id) saved = true;
   }
+  if (saved) loadDashboard().then(() => { if (state.page === "analyze") markAnalysed(); });
+  renderQueuePill();
+  if (!$("queueModal").classList.contains("hidden")) renderQueue();
+  const active = d.running || d.queued.length;
+  const open = !$("queueModal").classList.contains("hidden");
+  queue.timer = setTimeout(pollQueue, d.running ? 1000 : active || open ? 3000 : 20000);
 }
+
+function renderQueuePill() {
+  const d = queue.data, pill = $("queuePill");
+  const active = d && (d.running || d.queued.length);
+  pill.classList.toggle("hidden", !active);
+  const status = $("importStatus");
+  if (!active) { status.innerHTML = ""; return; }
+  const t = d.totals;
+  const which = t.games_total > 1 ? `game ${Math.min(t.games_total, t.games_done + 1)} of ${t.games_total}` : "1 game";
+  $("queueText").textContent = d.paused ? `Queue paused · ${t.games_left} waiting`
+    : `${cap(which)} · ${fmtDuration(t.seconds_left)} left`;
+  $("queueDot").className = `dot ${d.paused ? "warn" : "busy"}`;
+  $("queueMiniBar").style.width = `${Math.round(100 * t.progress)}%`;
+  status.innerHTML = `<span class="dot ${d.paused ? "warn" : "busy"}"></span> ${t.games_left} game${t.games_left === 1 ? "" : "s"} in the queue`
+    + (d.paused ? " (paused)" : ` · about ${fmtDuration(t.seconds_left)} left`)
+    + ` <button class="ghost sm" data-open-queue>Manage queue</button>`;
+}
+$("queuePill").addEventListener("click", () => openQueue());
+$("importStatus").addEventListener("click", (e) => { if (e.target.closest("[data-open-queue]")) openQueue(); });
+
+function openQueue() {
+  openModal("queueModal");
+  renderQueue();
+  pollQueue();
+}
+
+const STATUS_LABELS = { done: "Done", stopped: "Stopped", error: "Failed", cancelled: "Removed" };
+
+function detailChip(detail) {
+  return detail ? `<span class="chip" title="Coaching detail for this game">${esc(DETAIL_NAMES[detail] || detail)}</span>` : "";
+}
+
+function renderQueue() {
+  const d = queue.data;
+  if (!d) return;
+  const t = d.totals, active = d.running || d.queued.length;
+  $("queueRestored").innerHTML = d.restored && d.paused
+    ? `<div class="banner info"><div class="grow"><b>${d.restored} game${d.restored === 1 ? "" : "s"} from your last session ${d.restored === 1 ? "is" : "are"} waiting</b>`
+      + `<span class="small">The queue was paused when Lucidfish restarted, so nothing starts by surprise.</span></div>`
+      + `<button class="sm" data-qa="resume">▶ Resume</button></div>` : "";
+  $("queueOverall").innerHTML = active
+    ? `<div class="row"><b>${t.games_done} of ${t.games_total} game${t.games_total === 1 ? "" : "s"} done</b><div class="spacer"></div>`
+      + `<span class="small">${d.paused ? "Paused" : `about <b>${fmtDuration(t.seconds_left)}</b> left · done around ${fmtClock(t.finish_at)}`}</span></div>`
+      + `<div class="bar big"><div style="width:${(100 * t.progress).toFixed(1)}%"></div></div>`
+      + (t.learned ? "" : `<p class="small" style="margin:6px 0 0">Rough estimate for now — it gets accurate once a game with these settings has finished on this computer.</p>`)
+    : `<div class="empty small">The queue is empty. Add games from <a href="#" data-qa="analyze">Analyze games</a> — pick several and press “Analyze selected”, or queue your last 5–20 games at once.</div>`;
+  $("queuePause").textContent = d.paused ? "▶ Resume" : "Pause";
+  $("queuePause").disabled = !active && !d.paused;
+  $("queueStopAll").disabled = !active;
+  $("queueClear").disabled = !d.finished.length;
+
+  const r = d.running;
+  $("queueRunning").innerHTML = r ? `<div class="section-label">Now analysing</div>`
+    + `<div class="qjob" data-id="${r.id}"><div class="row"><span class="dot busy"></span><b class="grow ellipsis">${esc(r.title)}</b>${detailChip(r.detail)}`
+    + `<span class="small">${r.reviewing ? "writing the review…" : `about ${fmtDuration(r.eta_s)} left`}</span>`
+    + `<button class="secondary sm" data-qa="open">Open</button><button class="danger sm" data-qa="cancel">Stop</button></div>`
+    + `<div class="bar dual"><div class="eng" style="width:${(100 * r.engine_done / Math.max(1, r.total)).toFixed(1)}%"></div>`
+    + `<div class="done" style="width:${(100 * r.done / Math.max(1, r.total)).toFixed(1)}%"></div></div>`
+    + `<div class="small">${esc(r.label)} · ${r.done}/${r.total} moves ready${r.engine_done > r.done ? ` · engine at move ${r.engine_done}` : ""}</div></div>` : "";
+
+  $("queueUpcoming").innerHTML = d.queued.length ? `<div class="section-label">Up next</div><div class="list">`
+    + d.queued.map((j, i) => `<div class="item qrow" data-id="${j.id}" title="Open this game">`
+      + `<span class="qpos">${i + 1}</span><span class="title">${esc(j.title)}</span>${detailChip(j.detail)}`
+      + `<span class="meta">${d.paused ? "" : `starts in ${fmtDuration(j.start_in_s)} · `}takes ~${fmtDuration(j.eta_s)}`
+      + `${j.prefetched ? ` · engine ${Math.min(100, Math.round(100 * j.prefetched / (j.total + 1)))}% ahead` : ""}</span>`
+      + `<button class="ghost icon" data-qa="top" title="Analyse next" aria-label="Move to the front"${i === 0 ? " disabled" : ""}>⤒</button>`
+      + `<button class="ghost icon" data-qa="up" title="Move up" aria-label="Move up"${i === 0 ? " disabled" : ""}>↑</button>`
+      + `<button class="ghost icon" data-qa="down" title="Move down" aria-label="Move down"${i === d.queued.length - 1 ? " disabled" : ""}>↓</button>`
+      + `<button class="ghost icon" data-qa="cancel" title="Remove from the queue" aria-label="Remove">✕</button></div>`).join("")
+    + `</div>` : "";
+
+  $("queueDone").innerHTML = d.finished.length ? `<div class="section-label">Finished</div><div class="list">`
+    + d.finished.map((j) => `<div class="item qrow ${j.game_id || j.status === "done" ? "" : "static"}" data-id="${j.id}">`
+      + `<span class="chip ${j.status === "done" ? "win" : j.status === "error" ? "loss" : ""}">${esc(STATUS_LABELS[j.status] || j.status)}</span>`
+      + `<span class="title">${esc(j.title)}</span>`
+      + `<span class="meta">${[j.accuracy != null ? `${j.accuracy}% accuracy` : "", j.duration_s ? `took ${fmtDuration(j.duration_s)}` : "",
+        j.error ? esc(j.error) : ""].filter(Boolean).join(" · ")}</span></div>`).join("")
+    + `</div>` : "";
+}
+
+$("queueBody").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-qa]");
+  const row = e.target.closest("[data-id]");
+  const id = row?.dataset.id;
+  try {
+    if (btn) {
+      e.preventDefault();
+      const qa = btn.dataset.qa;
+      if (qa === "analyze") { closeModal("queueModal"); showPage("analyze"); return; }
+      if (qa === "open") { closeModal("queueModal"); openJob(id); return; }
+      if (qa === "resume") queue.data = await api("/api/queue/resume", { method: "POST" });
+      else if (qa === "cancel") queue.data = await api(`/api/queue/${id}/cancel`, { method: "POST" });
+      else queue.data = await api(`/api/queue/${id}/move`, { method: "POST", body: { where: qa } });
+      renderQueue(); renderQueuePill();
+      return;
+    }
+    if (!row || row.classList.contains("static")) return;
+    const j = [...queue.data.queued, ...queue.data.finished].find((x) => x.id === id);
+    closeModal("queueModal");
+    if (j?.game_id) openStoredGame(j.game_id); else openJob(id);
+  } catch (err) { toast(err.message, true); }
+});
+$("queuePause").addEventListener("click", async () => {
+  try { queue.data = await api(`/api/queue/${queue.data?.paused ? "resume" : "pause"}`, { method: "POST" }); }
+  catch (e) { toast(e.message, true); return; }
+  renderQueue(); renderQueuePill(); pollQueue();
+});
+$("queueStopAll").addEventListener("click", async () => {
+  if (!confirm("Stop the current analysis and remove every waiting game from the queue?")) return;
+  try { queue.data = await api("/api/queue/stop_all", { method: "POST" }); } catch (e) { toast(e.message, true); return; }
+  renderQueue(); renderQueuePill();
+});
+$("queueClear").addEventListener("click", async () => {
+  try { queue.data = await api("/api/queue/clear_finished", { method: "POST" }); } catch (e) { toast(e.message, true); return; }
+  renderQueue();
+});
 
 /* ================================================================ PGN input */
 
@@ -592,16 +779,23 @@ async function startAnalysis(pgn, side, rating) {
   let d;
   try { d = await api("/api/analyze", { method: "POST", body: { pgn, side, elo: rating || ratingFor(pgn) } }); }
   catch (e) { toast(e.message, true); return; }
+  openJob(d.job_id, pgn);
+  pollQueue();
+}
+
+/** Show a queued or running analysis on the Game page; moves stream in as they're ready. */
+function openJob(jobId, pgn = "") {
   clearTimeout(pollTimer);
-  state.game = { mode: "game", pgn, jobId: d.job_id, status: "queued", headers: {}, side, moves: [], review: "",
-    opening: "", accuracy: {}, warnings: [], total: 0, started: Date.now(), coach: "" };
+  state.game = { mode: "game", pgn, jobId, status: "queued", headers: {}, side: null, moves: [], review: "",
+    opening: "", accuracy: {}, warnings: [], total: 0, coach: "" };
   resetGameView();
   $("navGame").classList.remove("hidden");
   showPage("game");
   $("progressCard").classList.remove("hidden");
   // Engine-only mode has nothing for a "Coach" bar to show.
   $("barCoach").closest(".bar-row").classList.toggle("hidden", state.health?.coach?.enabled === false);
-  $("stopBtn").disabled = false; $("stopBtn").textContent = "■ Stop";
+  $("stopBtn").disabled = false;
+  renderReview();
   poll();
 }
 
@@ -610,50 +804,82 @@ async function poll() {
   if (!g || !g.jobId) return;
   let j;
   try { j = await api(`/api/job/${g.jobId}?since=${g.moves.length}`); }
-  catch (e) { toast(e.message, true); $("progressCard").classList.add("hidden"); return; }
+  catch (e) { toast(e.message, true); $("progressCard").classList.add("hidden"); g.jobId = null; return; }
   if (state.game !== g) return;   // a different game was opened meanwhile
+  const firstMoves = !g.moves.length && j.moves.length;
   Object.assign(g, { status: j.status, headers: j.headers, side: j.side, total: j.total, warnings: j.warnings });
   if (j.moves.length) {
     g.moves.push(...j.moves);
-    if (state.cur < 0) goTo(0); else renderMoveList();
+    if (state.cur < 0 && !state.practice) goTo(0); else renderMoveList();
     renderGraph();
   }
-  renderHeader();
+  if (firstMoves || !g.moves.length) renderHeader();
+  if (!g.moves.length) {
+    renderMoveList();
+    $("explain").innerHTML = `<p class="small">The engine verdicts, commentary and coach's notes for each move will appear here.</p>`;
+  }
   updateProgress(j);
   if (j.status === "queued" || j.status === "running") {
-    pollTimer = setTimeout(poll, j.status === "queued" ? 1500 : 700);
+    pollTimer = setTimeout(poll, j.status === "queued" ? 2000 : 700);
     return;
   }
-  Object.assign(g, { review: j.review, opening: j.opening, accuracy: j.accuracy, coach: j.coach, jobId: null });
+  Object.assign(g, { review: j.review, opening: j.opening, accuracy: j.accuracy, coach: j.coach, jobId: null,
+    pgn: g.pgn || "" });
+  if (!g.pgn && j.game_id) {
+    try { g.pgn = (await api(`/api/profile/game/${j.game_id}`)).pgn; } catch { /* export needs it; not critical */ }
+  }
   $("progressCard").classList.add("hidden");
   renderHeader(); renderReview(); renderGraph();
-  if (state.cur >= 0) goTo(state.cur);
+  if (state.cur >= 0 && !state.practice) goTo(state.cur);
   if (j.status === "error") toast(j.error || "The analysis failed.", true);
   else if (j.status === "stopped") toast("Analysis stopped — showing the moves completed so far.");
+  else if (j.status === "cancelled") toast("Removed from the queue.");
   else toast(j.game_id ? "Analysis complete and saved to your profile." : "Analysis complete.");
-  loadHealth(); loadDashboard();
+  loadHealth(); pollQueue();
 }
 
 function updateProgress(j) {
+  const queued = j.status === "queued";
+  $("progressBars").classList.toggle("hidden", queued);
+  $("progressDot").className = `dot ${queued && j.paused ? "warn" : "busy"}`;
+  $("stopBtn").textContent = queued ? "✕ Remove" : "■ Stop";
+  const jump = $("jumpBtn");
+  jump.classList.toggle("hidden", !queued || (!j.paused && j.position === 1));
+  jump.textContent = j.paused ? "▶ Resume the queue" : "⤒ Analyse this next";
+  if (queued) {
+    $("progressLabel").textContent = j.paused ? "Waiting in the queue — the queue is paused"
+      : j.ahead ? `Waiting in the queue — ${j.ahead} game${j.ahead === 1 ? "" : "s"} ahead` : "Starting…";
+    $("progressEta").textContent = j.paused || j.start_in_s == null ? "" : `starts in about ${fmtDuration(j.start_in_s)}`;
+    $("progressHint").textContent = j.prefetched
+      ? `The engine is already working ahead on this game (${Math.min(100, Math.round((100 * j.prefetched) / (j.total + 1)))}% of positions searched).`
+      : "It starts automatically — you can keep using Lucidfish meanwhile.";
+    return;
+  }
   const total = Math.max(1, j.total);
-  $("progressLabel").textContent = j.status === "queued" ? "Waiting for the current analysis to finish…" : j.label;
+  $("progressLabel").textContent = j.label;
   $("barEngine").style.width = `${(100 * j.engine_done) / total}%`;
   $("barCoach").style.width = `${(100 * j.done) / total}%`;
   $("barEngineTxt").textContent = `${j.engine_done}/${j.total}`;
   $("barCoachTxt").textContent = `${j.done}/${j.total}`;
-  const elapsed = (Date.now() - state.game.started) / 1000;
-  const done = j.done;
-  if (done >= 3 && done < j.total) {
-    const eta = Math.round((elapsed / done) * (j.total - done));
-    $("progressEta").textContent = `about ${eta >= 90 ? Math.ceil(eta / 60) + " min" : eta + " s"} left`;
-  } else $("progressEta").textContent = "";
+  $("progressEta").textContent = j.eta_s == null ? ""
+    : `about ${fmtDuration(j.eta_s)} left · done around ${fmtClock(Date.now() / 1000 + j.eta_s)}`;
+  $("progressHint").textContent = "Moves appear below as soon as they're ready — you can start reviewing now.";
 }
 
 $("stopBtn").addEventListener("click", async () => {
   const g = state.game;
   if (!g?.jobId) return;
-  $("stopBtn").disabled = true; $("stopBtn").textContent = "Stopping…";
+  $("stopBtn").disabled = true;
   try { await api(`/api/job/${g.jobId}/stop`, { method: "POST" }); } catch (e) { toast(e.message, true); }
+});
+$("jumpBtn").addEventListener("click", async () => {
+  const g = state.game;
+  if (!g?.jobId) return;
+  try {
+    if (queue.data?.paused) await api("/api/queue/resume", { method: "POST" });
+    await api(`/api/queue/${g.jobId}/move`, { method: "POST", body: { where: "top" } });
+  } catch (e) { toast(e.message, true); }
+  pollQueue();
 });
 
 async function openStoredGame(id) {
@@ -670,7 +896,7 @@ async function openStoredGame(id) {
 }
 
 function resetGameView() {
-  state.cur = -1; state.preview = null; state.gameChat.length = 0;
+  state.cur = -1; state.preview = null; state.practice = null; state.gameChat.length = 0;
   $("gameChatLog").innerHTML = ""; $("moveList").innerHTML = ""; $("explain").innerHTML = "";
   $("review").innerHTML = ""; $("previewBar").classList.add("hidden");
   $("progressCard").classList.add("hidden");
@@ -695,8 +921,9 @@ function renderHeader() {
     const acc = g.accuracy || {};
     $("accPills").innerHTML = ["white", "black"].filter((s) => acc[s] != null)
       .map((s) => `<div class="acc"><b>${acc[s]}%</b><span>${s} accuracy</span></div>`).join("");
-    $("exportRow").querySelectorAll("#exportPgn,#exportMd").forEach((b) => b.classList.remove("hidden"));
+    $("exportRow").querySelectorAll("#exportPgn,#exportMd").forEach((b) => b.classList.toggle("hidden", !g.moves.length));
   }
+  $("practiceAll").classList.toggle("hidden", !(g.mode === "game" && !g.jobId && myMistakes().length));
   $("gameWarnings").innerHTML = (g.warnings || []).map((w) =>
     `<div class="banner" style="margin:12px 0 0"><div class="grow small">${esc(w)}</div></div>`).join("");
 }
@@ -712,7 +939,21 @@ function renderReview() {
 
 function ensureBoard() {
   if (board) return;
-  board = Chessboard("board", { position: "start", pieceTheme: PIECES, showNotation: true, moveSpeed: 120, snapSpeed: 60 });
+  board = Chessboard("board", {
+    position: "start", pieceTheme: PIECES, showNotation: true, moveSpeed: 120, snapSpeed: 60,
+    draggable: true,   // pieces only move in practice mode (see onDragStart)
+    onDragStart: (source, piece) => {
+      const p = state.practice;
+      if (!p || p.busy || p.result || state.preview) return false;
+      return piece[0] === p.fen.split(" ")[1];   // only the side to move
+    },
+    onDrop: (source, target, piece) => {
+      if (!state.practice || target === "offboard" || source === target) return "snapback";
+      const promotes = piece[1] === "P" && (target[1] === "8" || target[1] === "1");
+      tryPracticeMove(source + target + (promotes ? "q" : ""));
+      return undefined;
+    },
+  });
 }
 
 function orientation() { return board ? board.orientation() : "white"; }
@@ -720,6 +961,7 @@ function orientation() { return board ? board.orientation() : "white"; }
 function refreshBoard() {
   if (!board || !state.game) return;
   if (state.preview) { stepPreview(0); return; }
+  if (state.practice) { practiceBoard(); return; }
   if (state.game.mode === "position") {
     board.position(state.game.position.fen, false);
     positionOverlay();
@@ -771,12 +1013,29 @@ $("btnPrev").addEventListener("click", () => (state.preview ? stepPreview(-1) : 
 $("btnNext").addEventListener("click", () => (state.preview ? stepPreview(1) : goTo(state.cur + 1)));
 $("btnLast").addEventListener("click", () => goTo((state.game?.moves.length || 0) - 1));
 $("btnFlip").addEventListener("click", flip);
+$("btnPrevKey").addEventListener("click", () => jumpKeyMoment(-1));
+$("btnNextKey").addEventListener("click", () => jumpKeyMoment(1));
+
+/** Critical moments, every mistake or blunder, and your own inaccuracies. */
+function isKeyMoment(m, g) {
+  const mine = !g.side || m.side.toLowerCase() === g.side;
+  return m.critical || m.cls === "mistake" || m.cls === "blunder" || (mine && m.cls === "inaccuracy");
+}
+
+function jumpKeyMoment(dir) {
+  const g = state.game;
+  if (!g || g.mode !== "game" || !g.moves.length) return;
+  for (let i = state.cur + dir; i >= 0 && i < g.moves.length; i += dir) {
+    if (isKeyMoment(g.moves[i], g)) { goTo(i); return; }
+  }
+  toast(dir > 0 ? "No more key moments after this move." : "No key moments before this move.");
+}
 
 function flip() {
   if (!board) return;
   board.flip();
   refreshBoard();
-  if (state.game?.mode === "game" && state.cur >= 0) setEvalBar(winOf(state.game.moves[state.cur]), evalWords(state.game.moves[state.cur].eval));
+  if (state.game?.mode === "game" && state.cur >= 0 && !state.practice) setEvalBar(winOf(state.game.moves[state.cur]), evalWords(state.game.moves[state.cur].eval));
 }
 
 /* ================================================================ moves */
@@ -786,6 +1045,7 @@ function goTo(i, rerender = true) {
   if (!g || g.mode !== "game" || !g.moves.length) return;
   ensureBoard();
   state.preview = null; $("previewBar").classList.add("hidden");
+  state.practice = null;
   const prev = state.cur;
   state.cur = Math.max(0, Math.min(g.moves.length - 1, i));
   const m = g.moves[state.cur];
@@ -803,8 +1063,19 @@ function goTo(i, rerender = true) {
 }
 
 function renderMoveList() {
+  const story = state.moveView === "story";
+  $("moveList").classList.toggle("hidden", story);
+  $("storyList").classList.toggle("hidden", !story);
+  if (story) renderStory(); else renderMoveGrid();
+}
+
+function renderMoveGrid() {
   const g = state.game, box = $("moveList");
   if (!g || g.mode !== "game") return;
+  if (!g.moves.length) {
+    box.innerHTML = `<div class="small" style="grid-column: span 3">${g.jobId ? "Moves appear here as soon as the analysis starts." : "No moves."}</div>`;
+    return;
+  }
   const h = g.headers || {};
   let html = `<div class="moves-head"></div><div class="moves-head" title="${esc(h.White || "")}">♔ ${esc(h.White || "White")}</div>`
     + `<div class="moves-head" title="${esc(h.Black || "")}">♚ ${esc(h.Black || "Black")}</div>`;
@@ -831,6 +1102,45 @@ $("moveList").addEventListener("click", (e) => {
   const cell = e.target.closest(".mv[data-i]");
   if (cell) goTo(parseInt(cell.dataset.i, 10));
 });
+
+/** The game as a running commentary: every move with the commentator's line. */
+function renderStory() {
+  const g = state.game, box = $("storyList");
+  if (!g || g.mode !== "game") return;
+  const hasFlow = g.moves.some((m) => m.flow);
+  let html = hasFlow || !g.moves.length ? "" : `<p class="small story-note">This game was analysed without running commentary, `
+    + `so the story shows the coach's notes only. Choose <b>Commentary</b> in Settings → Analysis for a line on every move.</p>`;
+  let phase = "";
+  g.moves.forEach((m, i) => {
+    if (m.phase && m.phase !== phase) { phase = m.phase; html += `<div class="story-phase">${esc(cap(phase))}</div>`; }
+    const text = m.flow || (m.expl ? m.expl.split(/(?<=[.!?])\s/)[0] : "");
+    const mark = ERRORS.includes(m.cls) ? badge(m.cls) : m.critical ? `<span class="crit" title="Critical moment">⚡</span>` : "";
+    html += `<div class="story-row${i === state.cur ? " sel" : ""}${m.side === "White" ? " w" : " b"}" data-i="${i}">`
+      + `<span class="story-move">${m.side === "White" ? `${m.n}.` : `${m.n}…`} ${esc(m.san)} ${mark}</span>`
+      + `<span class="story-text">${text ? esc(text) : `<span class="muted">${m.book ? "Opening theory." : "—"}</span>`}</span></div>`;
+  });
+  if (g.jobId && g.moves.length < g.total) html += `<div class="story-row pending">analysing… ${g.moves.length}/${g.total}</div>`;
+  box.innerHTML = html;
+  const sel = box.querySelector(".story-row.sel");
+  if (sel) sel.scrollIntoView({ block: "nearest" });
+}
+$("storyList").addEventListener("click", (e) => {
+  const row = e.target.closest(".story-row[data-i]");
+  if (row) goTo(parseInt(row.dataset.i, 10));
+});
+document.querySelectorAll("#moveViewSeg button").forEach((b) => b.addEventListener("click", () => {
+  state.moveView = b.dataset.view;
+  document.querySelectorAll("#moveViewSeg button").forEach((x) => x.classList.toggle("active", x === b));
+  try { localStorage.setItem("lucidfish-move-view", state.moveView); } catch { /* ignore */ }
+  renderMoveList();
+}));
+try {
+  const saved = localStorage.getItem("lucidfish-move-view");
+  if (saved === "story" || saved === "moves") {
+    state.moveView = saved;
+    document.querySelectorAll("#moveViewSeg button").forEach((x) => x.classList.toggle("active", x.dataset.view === saved));
+  }
+} catch { /* ignore */ }
 
 /** Alternatives worth showing: only when the move wasn't (close to) the best. */
 function pickAlternatives(m) {
@@ -859,10 +1169,18 @@ function renderExplain(m) {
     + `<span class="verdict v-${esc(m.cls)}">${badge(m.cls)} ${esc(LABELS[m.cls] || m.cls)}</span>`
     + `<span class="small">${esc(evalWords(m.eval))}${m.acc != null ? ` · accuracy ${Math.round(m.acc)}%` : ""}${think}</span>`
     + (m.critical ? `<span class="chip tag">⚡ critical moment</span>` : "")
+    + (m.book ? `<span class="chip" title="A known opening move">📖 book</span>` : "")
     + (opponent ? `<span class="chip">opponent</span>` : "") + `</div>`;
   if (m.tags && m.tags.length) html += `<div class="row" style="margin-bottom:10px">${m.tags.map((t) => `<span class="chip tag">${esc(t)}</span>`).join("")}</div>`;
+  if (m.flow) html += `<div class="flow"><span class="flow-label">🎙 Commentary</span>${esc(m.flow)}</div>`;
+  if (!opponent && ERRORS.includes(m.cls) && !g.jobId) {
+    html += `<div class="row" style="margin:4px 0 10px"><button class="sm" data-practice="${state.cur}">🎯 Find a better move yourself</button></div>`;
+  }
   if (m.expl) {
-    html += (opponent ? `<span class="opp-label">What your opponent is up to</span>` : "") + `<div class="md">${md(m.expl)}</div>`;
+    html += (opponent ? `<span class="opp-label">What your opponent is up to</span>` : m.flow ? `<div class="section-label">Coach's note</div>` : "")
+      + `<div class="md">${md(m.expl)}</div>`;
+  } else if (m.flow) {
+    /* the commentary line says it all */
   } else if (g.jobId) {
     html += `<p class="small">${m.cls === "best" || m.cls === "good" ? "A solid move — no note needed." : "No note for this move."}</p>`;
   } else if (ERRORS.includes(m.cls)) {
@@ -892,7 +1210,121 @@ function renderExplain(m) {
 }
 $("explain").addEventListener("click", (e) => {
   const el = e.target.closest("[data-prev]");
-  if (el) startPreview(el.dataset.prev);
+  if (el) { startPreview(el.dataset.prev); return; }
+  const pr = e.target.closest("[data-practice]");
+  if (pr) { startPractice(parseInt(pr.dataset.practice, 10)); return; }
+  const act = e.target.closest("[data-pa]");
+  if (act) practiceAction(act.dataset.pa);
+});
+
+/* ================================================================ practise your mistakes */
+
+/** Indices of the coached player's inaccuracies, mistakes and blunders. */
+function myMistakes() {
+  const g = state.game;
+  if (!g || g.mode !== "game") return [];
+  return g.moves.map((m, i) => [m, i])
+    .filter(([m]) => ERRORS.includes(m.cls) && (!g.side || m.side.toLowerCase() === g.side) && m.fen_before)
+    .map(([, i]) => i);
+}
+
+function startPractice(i) {
+  const g = state.game, m = g?.moves[i];
+  if (!m) return;
+  goTo(i, false);   // select the move (and leave any preview)
+  state.practice = { i, fen: m.fen_before, busy: false, result: null, tries: 0 };
+  board.orientation(m.side.toLowerCase());
+  practiceBoard();
+  renderPractice();
+  $("board").scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
+function practiceBoard() {
+  const p = state.practice, g = state.game;
+  board.position(p.result ? p.result.fen_after : p.fen, false);
+  if (p.result) {
+    const u = p.result.uci, color = p.result.solved ? "rgba(31, 157, 107, .5)" : "rgba(224, 70, 75, .45)";
+    drawOverlay({ arrows: [], squares: [{ sq: u.slice(0, 2), color }, { sq: u.slice(2, 4), color }] });
+    setEvalBar(winFromEval(p.result.eval), evalWords(p.result.eval));
+  } else {
+    drawOverlay({ arrows: [], squares: [] });
+    const before = p.i > 0 ? g.moves[p.i - 1] : null;
+    setEvalBar(before ? winOf(before) : 50, "Your move");
+  }
+}
+
+function renderPractice() {
+  const p = state.practice, g = state.game, m = g.moves[p.i];
+  const label = `${m.side === "White" ? `${m.n}.` : `${m.n}…`}`;
+  const others = myMistakes().filter((i) => i !== p.i);
+  let html = `<div class="expl-title"><span class="san">🎯 Practice · ${esc(label)}</span>`
+    + `<span class="small">In the game you played <b>${esc(m.san)}</b> ${badge(m.cls)} — can you find something better?</span></div>`;
+  state.previewMap = {};
+  if (p.busy) html += `<div class="callout">Checking your move with the engine…</div>`;
+  else if (!p.result) {
+    html += `<div class="callout">Drag a ${esc(m.side)} piece to play your move. Take your time: look for checks, captures and threats first. `
+      + `(Pawns promote to a queen.)</div>`;
+  } else if (p.result.solved) {
+    const r = p.result;
+    html += `<div class="callout good"><b>✓ ${esc(r.san)} — ${esc(LABELS[r.cls] || r.cls)}!</b> `
+      + (r.cls === "best" ? "That's the engine's top choice." : `Good enough — the engine's first choice was <b>${esc(r.best)}</b>.`)
+      + ` ${esc(evalWords(r.eval))}.</div>`;
+  } else {
+    const r = p.result;
+    html += `<div class="callout bad"><b>✗ ${esc(r.san)} is ${r.cls === "inaccuracy" ? "an" : "a"} ${esc(r.cls)} too.</b> ${esc(evalWords(r.eval))}.</div>`;
+    if (r.refutation_steps?.length) {
+      state.previewMap.pref = { steps: r.refutation_steps, base: r.fen_after, label: `why ${r.san} fails` };
+      html += `<div class="section-label">Why it doesn't work · click to watch</div>` + lineHtml("pref", "", "", r.refutation, "");
+    }
+  }
+  if (p.result && !p.result.solved) html += `<div class="row" style="margin-top:12px"><button class="sm" data-pa="retry">↺ Try again</button>`;
+  else html += `<div class="row" style="margin-top:12px">`;
+  if (!p.result?.solved) html += `<button class="secondary sm" data-pa="answer">Show the answer</button>`;
+  if (others.length) html += `<button class="secondary sm" data-pa="next">Next mistake →</button>`;
+  html += `<div class="spacer"></div><button class="ghost sm" data-pa="exit">Exit practice</button></div>`;
+  if (p.showAnswer) {
+    const best = m.candidates?.[0];
+    state.previewMap.pbest = { steps: best?.steps || [], base: p.fen, label: "the engine's line" };
+    html += `<div class="section-label">The answer · click to play it out</div>`
+      + lineHtml("pbest", m.best, best?.score || "", best?.line || m.best, best?.idea || "");
+  }
+  $("explain").innerHTML = html;
+}
+
+async function tryPracticeMove(uci) {
+  const p = state.practice;
+  p.busy = true; p.tries += 1;
+  renderPractice();
+  let r;
+  try { r = await api("/api/check_move", { method: "POST", body: { fen: p.fen, uci } }); }
+  catch (e) {
+    if (state.practice !== p) return;
+    p.busy = false; toast(e.message, true); practiceBoard(); renderPractice();
+    return;
+  }
+  if (state.practice !== p) return;   // left practice while the engine was thinking
+  p.busy = false; p.result = r;
+  if (r.solved) p.showAnswer = false;
+  practiceBoard();
+  renderPractice();
+}
+
+function practiceAction(action) {
+  const p = state.practice;
+  if (!p) return;
+  if (action === "retry") { p.result = null; practiceBoard(); renderPractice(); }
+  else if (action === "answer") { p.showAnswer = true; renderPractice(); }
+  else if (action === "exit") { goTo(p.i); }
+  else if (action === "next") {
+    const list = myMistakes();
+    const next = list.find((i) => i > p.i) ?? list[0];
+    if (next != null) startPractice(next);
+  }
+}
+$("practiceAll").addEventListener("click", () => {
+  const list = myMistakes();
+  if (!list.length) return;
+  startPractice(list.find((i) => i >= state.cur) ?? list[0]);
 });
 
 /* ================================================================ eval graph */
@@ -958,7 +1390,9 @@ function stepPreview(d) {
 function exitPreview() {
   state.preview = null;
   $("previewBar").classList.add("hidden");
-  if (state.game?.mode === "position") refreshBoard(); else goTo(state.cur, false);
+  if (state.practice) practiceBoard();
+  else if (state.game?.mode === "position") refreshBoard();
+  else goTo(state.cur, false);
 }
 $("previewExit").addEventListener("click", exitPreview);
 
@@ -1090,6 +1524,7 @@ function gameContext() {
     + `FEN after the move: ${m.fen_after}\nEngine candidates before it:\n`
     + (m.candidates || []).map((c) => `${c.san} (${c.score}): ${c.line}`).join("\n");
   if (m.refutation) ctx += `\nRefutation of the played move: ${m.refutation}`;
+  if (m.flow) ctx += `\nCommentary on this move: ${m.flow}`;
   if (m.expl) ctx += `\nCoach note for this move: ${m.expl}`;
   if (g.review) ctx += `\nWhole-game review:\n${g.review}`;
   return ctx;
@@ -1136,9 +1571,9 @@ bindChat("reviewChatLog", "reviewChatInput", "reviewChatSend", state.reviewChat,
 /* ================================================================ settings */
 
 const DETAIL_NOTES = {
-  key: "Notes only for your mistakes and the game's critical moments. Fastest — good for slower computers.",
-  standard: "A short note on each of your moves, full explanations of mistakes, and warnings about your opponent's threats. Recommended.",
-  full: "Detailed notes on every move by both players. Slowest — best with a fast GPU or a cloud model.",
+  key: "Notes only for your mistakes and the game's critical moments, no running commentary. Fastest — good for slower computers.",
+  standard: "A commentator's line on every move by both players — the plans and intentions behind them — plus a full explanation of each of your mistakes and the critical moments. Written 8 moves at a time, so it stays fast. Recommended.",
+  full: "A detailed note on every move by both players. Slowest — best with a fast GPU or a cloud model.",
 };
 let draft = null;
 
@@ -1151,6 +1586,7 @@ async function openSettings(tab = "coach") {
   draft.models[s.provider] = s.model;
   $("setLlmEnabled").checked = s.llm_enabled;
   $("setFactcheck").checked = s.factcheck;
+  $("setPrefetch").checked = s.prefetch !== false;
   $("setConcurrency").value = s.concurrency || "";
   $("setDepth").value = s.depth;
   $("setThreads").value = s.threads; $("setThreads").max = s.max_threads;
@@ -1283,7 +1719,7 @@ $("saveSettings").addEventListener("click", async () => {
   const p = spec();
   const body = {
     provider: draft.provider, model: $("setModel").value.trim(), llm_enabled: $("setLlmEnabled").checked,
-    factcheck: $("setFactcheck").checked, detail: draft.detail,
+    factcheck: $("setFactcheck").checked, prefetch: $("setPrefetch").checked, detail: draft.detail,
     depth: $("setDepth").value, threads: $("setThreads").value, hash_mb: $("setHash").value,
     stockfish_path: $("setStockfish").value.trim(), concurrency: $("setConcurrency").value || null,
   };
@@ -1307,6 +1743,8 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "Home") { e.preventDefault(); goTo(0); }
   else if (e.key === "End") { e.preventDefault(); goTo((state.game?.moves.length || 0) - 1); }
   else if (e.key.toLowerCase() === "f") flip();
+  else if (e.key.toLowerCase() === "n") jumpKeyMoment(1);
+  else if (e.key.toLowerCase() === "p") jumpKeyMoment(-1);
 });
 
 window.addEventListener("resize", debounce(() => {
@@ -1323,6 +1761,7 @@ window.addEventListener("resize", debounce(() => {
     await loadDashboard();
     if (!d.profiles.length) openProfile(null);
   } catch (e) { toast(e.message, true); }
-  // Resume the progress display of a batch analysis started before a page reload.
-  api("/api/profile/import_status").then((j) => { if (j.status === "running") pollImport(); }).catch(() => {});
+  // Live queue progress (also picks up games restored from the last session).
+  await pollQueue();
+  if (queue.data?.restored && queue.data.paused) openQueue();
 })();

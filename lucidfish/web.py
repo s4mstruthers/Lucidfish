@@ -621,6 +621,11 @@ def coach_chat(req: ChatReq):
 def _free_port(host: str, start: int) -> int:
     for port in range(start, start + 20):
         with socket.socket(socket.AF_INET6 if ":" in host else socket.AF_INET, socket.SOCK_STREAM) as s:
+            if os.name != "nt":
+                # Same as the server itself: connections lingering from a previous run (TIME_WAIT)
+                # must not push a quick restart onto another port. (On Windows this option would
+                # instead allow sharing a port that is really in use, so it is left off there.)
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 s.bind((host, port))
                 return port

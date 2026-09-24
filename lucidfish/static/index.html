@@ -23,6 +23,10 @@
     <button data-page="game" class="hidden" id="navGame">Current game</button>
   </nav>
   <div class="spacer"></div>
+  <button class="queue-pill hidden" id="queuePill" title="Analysis queue — click to see progress and manage it">
+    <span class="dot busy" id="queueDot"></span><span id="queueText">Queue</span>
+    <span class="mini-bar" aria-hidden="true"><span id="queueMiniBar"></span></span>
+  </button>
   <button class="status-pill" id="statusPill" title="Engine and AI coach status — click for settings">
     <span class="dot busy" id="statusDot"></span><span id="statusText">Checking setup…</span>
   </button>
@@ -52,6 +56,16 @@
         <button class="secondary sm" id="refreshSummary">⟳ Update review</button>
       </div>
       <div class="md" id="summary"></div>
+    </div>
+    <div class="grid-2 hidden" id="insightsRow">
+      <div class="card">
+        <div class="card-head"><h2>Accuracy by game phase</h2></div>
+        <div id="phaseBars"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Recurring mistakes</h2></div>
+        <div class="list" id="patterns"></div>
+      </div>
     </div>
     <div class="grid-2">
       <div class="card">
@@ -100,6 +114,16 @@
             <option value="5">Last 5</option><option value="10">Last 10</option><option value="20">Last 20</option>
           </select>
           <button class="secondary" id="analyzeBatch">Analyze batch</button>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <label class="field inline">Coaching for these games
+            <select id="batchDetail" title="How much the coach writes for the games you add to the queue">
+              <option value="">As in Settings</option>
+              <option value="key">Key moments (fastest)</option>
+              <option value="standard">Commentary</option>
+              <option value="full">Every move (slowest)</option>
+            </select>
+          </label>
         </div>
         <div class="row small" id="importStatus" style="margin-top:10px"></div>
       </div>
@@ -162,16 +186,17 @@
   <section id="page-game" class="hidden" data-page-section>
     <div class="card progress-card hidden" id="progressCard">
       <div class="row">
-        <span class="dot busy"></span><b id="progressLabel">Starting…</b>
+        <span class="dot busy" id="progressDot"></span><b id="progressLabel">Starting…</b>
         <div class="spacer"></div>
         <span class="small" id="progressEta"></span>
+        <button class="secondary sm hidden" id="jumpBtn">⤒ Analyse this next</button>
         <button class="danger sm" id="stopBtn">■ Stop</button>
       </div>
-      <div class="bars">
+      <div class="bars" id="progressBars">
         <div class="bar-row"><span class="small">Engine</span><div class="bar"><div id="barEngine"></div></div><span class="small" id="barEngineTxt"></span></div>
         <div class="bar-row"><span class="small">Coach</span><div class="bar coach"><div id="barCoach"></div></div><span class="small" id="barCoachTxt"></span></div>
       </div>
-      <p class="small" style="margin:10px 0 0">Moves appear below as soon as they're ready — you can start reviewing now.</p>
+      <p class="small" id="progressHint" style="margin:10px 0 0"></p>
     </div>
 
     <div class="analysis-grid">
@@ -194,12 +219,14 @@
           </div>
           <div class="board-toolbar">
             <button class="secondary icon" id="btnFirst" title="First move (Home)" aria-label="First move">⏮</button>
+            <button class="secondary icon key-nav" id="btnPrevKey" title="Previous key moment (P)" aria-label="Previous key moment">◀ ⚑</button>
             <button class="secondary icon" id="btnPrev" title="Previous (←)" aria-label="Previous move">◀</button>
             <button class="secondary icon" id="btnNext" title="Next (→)" aria-label="Next move">▶</button>
+            <button class="secondary icon key-nav" id="btnNextKey" title="Next key moment (N)" aria-label="Next key moment">⚑ ▶</button>
             <button class="secondary icon" id="btnLast" title="Last move (End)" aria-label="Last move">⏭</button>
             <button class="secondary icon" id="btnFlip" title="Flip board (F)" aria-label="Flip board">⇅</button>
           </div>
-          <div class="hint">← → step through moves · Home/End jump · F flips · Esc leaves a preview</div>
+          <div class="hint">← → step · N / P jump between key moments · Home/End · F flips · Esc leaves a preview</div>
           <div class="graph" id="graphWrap">
             <svg id="graph" viewBox="0 0 400 100" preserveAspectRatio="none" role="img" aria-label="Evaluation graph"></svg>
             <div class="graph-tip" id="graphTip"></div>
@@ -229,12 +256,19 @@
             <button class="secondary sm" id="exportPgn" title="Annotated PGN for Lichess studies, ChessBase, …">⬇ Annotated PGN</button>
             <button class="secondary sm" id="exportMd">⬇ Report (.md)</button>
             <button class="secondary sm" id="copyFen" title="Copy the FEN of the current position">Copy FEN</button>
+            <button class="sm hidden" id="practiceAll" title="Replay the positions where you went wrong and look for a better move">🎯 Practise my mistakes</button>
           </div>
           <div id="gameWarnings"></div>
         </div>
         <div class="card">
-          <div class="card-head"><h2>Moves</h2></div>
+          <div class="card-head"><h2>Moves</h2><div class="spacer"></div>
+            <div class="segmented" id="moveViewSeg" role="tablist" aria-label="Move list view">
+              <button data-view="moves" class="active" title="Move grid with verdicts">Moves</button>
+              <button data-view="story" title="The commentary on every move, read like a story">Story</button>
+            </div>
+          </div>
           <div class="moves" id="moveList"></div>
+          <div class="story hidden" id="storyList"></div>
         </div>
         <div class="card">
           <div class="explain" id="explain"></div>
@@ -308,7 +342,7 @@
           <legend>How much should the coach write?</legend>
           <div class="segmented" id="detailSeg">
             <button data-detail="key">Key moments</button>
-            <button data-detail="standard">Standard</button>
+            <button data-detail="standard">Commentary</button>
             <button data-detail="full">Every move</button>
           </div>
           <p class="small" id="detailNote"></p>
@@ -328,6 +362,7 @@
             <label class="field">Hash memory (MB) <input type="number" id="setHash" min="16" max="4096"></label>
           </div>
           <p class="small">If you run the AI coach locally, leave a couple of cores free for it.</p>
+          <label class="check" style="margin-top:6px"><input type="checkbox" id="setPrefetch"> Give the next queued game an engine head start while the coach writes (recommended)</label>
         </fieldset>
         <fieldset>
           <legend>Stockfish</legend>
@@ -390,6 +425,29 @@
       <span class="small" id="pfError" style="color:var(--c-blunder)"></span>
       <button class="secondary" data-close>Cancel</button>
       <button id="pfSave">Save profile</button>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ QUEUE -->
+<div class="modal-back hidden" id="queueModal" role="dialog" aria-modal="true" aria-labelledby="queueTitle">
+  <div class="modal" style="width:min(780px,100%)">
+    <div class="modal-head"><h2 id="queueTitle">Analysis queue</h2><div class="spacer"></div>
+      <button class="ghost icon" data-close aria-label="Close">✕</button></div>
+    <div class="modal-body" id="queueBody">
+      <div id="queueRestored"></div>
+      <div id="queueOverall"></div>
+      <div class="row" style="margin:14px 0 6px">
+        <button class="secondary sm" id="queuePause">⏸ Pause</button>
+        <button class="danger sm" id="queueStopAll">■ Stop all</button>
+        <div class="spacer"></div>
+        <button class="ghost sm" id="queueClear">Clear finished</button>
+      </div>
+      <div id="queueRunning"></div>
+      <div id="queueUpcoming"></div>
+      <div id="queueDone"></div>
+      <p class="small" style="margin-top:16px">Games are analysed one at a time so Stockfish gets every core. While the coach writes up one game,
+        the engine already works on the next, so no time is wasted. Time estimates learn from your previous analyses.</p>
     </div>
   </div>
 </div>
