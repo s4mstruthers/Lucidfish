@@ -56,6 +56,10 @@ def build_parser() -> argparse.ArgumentParser:
     coach.add_argument("--provider", choices=list(PROVIDERS), help="AI provider (default: ollama)")
     coach.add_argument("--model", help="model name, e.g. llama3.1:8b or gpt-4.1-mini")
     coach.add_argument("--no-llm", action="store_true", help="engine analysis only (fast, no AI coach)")
+    coach.add_argument("--expert-provider", choices=[*PROVIDERS, "none"],
+                       help="second, stronger model for notes on mistakes, the review and escalations "
+                            "(e.g. anthropic); 'none' = main model does everything")
+    coach.add_argument("--expert-model", help="model for --expert-provider (default: that provider's default)")
     eng = p.add_argument_group("engine")
     eng.add_argument("--preset", choices=list(DEPTH_PRESETS), help="engine strength preset")
     eng.add_argument("--depth", type=int, help="search depth per position (default 18)")
@@ -83,7 +87,8 @@ def main(argv: list[str] | None = None) -> int:
     from .config import DEPTH_PRESETS
     from .settings import load_config
 
-    cfg = load_config(provider=args.provider, model=args.model)
+    cfg = load_config(provider=args.provider, model=args.model,
+                      expert_provider=args.expert_provider, expert_model=args.expert_model)
     if args.preset:
         cfg.engine.depth = DEPTH_PRESETS[args.preset]
     if args.depth:
@@ -240,6 +245,13 @@ def _check(cfg, console: Console) -> int:
         except LLMError as e:
             ok = False
             console.print(f"[red]✘ AI coach:[/red] {e}")
+        if cfg.expert:
+            try:
+                result = make_provider(cfg.expert).check()
+                console.print(f"[green]✔[/green] Second model: {result['message']}")
+            except LLMError as e:
+                ok = False
+                console.print(f"[red]✘ Second model:[/red] {e} (the main model will do its work instead)")
     else:
         console.print("[yellow]•[/yellow] AI coach: disabled (engine-only mode)")
     console.print(f"[green]✔[/green] Data folder: {data_dir()}", soft_wrap=True)

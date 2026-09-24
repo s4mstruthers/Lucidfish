@@ -176,6 +176,7 @@ class LLMConfig:
     concurrency: int | None = None    # parallel requests; None = provider default (1 local, 4 cloud)
     enabled: bool = True              # False = engine-only analysis (no LLM at all)
     factcheck: bool = True            # re-ask once when a note names moves/pieces not on the board
+    escalate: bool = True             # let the expert model (if any) rewrite text that failed the fact-check
 
 
 @dataclass
@@ -201,6 +202,9 @@ class AnalysisConfig:
 class Config:
     engine: EngineConfig = field(default_factory=EngineConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
+    # Optional second, stronger model for the hard parts: notes on mistakes and critical
+    # moments, the post-game review, the coach profile and chat. None = main model does all.
+    expert: LLMConfig | None = None
     analysis: AnalysisConfig = field(default_factory=AnalysisConfig)
     # Optional default account for `lucidfish` with no arguments.
     chesscom_user: str = field(default_factory=lambda: os.environ.get("LUCIDFISH_CHESSCOM_USER", ""))

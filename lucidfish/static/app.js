@@ -253,7 +253,8 @@ function renderHealth() {
   const dot = $("statusDot"), text = $("statusText");
   if (!h) { dot.className = "dot bad"; text.textContent = "Server unreachable"; renderBanners(); return; }
   const coach = h.coach || {}, engine = h.engine || {};
-  const coachText = coach.enabled ? `${coach.model}${coach.local ? " (local)" : ""}` : "engine only";
+  const coachText = coach.enabled
+    ? `${coach.model}${coach.local ? " (local)" : ""}${coach.expert ? ` + ${coach.expert}` : ""}` : "engine only";
   text.textContent = engine.ok ? `${engine.name} · ${coachText}` : "Stockfish not found";
   dot.className = "dot " + (h.busy ? "busy" : !engine.ok ? "bad" : coach.ok ? "ok" : "warn");
   $("aboutVersion").textContent = h.version || "";
@@ -1846,6 +1847,13 @@ async function openSettings(tab = "coach") {
   draft.models[s.provider] = s.model;
   $("setLlmEnabled").checked = s.llm_enabled;
   $("setFactcheck").checked = s.factcheck;
+  $("setEscalate").checked = s.escalate !== false;
+  $("setExpertProvider").innerHTML = `<option value="">Off — the main model does everything</option>`
+    + s.providers.map((p) => `<option value="${p.id}">${esc(p.label)} · ${p.local ? "on this computer" : "cloud"}</option>`).join("");
+  $("setExpertProvider").value = s.expert_provider || "";
+  $("setExpertModel").value = s.expert_model || "";
+  $("testExpertResult").textContent = "";
+  renderExpert();
   $("setPrefetch").checked = s.prefetch !== false;
   $("setConcurrency").value = s.concurrency || "";
   $("setDepth").value = s.depth;
@@ -1875,7 +1883,50 @@ function spec(id = draft.provider) { return state.settings.providers.find((p) =>
 
 function renderCoachEnabled() {
   $("coachFields").style.opacity = $("setLlmEnabled").checked ? "1" : ".45";
+  $("expertFields").style.opacity = $("setLlmEnabled").checked ? "1" : ".45";
 }
+
+/** The optional second model: model list, its API key, and what using it means. */
+function renderExpert() {
+  const id = $("setExpertProvider").value, p = id ? spec(id) : null;
+  $("expertModelField").classList.toggle("hidden", !p);
+  $("expertMore").classList.toggle("hidden", !p);
+  $("expertKeyBlock").classList.toggle("hidden", !p?.key_env);
+  if (!p) return;
+  $("setExpertModel").placeholder = p.default_model || "model name";
+  $("expertModelList").innerHTML = p.models.map((m) => `<option value="${esc(m)}">`).join("");
+  $("setExpertKey").value = "";
+  $("expertKeyStatus").textContent = p.key.present ? `✓ Key saved (${p.key.hint})`
+    : p.needs_key ? `No ${p.label} key saved yet.` : "Optional — only needed if your server requires one.";
+  const main = spec(draft.provider);
+  $("expertNote").innerHTML = p.local
+    ? (main.local ? "Both models run on this computer, one after the other, so it needs memory for both. On a 16 GB Mac, "
+      + "pick a second model only slightly bigger than the main one, or use a cloud model instead." : "The second model runs on this computer.")
+    : `Only the evidence for your key moments and the review (moves, engine lines and position facts) is sent to ${esc(p.label)}. `
+      + "The running commentary stays with your main model.";
+}
+$("setExpertProvider").addEventListener("change", () => { $("setExpertModel").value = ""; $("testExpertResult").textContent = ""; renderExpert(); });
+$("saveExpertKey").addEventListener("click", async () => {
+  const id = $("setExpertProvider").value, key = $("setExpertKey").value.trim();
+  if (!id || !key) { toast("Paste a key first.", true); return; }
+  try {
+    const d = await api("/api/settings/key", { method: "POST", body: { provider: id, key } });
+    spec(id).key = d.key; renderExpert(); toast(d.message);
+    if (id === draft.provider) renderKeyStatus(d.key);
+  } catch (e) { toast(e.message, true); }
+});
+$("testExpert").addEventListener("click", async () => {
+  const id = $("setExpertProvider").value, out = $("testExpertResult"), btn = $("testExpert");
+  if (!id) return;
+  out.className = "small"; out.textContent = "Testing…";
+  btn.disabled = true;
+  try {
+    const d = await api("/api/settings/test", { method: "POST", body: {
+      provider: id, model: $("setExpertModel").value.trim() || null, key: $("setExpertKey").value.trim() || null } });
+    out.className = "result-ok"; out.textContent = `✓ ${d.message}`;
+  } catch (e) { out.className = "result-bad"; out.textContent = `✗ ${e.message}`; }
+  btn.disabled = false;
+});
 $("setLlmEnabled").addEventListener("change", renderCoachEnabled);
 
 function renderProviders() {
@@ -1889,6 +1940,7 @@ function renderProviders() {
     draft.provider = b.dataset.provider;
     $("testResult").textContent = "";
     renderProviders();
+    renderExpert();
   }));
   const p = spec();
   $("providerNote").innerHTML = esc(p.note || (p.local ? "Runs on this computer." : "Runs in the provider's cloud; moves and engine facts are sent to them."))
@@ -1980,6 +2032,8 @@ $("saveSettings").addEventListener("click", async () => {
   const body = {
     provider: draft.provider, model: $("setModel").value.trim(), llm_enabled: $("setLlmEnabled").checked,
     factcheck: $("setFactcheck").checked, prefetch: $("setPrefetch").checked, detail: draft.detail,
+    expert_provider: $("setExpertProvider").value, expert_model: $("setExpertModel").value.trim(),
+    escalate: $("setEscalate").checked,
     depth: $("setDepth").value, threads: $("setThreads").value, hash_mb: $("setHash").value,
     stockfish_path: $("setStockfish").value.trim(), concurrency: $("setConcurrency").value || null,
   };

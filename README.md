@@ -261,18 +261,54 @@ make sure it works before analysing.
 You can type any model name the provider offers; the list only shows suggestions. Model
 catalogues change often, so if a default stops working, choose a current model.
 
-**Cost:** cloud providers charge per use. A 40-move game at the *Standard* detail level makes
-roughly 40–80 short requests. Use *Key moments* or a smaller model to spend less.
-Check your provider's pricing page.
+**Cost:** cloud providers charge per use. A 40-move game at the *Commentary* detail level makes
+roughly 15–20 requests. Use *Key moments* or a smaller model to spend less, or use a cloud
+model only as the second model (below). Check your provider's pricing page.
 
 **Coaching detail** (Settings → Analysis) controls how much the coach writes, and therefore
 how long an analysis takes:
 
-| Level | What gets a note | Speed |
+| Level | What gets written | Speed |
 |---|---|---|
-| **Key moments** | Your mistakes and the game's critical moments | Fastest |
-| **Standard** (default) | A short note on each of your moves, full notes on mistakes, and your opponent's threats | Balanced |
-| **Every move** | Detailed notes on every move by both players | Slowest |
+| **Key moments** | Notes on your mistakes and the game's critical moments | Fastest |
+| **Commentary** (default) | A commentator's line on every move by both players, plus full notes on your mistakes and critical moments | Balanced |
+| **Every move** | A detailed note on every move by both players | Slowest |
+
+### Which local model? (Ollama)
+
+Pick by how much memory your computer has. Good starting points:
+
+| Memory | Model | Why |
+|---|---|---|
+| 8 GB | `llama3.2:3b` | Small enough to leave room for everything else |
+| 16 GB | `qwen2.5:7b` or `qwen3:8b` | Follow Lucidfish's strict format well; about 5 GB |
+| 24 GB or more | `qwen2.5:14b`, `qwen3:14b` or `gemma3:12b` | Noticeably better explanations, about half the speed |
+
+*Thinking* models such as `qwen3` normally write hidden reasoning before answering, which is
+slow and eats into the answer's length limit. Lucidfish switches that off for Ollama, so they
+answer directly. (If a model can't switch it off, Lucidfish notices and asks it normally.)
+
+### Two models: a fast one for commentary, a smarter one for the hard parts
+
+Under **Settings → AI coach → Second model for the hard parts** you can add a second model:
+
+- The **main model** writes the move-by-move commentary. It handles most of the requests, so
+  a fast local model is ideal.
+- The **second model** writes the detailed notes on your mistakes and critical moments, the
+  post-game review, your coach profile, chat answers and board-editor assessments. These are
+  the jobs where a smarter model makes the biggest difference, and there are only a handful
+  per game.
+- **Escalation:** if a stretch of commentary fails the fact-check, the second model rewrites
+  it, instead of the main model trying again.
+- If the second model stops working (e.g. no internet or an expired key), the main model
+  takes over its jobs and the game page shows a warning.
+
+A good setup for a laptop is a local main model (e.g. `qwen2.5:7b`) with a small cloud model
+(e.g. `claude-haiku-4-5`, `gpt-4.1-mini` or `gemini-2.5-flash`) as the second model. The
+cloud model only sees the evidence for your key moments and the review, so the cost stays
+small. It also works in parallel with your computer, so games finish sooner. From the
+command line: `--expert-provider anthropic --expert-model claude-haiku-4-5`, or set
+`LUCIDFISH_EXPERT_PROVIDER` / `LUCIDFISH_EXPERT_MODEL`.
 
 ## Using API keys safely
 
@@ -379,6 +415,7 @@ lucidfish web                                      # start the web app
 | `--elo N` | Your rating, to pitch explanations at your level |
 | `--detail key\|standard\|full`, `--explain-all` | How much the coach writes: key moments, commentary on every move, or a full note on every move (`--explain-all` = `full`) |
 | `--provider`, `--model` | AI provider and model (defaults to what you saved in the web app) |
+| `--expert-provider`, `--expert-model` | Second model for notes on mistakes, the review and fact-check rewrites (`none` = off) |
 | `--no-llm` | Engine analysis only |
 | `--preset fast\|balanced\|deep`, `--depth N`, `--fast` | Engine strength (depth 14 / 18 / 22, or 0.3 s per position) |
 | `--threads N`, `--no-cache` | CPU threads for Stockfish; ignore stored engine results |
@@ -398,6 +435,7 @@ and `.env` → settings saved in the web app → command-line flags.
 | `LUCIDFISH_PROVIDER` | `ollama` | `ollama`, `openai`, `anthropic`, `gemini`, `openrouter`, `groq`, `custom` |
 | `LUCIDFISH_MODEL` | provider default | Model name |
 | `LUCIDFISH_BASE_URL` / `OLLAMA_HOST` | provider default | Server URL for local providers |
+| `LUCIDFISH_EXPERT_PROVIDER`, `LUCIDFISH_EXPERT_MODEL` | — | Optional second model for the hard parts (see [Choosing an AI coach](#choosing-an-ai-coach)) |
 | `LUCIDFISH_DETAIL` | `standard` | `key` (key moments), `standard` (commentary) or `full` (every move) |
 | `LUCIDFISH_NUM_CTX` | `8192` | Context window for local models (prevents silent prompt truncation) |
 | `LUCIDFISH_DATA_DIR` | per-user folder (see below) | Where the database is stored |

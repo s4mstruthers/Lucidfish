@@ -450,10 +450,12 @@ def _engine_health() -> dict:
 
 
 def _coach_health() -> dict:
-    cfg = settings.load_config().llm
+    full = settings.load_config()
+    cfg = full.llm
     spec = PROVIDERS.get(cfg.provider)
     base = {"enabled": cfg.enabled, "provider": cfg.provider, "label": spec.label if spec else cfg.provider,
-            "model": cfg.model or (spec.default_model if spec else ""), "local": bool(spec and spec.local)}
+            "model": cfg.model or (spec.default_model if spec else ""), "local": bool(spec and spec.local),
+            "expert": full.expert.model if full.expert else ""}
     if not cfg.enabled:
         return {**base, "ok": True, "message": "AI coach off — engine analysis only."}
     try:
@@ -656,7 +658,7 @@ def coach_chat(req: ChatReq):
     while history and history[0]["role"] != "user":   # conversations must start with the user
         history.pop(0)
     try:
-        return {"reply": coach.llm.chat(system, history, max_tokens=700)}
+        return {"reply": coach.hard(lambda llm: llm.chat(system, history, max_tokens=700))}
     except LLMError as e:
         return _error(str(e), 502)
 

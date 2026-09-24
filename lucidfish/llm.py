@@ -47,7 +47,8 @@ class ProviderSpec:
 PROVIDERS: dict[str, ProviderSpec] = {p.id: p for p in (
     ProviderSpec("ollama", "Ollama (local)", "ollama", "http://localhost:11434", "llama3.1:8b",
                  None, False, True, 1,
-                 ("llama3.1:8b", "llama3.2:3b", "qwen2.5:7b", "qwen2.5:14b", "gemma3:12b"),
+                 ("qwen2.5:7b", "qwen3:8b", "llama3.1:8b", "llama3.2:3b", "qwen2.5:14b", "qwen3:14b",
+                  "gemma3:12b"),
                  "https://ollama.com/download",
                  "Runs on your computer: private and free, but CPU/GPU intensive."),
     ProviderSpec("openai", "OpenAI", "openai", "https://api.openai.com/v1", "gpt-4.1-mini",
@@ -233,17 +234,36 @@ class OllamaProvider(_HTTPProvider):
                               fatal=True)
         return super()._http_error(r)
 
+    # Models (per server) that rejected the "think" switch; they are asked without it.
+    _no_think_switch: set[tuple[str, str]] = set()
+    _switch_lock = threading.Lock()
+
     def chat(self, system: str, messages: list[dict], *, max_tokens: int | None = None) -> str:
         options = {"temperature": self.cfg.temperature, "num_ctx": self.cfg.num_ctx}
         if max_tokens:
             options["num_predict"] = max_tokens
-        data = self._post(f"{self.base_url}/api/chat", {
+        payload = {
             "model": self.model,
             "messages": [{"role": "system", "content": system}, *messages],
             "stream": False,
             "keep_alive": "30m",   # stay loaded between moves instead of reloading from disk
             "options": options,
-        })
+        }
+        key = (self.base_url, self.model)
+        if key not in self._no_think_switch:
+            # Thinking models (qwen3, deepseek-r1, ...) otherwise write hundreds of hidden
+            # reasoning tokens first: slower, and counted against num_predict, which can cut
+            # the actual answer off. The notes are narration of verified facts; no thinking needed.
+            payload["think"] = False
+        try:
+            data = self._post(f"{self.base_url}/api/chat", payload)
+        except LLMError as e:
+            if "think" not in payload or "think" not in str(e).lower():
+                raise
+            with self._switch_lock:
+                self._no_think_switch.add(key)   # e.g. a model that can only think: ask without the switch
+            payload.pop("think")
+            data = self._post(f"{self.base_url}/api/chat", payload)
         return clean_output((data.get("message") or {}).get("content"))
 
     def list_models(self) -> list[str]:

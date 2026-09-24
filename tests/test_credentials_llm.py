@@ -82,3 +82,26 @@ def test_ollama_missing_model_message():
         with pytest.raises(LLMError) as err:
             provider.generate("sys", "hi")
     assert err.value.fatal and "ollama pull nope:1b" in str(err.value)
+
+
+def test_ollama_turns_thinking_off_and_falls_back_when_unsupported():
+    from lucidfish.llm import OllamaProvider
+    OllamaProvider._no_think_switch.clear()
+    provider = make_provider(LLMConfig(provider="ollama", model="qwen3:8b"))
+    ok = _response(200, {"message": {"content": "EXPLANATION: fine"}})
+    with mock.patch("requests.Session.post", return_value=ok) as post:
+        assert provider.generate("sys", "hi") == "EXPLANATION: fine"
+    assert post.call_args.kwargs["json"]["think"] is False
+    # A model that rejects the switch is asked again without it, and remembered.
+    stubborn = make_provider(LLMConfig(provider="ollama", model="thinker:20b"))
+    replies = [_response(400, {"error": '"thinker:20b" does not support think=false'}), ok, ok]
+    with mock.patch("requests.Session.post", side_effect=replies) as post:
+        assert stubborn.generate("sys", "hi") == "EXPLANATION: fine"
+        assert "think" not in post.call_args.kwargs["json"]
+        stubborn.generate("sys", "again")
+    assert post.call_count == 3                     # no second failed attempt for the same model
+    # Other errors are not retried.
+    with mock.patch("requests.Session.post", return_value=_response(500, {"error": "boom"})) as post:
+        with pytest.raises(LLMError):
+            provider.generate("sys", "hi")
+    assert post.call_count == 1

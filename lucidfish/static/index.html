@@ -367,7 +367,42 @@
             <button class="secondary" id="testLlm">Test connection</button>
             <span id="testResult"></span>
           </div>
-          <details style="margin-top:14px">
+        </fieldset>
+        <fieldset id="expertFields">
+          <legend>Second model for the hard parts <span class="small">(optional)</span></legend>
+          <p class="small" style="margin:0 0 10px">Your main model writes the move-by-move commentary. A second,
+            stronger model can write the detailed notes on your mistakes and critical moments, the post-game review,
+            your coach profile and chat answers — where a smarter model matters most. It only gets a few requests per
+            game, so a cloud model here costs very little.</p>
+          <div class="form-grid">
+            <label class="field">Second model runs on
+              <select id="setExpertProvider"></select>
+            </label>
+            <label class="field" id="expertModelField">Model
+              <input id="setExpertModel" list="expertModelList" spellcheck="false" autocomplete="off">
+              <datalist id="expertModelList"></datalist>
+            </label>
+          </div>
+          <div id="expertKeyBlock" class="hidden" style="margin-top:12px">
+            <label class="field">API key for the second model
+              <div class="row">
+                <input type="password" id="setExpertKey" autocomplete="off" spellcheck="false" style="flex:1" placeholder="Paste your API key">
+                <button class="secondary" id="saveExpertKey">Save key</button>
+              </div>
+            </label>
+            <div class="small" id="expertKeyStatus" style="margin-top:6px"></div>
+          </div>
+          <div id="expertMore" class="stack" style="margin-top:12px">
+            <label class="check"><input type="checkbox" id="setEscalate"> If commentary fails the fact-check, let the second model rewrite it</label>
+            <div class="row">
+              <button class="secondary" id="testExpert">Test second model</button>
+              <span id="testExpertResult"></span>
+            </div>
+            <div class="callout" id="expertNote"></div>
+          </div>
+        </fieldset>
+        <fieldset>
+          <details>
             <summary class="small">Advanced</summary>
             <div class="stack" style="margin-top:10px">
               <label class="check"><input type="checkbox" id="setFactcheck"> Fact-check notes against the board (recommended)</label>

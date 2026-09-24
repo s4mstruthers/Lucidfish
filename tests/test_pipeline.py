@@ -1,5 +1,6 @@
 import re
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -38,32 +39,44 @@ def test_plan_note_matrix():
 
 
 class FakeLLM:
-    """Stands in for a provider; records calls and can simulate failures."""
+    """Stands in for a provider; records every request and can simulate failures.
 
-    def __init__(self, fail: Exception | None = None):
+    `slip` adds an impossible move to every commentary line (the fact-checker must catch it).
+    """
+
+    def __init__(self, fail: Exception | None = None, *, name="Fake", local=True, slip=False):
         self.calls = 0
         self.windows = 0
+        self.prompts: list[str] = []          # first user message of each request
+        self.corrections = 0
         self.fail = fail
+        self.name = name
+        self.slip = slip
+        self.spec = SimpleNamespace(local=local)
         self.lock = threading.Lock()
 
     concurrency = 2
 
     def describe(self):
-        return "Fake · test"
+        return f"{self.name} · test"
 
     def chat(self, system, messages, *, max_tokens=None):
+        first, last = messages[0]["content"], messages[-1]["content"]
+        fixing = len(messages) > 1 and "Your answer contains claims" in last
         with self.lock:
             self.calls += 1
+            self.prompts.append(first)
+            self.corrections += fixing
         if self.fail:
             raise self.fail
-        prompt = messages[-1]["content"]
-        if "Write the post-game review" in prompt:
+        if "Write the post-game review" in first:
             return "## Summary\nGood game.\n## Key takeaways\n- Develop."
-        if prompt.startswith("COMMENTARY WINDOW"):
+        if first.startswith("COMMENTARY WINDOW"):
             with self.lock:
-                self.windows += 1
-            labels = re.findall(r"^- (\S+ \S+) \((White|Black)\)", prompt, re.M)
-            return "\n".join(f"{label}: {side} continues the plan." for label, side in labels)
+                self.windows += not fixing
+            labels = re.findall(r"^- (\S+ \S+) \((White|Black)\)", first, re.M)
+            bad = " Black then plays Kxa1." if self.slip and not fixing else ""
+            return "\n".join(f"{label}: {side} continues the plan.{bad}" for label, side in labels)
         return "EXPLANATION:\nA grounded note."
 
     def generate(self, system, prompt, *, max_tokens=None):
@@ -160,3 +173,61 @@ def test_check_move_for_practice_mode():
     assert not bad["solved"] and bad["best"] == "Rd8#" and bad["best_steps"][0]["san"] == "Rd8#"
     with pytest.raises(ValueError):
         pipeline.check_move(fen, "a1a8", fast_config())            # no piece there: illegal
+
+
+# ------------------------------------------------------------------ two models
+
+
+def _two_models(monkeypatch, main, expert, escalate=True):
+    from lucidfish.config import LLMConfig
+    monkeypatch.setattr(pipeline, "make_provider", lambda c: expert if c.provider == "anthropic" else main)
+    cfg = fast_config(enabled=True, escalate=escalate)
+    cfg.analysis.detail = "standard"
+    cfg.expert = LLMConfig(provider="anthropic", model="claude-haiku-4-5")
+    return cfg
+
+
+@needs_engine
+def test_expert_model_writes_the_hard_parts(monkeypatch):
+    main, expert = FakeLLM(name="Local"), FakeLLM(name="Cloud", local=False)
+    report = pipeline.analyze_game(SAMPLE_PGN, _two_models(monkeypatch, main, expert), side_filter="white")
+    assert all(p.startswith("COMMENTARY WINDOW") for p in main.prompts)      # main: running commentary only
+    assert main.windows == -(-len(report.moves) // pipeline.WINDOW)
+    assert any("Write the post-game review" in p for p in expert.prompts)
+    hard = [m for m in report.moves if m.side == "White" and (m.classification in pipeline.ERRORS or m.critical)]
+    assert hard and all(m.explanation for m in hard)
+    notes = [p for p in expert.prompts if not p.startswith("COMMENTARY WINDOW") and "post-game review" not in p]
+    assert len(notes) >= len(hard)
+    assert report.coach == "Local · test + Cloud · test for key moments"
+
+
+@needs_engine
+def test_commentary_that_fails_the_fact_check_is_rewritten_by_the_expert(monkeypatch):
+    main, expert = FakeLLM(name="Local", slip=True), FakeLLM(name="Cloud", local=False)
+    report = pipeline.analyze_game(SAMPLE_PGN, _two_models(monkeypatch, main, expert), side_filter="white")
+    assert expert.corrections == main.windows and main.corrections == 0
+    assert all(m.commentary and "Kxa1" not in m.commentary for m in report.moves)
+    # Without escalation the main model corrects itself.
+    main, expert = FakeLLM(name="Local", slip=True), FakeLLM(name="Cloud", local=False)
+    pipeline.analyze_game(SAMPLE_PGN, _two_models(monkeypatch, main, expert, escalate=False), side_filter="white")
+    assert main.corrections == main.windows and expert.corrections == 0
+
+
+@needs_engine
+def test_main_model_takes_over_when_the_expert_fails(monkeypatch):
+    main = FakeLLM(name="Local")
+    expert = FakeLLM(LLMError("Anthropic rejected the API key", fatal=True), name="Cloud", local=False)
+    report = pipeline.analyze_game(SAMPLE_PGN, _two_models(monkeypatch, main, expert), side_filter="white")
+    assert expert.calls == 1                                   # gave up on it after the fatal error
+    assert report.review.startswith("## Summary")              # written by the main model instead
+    assert any("second model stopped working" in w for w in report.warnings)
+    assert all(m.commentary for m in report.moves)
+
+
+def test_a_garbled_correction_never_replaces_the_original():
+    class Garbled(FakeLLM):
+        def chat(self, system, messages, *, max_tokens=None):
+            return "Sorry, I can't help with that."
+    text = "11. axb4: fine.\n11... Qc7: Black then plays Kxa1."
+    check = lambda t: ["bad"] * (2 if "Kxa1" in t else 0) + ([] if "11. axb4" in t else ["missing"] * 2)  # noqa: E731
+    assert pipeline._verified_text(Garbled(), "sys", [{"role": "user", "content": "x"}], text, check, 100) == text

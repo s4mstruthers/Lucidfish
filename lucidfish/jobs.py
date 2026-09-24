@@ -50,6 +50,8 @@ class Timings:
     @staticmethod
     def signature(cfg: Config) -> str:
         coach = f"{cfg.llm.provider}:{cfg.llm.model or 'default'}" if cfg.llm.enabled else "engine-only"
+        if cfg.llm.enabled and cfg.expert is not None:
+            coach += f"+{cfg.expert.provider}:{cfg.expert.model}"
         return f"d{cfg.engine.depth}|t{cfg.engine.threads}|{coach}|{cfg.analysis.detail}"
 
     @staticmethod
@@ -570,10 +572,9 @@ def refresh_player_summary(pid: int) -> tuple[str, str]:
     coach, warnings = build_coach(settings.load_config())
     if not coach.available:
         return "", warnings[0] if warnings else "The AI coach is turned off in Settings."
+    prompt = build_player_summary_prompt(stats, store.recent_reviews(pid), profile=store.get_profile(pid))
     try:
-        summary = coach.llm.generate(
-            PLAYER_SUMMARY_SYSTEM,
-            build_player_summary_prompt(stats, store.recent_reviews(pid), profile=store.get_profile(pid)))
+        summary = coach.hard(lambda llm: llm.generate(PLAYER_SUMMARY_SYSTEM, prompt))
     except LLMError as e:
         return "", str(e)
     store.set_summary(pid, summary)

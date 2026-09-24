@@ -7,12 +7,13 @@ are stored (in the local database); API keys go through credentials.py.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from pathlib import Path
 from urllib.parse import urlparse
 
 from . import credentials, store
-from .config import DEPTH_PRESETS, Config, data_dir, find_stockfish, load_dotenv
+from .config import DEPTH_PRESETS, Config, LLMConfig, data_dir, find_stockfish, load_dotenv
 from .llm import PROVIDERS
 from .pipeline import DETAIL_LEVELS
 
@@ -46,6 +47,9 @@ def load_config(**overrides) -> Config:
         cfg.llm.concurrency = int(values["concurrency"])
     if values.get("factcheck") is not None:
         cfg.llm.factcheck = bool(values["factcheck"])
+    if values.get("escalate") is not None:
+        cfg.llm.escalate = bool(values["escalate"])
+    cfg.expert = _expert_config(cfg, saved, overrides, urls)
 
     if values.get("stockfish_path"):
         cfg.engine.path = values["stockfish_path"]
@@ -58,6 +62,27 @@ def load_config(**overrides) -> Config:
     if values.get("detail") in DETAIL_LEVELS:
         cfg.analysis.detail = values["detail"]
     return cfg
+
+
+def _expert_config(cfg: Config, saved: dict, overrides: dict, urls: dict) -> LLMConfig | None:
+    """The optional second model: command-line flag, else saved setting, else
+    LUCIDFISH_EXPERT_PROVIDER / LUCIDFISH_EXPERT_MODEL."""
+    provider = overrides.get("expert_provider")
+    if provider is None:
+        provider = saved.get("expert_provider", os.environ.get("LUCIDFISH_EXPERT_PROVIDER", ""))
+    if not provider or provider == "none" or provider not in PROVIDERS:
+        return None
+    saved_model = ""
+    if provider == saved.get("expert_provider"):           # a saved model belongs to its saved provider
+        saved_model = saved.get("expert_model") or ""
+    elif provider == os.environ.get("LUCIDFISH_EXPERT_PROVIDER"):
+        saved_model = os.environ.get("LUCIDFISH_EXPERT_MODEL", "")
+    model = overrides.get("expert_model") or saved_model or PROVIDERS[provider].default_model
+    main_model = cfg.llm.model or PROVIDERS[cfg.llm.provider].default_model
+    if provider == cfg.llm.provider and model == main_model:
+        return None   # the same model twice is just the main model
+    return dataclasses.replace(cfg.llm, provider=provider, model=model, base_url=urls.get(provider, ""),
+                               api_key=None, concurrency=None)
 
 
 def validate(values: dict) -> dict:
@@ -81,7 +106,17 @@ def validate(values: dict) -> dict:
             if parsed.scheme not in ("http", "https") or not parsed.netloc:
                 raise ValueError("The server URL must look like http://host:port.")
         clean["base_urls"] = {**saved.get("base_urls", {}), provider: url}
-    for key in ("llm_enabled", "factcheck", "prefetch"):
+    if "expert_provider" in values:
+        expert = str(values["expert_provider"] or "")
+        if expert and expert not in PROVIDERS:
+            raise ValueError("Unknown provider for the second model.")
+        clean["expert_provider"] = expert
+    if "expert_model" in values:
+        model = str(values["expert_model"] or "").strip()
+        if len(model) > 200:
+            raise ValueError("Model name is too long.")
+        clean["expert_model"] = model
+    for key in ("llm_enabled", "factcheck", "prefetch", "escalate"):
         if key in values:
             clean[key] = bool(values[key])
     ranges = {"depth": (6, 30), "threads": (1, max(1, os.cpu_count() or 1)), "hash_mb": (16, 4096),
@@ -132,6 +167,10 @@ def public_settings() -> dict:
         "model": cfg.llm.model or PROVIDERS[cfg.llm.provider].default_model,
         "llm_enabled": cfg.llm.enabled,
         "factcheck": cfg.llm.factcheck,
+        "escalate": cfg.llm.escalate,
+        "expert_provider": saved.get("expert_provider", ""),
+        "expert_model": saved.get("expert_model", ""),
+        "expert_active": bool(cfg.expert),
         "prefetch": saved.get("prefetch", True),
         "concurrency": saved.get("concurrency"),
         "detail": cfg.analysis.detail,

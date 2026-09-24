@@ -15,6 +15,12 @@ What the coach writes depends on the detail level:
               detailed note for each mistake and critical moment (default)
   full      — a detailed note for every move (slowest)
 
+Two models can share the work. The main model (often local) writes the running
+commentary; an optional second, stronger model (often a cloud model) writes the
+detailed notes on mistakes and critical moments, the review, and rewrites any
+commentary that failed the fact-check. It only sees a handful of requests per
+game, so a cloud model here costs very little.
+
 The LLM is optional and failure-tolerant: without one (or if it stops
 responding) the analysis completes with engine verdicts only, plus a warning.
 """
@@ -231,13 +237,23 @@ def plan_note(detail: str, coached_side: str | None, side: str, classification: 
 
 
 class _Coach:
-    """Thread-safe wrapper that turns repeated or fatal LLM failures into a
-    graceful switch to engine-only analysis."""
+    """The AI models for one analysis, with graceful failure handling.
 
-    def __init__(self, llm: LLMProvider | None, error: str = ""):
+    - ``llm`` (main model) writes the running commentary and ordinary notes.
+    - ``expert`` (optional, stronger) writes the hard parts: notes on mistakes and
+      critical moments, the review, and rewrites of text that failed the fact-check.
+      If it stops working, the main model takes over its jobs.
+    Repeated or fatal failures of the main model switch the analysis to engine-only.
+    """
+
+    def __init__(self, llm: LLMProvider | None, error: str = "", expert: LLMProvider | None = None):
         self.llm = llm
         self.error = error
+        self.expert = expert
+        self.expert_error = ""
+        self.escalations = 0
         self._fails = 0
+        self._expert_fails = 0
         self._lock = threading.Lock()
 
     @property
@@ -254,14 +270,49 @@ class _Coach:
             if getattr(e, "fatal", False) or self._fails >= 3:
                 self.error = self.error or str(e)
 
+    def smart(self) -> LLMProvider | None:
+        """The best model currently working: the expert if it is healthy, else the main one."""
+        with self._lock:
+            return self.expert if self.expert is not None and not self.expert_error else self.llm
+
+    def hard(self, job: Callable[[LLMProvider], object]):
+        """Run a job on the expert model, falling back to the main model if it fails."""
+        expert = self.smart()
+        if expert is not None and expert is not self.llm:
+            try:
+                result = job(expert)
+                with self._lock:
+                    self._expert_fails = 0
+                return result
+            except LLMError as e:
+                with self._lock:
+                    self._expert_fails += 1
+                    if e.fatal or self._expert_fails >= 2:
+                        self.expert_error = self.expert_error or str(e)
+        return job(self.llm)
+
+    def describe(self) -> str:
+        if self.llm is None:
+            return ""
+        if self.expert is None:
+            return self.llm.describe()
+        return f"{self.llm.describe()} + {self.expert.describe()} for key moments"
+
 
 def build_coach(cfg: Config) -> tuple[_Coach, list[str]]:
     if not cfg.llm.enabled:
         return _Coach(None), []
     try:
-        return _Coach(make_provider(cfg.llm)), []
+        main = make_provider(cfg.llm)
     except LLMError as e:
         return _Coach(None, str(e)), [f"The AI coach is unavailable ({e}). Showing engine analysis only."]
+    expert, warnings = None, []
+    if cfg.expert is not None:
+        try:
+            expert = make_provider(cfg.expert)
+        except LLMError as e:
+            warnings.append(f"The second model is unavailable ({e}), so {main.describe()} wrote everything.")
+    return _Coach(main, expert=expert), warnings
 
 
 @dataclass
@@ -338,8 +389,7 @@ def analyze_game(
 
     coach, coach_warnings = build_coach(cfg)
     report.warnings += coach_warnings
-    if coach.llm:
-        report.coach = coach.llm.describe()
+    report.coach = coach.describe()
     system = build_system_prompt(side_filter, cfg.user_elo, level, player_context,
                                  players={"White": game.headers.get("White", "White"),
                                           "Black": game.headers.get("Black", "Black")})
@@ -452,7 +502,11 @@ def analyze_game(
         if not coach.available:
             return "", {}
         try:
-            result = _write_note(coach.llm, system, ev, side_filter, coached_color, played, cfg)
+            if _is_hard(ev):
+                result = coach.hard(lambda llm: _write_note(llm, system, ev, side_filter, coached_color, played,
+                                                            cfg, coach))
+            else:
+                result = _write_note(coach.llm, system, ev, side_filter, coached_color, played, cfg, coach)
             coach.ok()
             return result
         except LLMError as e:
@@ -465,7 +519,7 @@ def analyze_game(
         if not coach.available:
             return {}
         try:
-            result = _write_window(coach.llm, system, evs, played, coached_color, opening_state["name"])
+            result = _write_window(coach.llm, system, evs, played, coached_color, opening_state["name"], cfg, coach)
             coach.ok()
             return result
         except LLMError as e:
@@ -512,6 +566,12 @@ def analyze_game(
     producer.start()
     workers = coach.llm.concurrency if coach.available else 1
     executor = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="lucidfish-coach")
+    # A cloud expert works in parallel with a local main model (different hardware); two
+    # local models would only compete for the same GPU and memory, so they share one queue.
+    expert_executor = executor
+    if coach.available and coach.expert is not None and not (coach.expert.spec.local and coach.llm.spec.local):
+        expert_executor = ThreadPoolExecutor(max_workers=coach.expert.concurrency,
+                                             thread_name_prefix="lucidfish-expert")
     pending: deque[_Unit] = deque()
     window: list[_Evidence] = []
     window_notes: dict[int, Future | None] = {}
@@ -552,7 +612,8 @@ def analyze_game(
             elif isinstance(item, BaseException):
                 raise item
             else:
-                fut = executor.submit(note_task, item) if item.note and coach.available else None
+                pool = expert_executor if _is_hard(item) else executor
+                fut = pool.submit(note_task, item) if item.note and coach.available else None
                 if commentary_mode:
                     window.append(item)
                     window_notes[item.ply] = fut
@@ -564,6 +625,7 @@ def analyze_game(
         # Always release the engine, even if narration raised: no orphaned Stockfish.
         stop_event.set()
         executor.shutdown(wait=False, cancel_futures=True)
+        expert_executor.shutdown(wait=False, cancel_futures=True)
         producer.join(timeout=30)
 
     report.engine = engine_name[0] if engine_name else ""
@@ -573,18 +635,21 @@ def analyze_game(
         start = first.win_before if report.moves[0].side == "White" else 100 - first.win_before
         report.accuracy = game_accuracy([start] + [m.win_white for m in report.moves],
                                         white_to_move_first=report.moves[0].side == "White")
-    if coach.error and cfg.llm.enabled and not coach_warnings:
+    if coach.error and cfg.llm.enabled and coach.llm is not None:
         report.warnings.append(f"The AI coach stopped responding ({coach.error}). Moves after that point "
                                "show engine analysis only.")
+    if coach.expert_error:
+        report.warnings.append(f"The second model stopped working ({coach.expert_error}), so "
+                               f"{coach.llm.describe()} took over its notes.")
     if should_stop and should_stop():
         return report   # partial results, no review — the user asked to stop
 
     if coach.available and report.moves:
         if progress:
             progress("review", total, total, "writing the post-game review")
+        prompt = _review_prompt(report, side_filter, cfg, player_context)
         try:
-            report.review = coach.llm.generate(GAME_REVIEW_SYSTEM, _review_prompt(report, side_filter, cfg,
-                                                                                  player_context))
+            report.review = coach.hard(lambda llm: llm.generate(GAME_REVIEW_SYSTEM, prompt))
         except LLMError as e:
             report.warnings.append(f"The post-game review could not be written: {e}")
     return report
@@ -641,21 +706,38 @@ def _after(ev: _Evidence) -> chess.Board:
     return b
 
 
+def _is_hard(ev: _Evidence) -> bool:
+    """Jobs worth the stronger model: detailed notes on mistakes and critical moments."""
+    return ev.note == "full" and (ev.analysis.classification in ERRORS or ev.critical)
+
+
 def _verified_text(llm: LLMProvider, system: str, messages: list[dict], text: str, check,
-                   max_tokens: int) -> str:
+                   max_tokens: int, coach: _Coach | None = None, escalate: bool = False) -> str:
     """Fact-check `text` with `check(text) -> problems`; ask once for a correction,
-    keep whichever version has fewer problems. The caller cleans what remains."""
+    keep whichever version has fewer problems. The caller cleans what remains.
+
+    With `escalate`, the correction goes to the expert model (when there is one):
+    it sees the original request, the weaker model's answer and what was wrong
+    with it, so one request from a stronger model repairs it.
+    """
     problems = check(text)
     if not problems:
         return text
-    retry = llm.chat(system, messages + [{"role": "assistant", "content": text},
-                                         {"role": "user", "content": correction_prompt(problems)}],
-                     max_tokens=max_tokens)
-    return retry if len(check(retry)) < len(problems) else text
+    convo = messages + [{"role": "assistant", "content": text},
+                        {"role": "user", "content": correction_prompt(problems)}]
+    fixer = coach.smart() if coach is not None and escalate else llm
+    if coach is not None and fixer is not llm:
+        with coach._lock:
+            coach.escalations += 1
+        retry = coach.hard(lambda m: m.chat(system, convo, max_tokens=max_tokens))
+    else:
+        retry = llm.chat(system, convo, max_tokens=max_tokens)
+    return retry if retry.strip() and len(check(retry)) < len(problems) else text
 
 
 def _write_note(llm: LLMProvider, system: str, ev: _Evidence, side_filter: str | None,
-                coached: chess.Color | None, played: list[plans.PlayedMove], cfg: Config) -> tuple[str, dict]:
+                coached: chess.Color | None, played: list[plans.PlayedMove], cfg: Config,
+                coach: _Coach | None = None) -> tuple[str, dict]:
     """One grounded note: prompt → parse → fact-check (one retry) → clean → line ideas."""
     a = ev.analysis
     prompt = build_move_prompt(
@@ -682,9 +764,10 @@ def _write_note(llm: LLMProvider, system: str, ev: _Evidence, side_filter: str |
 
         def check(t: str) -> list[str]:
             e, i = split_sections(t)
-            return index.problems(e + "\n" + "\n".join(i.values()))
+            missing = [] if e.strip() else ["the EXPLANATION section is missing"]
+            return missing + index.problems(e + "\n" + "\n".join(i.values()))
 
-        text = _verified_text(llm, system, messages, text, check, max_tokens)
+        text = _verified_text(llm, system, messages, text, check, max_tokens, coach, cfg.llm.escalate)
         explanation, ideas = split_sections(text)
         explanation = index.clean(explanation)[0]
         ideas = {k: v for k, v in ideas.items() if not index.problems(v)}
@@ -697,7 +780,8 @@ def _write_note(llm: LLMProvider, system: str, ev: _Evidence, side_filter: str |
 
 
 def _write_window(llm: LLMProvider, system: str, evs: list[_Evidence], played: list[plans.PlayedMove],
-                  coached: chess.Color | None, opening: str) -> dict[int, str]:
+                  coached: chess.Color | None, opening: str, cfg: Config | None = None,
+                  coach: _Coach | None = None) -> dict[int, str]:
     """Commentator lines for a window of consecutive moves (one request)."""
     first, last = evs[0], evs[-1]
     moves = []
@@ -747,9 +831,13 @@ def _write_window(llm: LLMProvider, system: str, evs: list[_Evidence], played: l
 
     def check(t: str) -> list[str]:
         parsed = parse_commentary(t, moves)
-        return [f"{label}: {p}" for label, comment in parsed.items() for p in index.problems(comment)]
+        # A missing line counts as a problem too, so an answer that lost lines never "wins".
+        missing = [f"there is no line for {m.label}; write one line for every move listed"
+                   for m in moves if m.label not in parsed]
+        return missing + [f"{label}: {p}" for label, comment in parsed.items() for p in index.problems(comment)]
 
-    text = _verified_text(llm, system, messages, text, check, _MAX_TOKENS["window"])
+    escalate = cfg.llm.escalate if cfg is not None else False
+    text = _verified_text(llm, system, messages, text, check, _MAX_TOKENS["window"], coach, escalate)
     parsed = parse_commentary(text, moves)
     return {ev.ply: index.clean(parsed.get(m.label, ""))[0] for ev, m in zip(evs, moves, strict=True)}
 
@@ -895,9 +983,9 @@ def analyze_position(fen: str, cfg: Config, perspective: str | None = None, leve
     result["warnings"] += warnings
     if coach.available and lines:
         system = build_system_prompt(persp.lower(), cfg.user_elo, level)
+        prompt = build_position_prompt(board, lines, facts, persp)
         try:
-            text = coach.llm.generate(system, build_position_prompt(board, lines, facts, persp),
-                                      max_tokens=_MAX_TOKENS["full"])
+            text = coach.hard(lambda llm: llm.generate(system, prompt, max_tokens=_MAX_TOKENS["full"]))
             commentary, ideas = split_sections(text)
             index = EvidenceIndex([], [(board, ln.pv_san) for ln in lines],
                                   chess.WHITE if persp == "White" else chess.BLACK)
