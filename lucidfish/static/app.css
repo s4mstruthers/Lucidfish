@@ -688,6 +688,9 @@ body.no-select, body.no-select * { user-select: none !important; -webkit-user-se
 .train-bar .bar.grow { flex: 1 1 120px; min-width: 80px; }
 .train-bar .bar > div { background: var(--c-best); }
 
+.busy-text { color: var(--accent); }
+.queue-pill.reviewing .mini-bar { display: none; }
+
 /* ------------------------------------------------------------ time control filter */
 .tc-bar { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 14px; }
 .tc-bar:empty { display: none; }

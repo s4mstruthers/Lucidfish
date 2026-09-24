@@ -465,7 +465,10 @@ accuracy in each phase of the game (with your weakest phase highlighted), your m
 mistake types, your openings and how you score in them, and the coach's written review of
 your progress. Choose a time control at the top to see all of it for, say, your rapid games
 only, with the coach's review of those games; each game is also coached with the review for
-its time control in mind.
+its time control in mind. The review updates by itself after new analyses (Settings → AI coach →
+*Update my coach review automatically*, on by default): it's rewritten once the analysis queue
+has finished, so it never slows an analysis down, and the Home page shows when it was last
+updated, or that an update is on its way. *⟳ Update review* rewrites it on demand.
 
 ## Sharing a profile
 

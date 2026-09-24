@@ -561,7 +561,7 @@ def profile(tc: TimeClass = ""):
         return {"profile": None}
     games = store.list_games(pid)
     return {"profile": p, "stats": store.aggregate_stats(pid, games, tc or None), "games": games,
-            "time_classes": store.time_class_counts(games)}
+            "time_classes": store.time_class_counts(games), "review": QUEUE.review_state(pid)}
 
 
 class RefreshSummaryReq(BaseModel):

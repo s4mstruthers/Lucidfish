@@ -475,6 +475,9 @@
         <fieldset>
           <label class="check"><input type="checkbox" id="setLlmEnabled"> Use the AI coach to explain moves</label>
           <p class="small" style="margin:4px 0 0">Turn off for fast, engine-only analysis (verdicts, best moves and lines, no written notes).</p>
+          <label class="check" style="margin-top:10px"><input type="checkbox" id="setAutoReview"> Update my coach review automatically after new analyses</label>
+          <p class="small" style="margin:4px 0 0">Rewritten once the analysis queue has finished, so it never slows an analysis down:
+            one AI request for the overall review, and one for each time control that got new games.</p>
         </fieldset>
         <fieldset id="coachFields">
           <legend>Where should the coach run?</legend>
