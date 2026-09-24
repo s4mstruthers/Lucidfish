@@ -60,9 +60,10 @@
       <button id="goTrain" class="secondary hidden" title="Puzzles from your own mistakes, with spaced repetition">🎯 Train</button>
       <button id="goAnalyze" class="server-only">Analyze a game</button>
     </div>
+    <div class="tc-bar" data-tc-bar="analysed" role="group" aria-label="Time control"></div>
     <div class="card">
       <div class="stats" id="stats"></div>
-      <div class="card-head"><h2>Coach review</h2><div class="spacer"></div>
+      <div class="card-head"><h2 id="summaryTitle">Coach review</h2><div class="spacer"></div>
         <span class="small" id="summaryStatus"></span>
         <button class="secondary sm server-only" id="refreshSummary">⟳ Update review</button>
       </div>
@@ -117,6 +118,7 @@
       <button data-page="games" role="tab">Analysed games</button>
       <button data-page="analyze" role="tab" class="server-only">＋ Analyse new games</button>
     </div>
+    <div class="tc-bar" data-tc-bar="analysed" role="group" aria-label="Time control"></div>
     <div class="card">
       <div class="games-toolbar">
         <input type="search" id="gSearch" placeholder="Search opponent, opening or date…" aria-label="Search games" autocomplete="off">
@@ -126,7 +128,6 @@
         <select id="gColor" aria-label="Your colour">
           <option value="">Both colours</option><option value="white">As White</option><option value="black">As Black</option>
         </select>
-        <select id="gTime" aria-label="Time control"><option value="">All time controls</option></select>
         <select id="gSort" aria-label="Sort by">
           <option value="analysed">Recently analysed</option>
           <option value="played">Date played</option>
@@ -166,6 +167,7 @@
           </div>
           <button class="ghost icon" id="reloadGames" title="Refresh" aria-label="Refresh game list">↻</button>
         </div>
+        <div class="tc-bar" data-tc-bar="site" role="group" aria-label="Time control"></div>
         <div class="select-bar hidden" id="selectBar">
           <label class="check"><input type="checkbox" id="selectAll"> Select all</label>
           <span class="small">Click games to select them · Shift-click selects a range</span>
@@ -252,24 +254,34 @@
     <div class="page-head">
       <div>
         <h1>Train</h1>
-        <p>Puzzles from your own games: every position where you went wrong. Find a better move. Puzzles you solve come
+        <p>Puzzles from your own games: the positions where you went wrong. Find a better move. Puzzles you solve come
           back less and less often; the ones you miss come back soon, until they stick.</p>
       </div>
     </div>
+    <div class="tc-bar" data-tc-bar="analysed" role="group" aria-label="Time control"></div>
     <div class="card train-done hidden" id="trainDone"></div>
     <div class="card">
       <div class="train-levels" id="trainLevels"></div>
-      <div class="games-toolbar" style="margin-top:16px">
+      <div class="tc-bar theme-bar" id="trainThemes" role="group" aria-label="Theme" style="margin-top:14px"></div>
+      <div class="games-toolbar" style="margin-top:6px">
         <label class="field inline">Puzzles
           <select id="trainFilter">
-            <option value="all">All my mistakes</option>
-            <option value="serious">Only mistakes and blunders</option>
+            <option value="3">★★★ Key moments only</option>
+            <option value="2">★★ Key and costly</option>
+            <option value="1">★ Everything, including minor</option>
           </select></label>
+        <label class="field inline">New per day
+          <select id="trainPerDay"><option value="5">5</option><option value="10">10</option><option value="20">20</option>
+            <option value="0">No limit</option></select></label>
         <label class="field inline">Session
           <select id="trainSize"><option value="5">5 puzzles</option><option value="10" selected>10 puzzles</option>
             <option value="20">20 puzzles</option></select></label>
         <div class="spacer"></div>
         <button id="trainStart">▶ Start training</button>
+      </div>
+      <div class="row small" style="margin-top:10px;gap:16px">
+        <label class="check"><input type="checkbox" id="trainHurried"> Include moves made in time trouble</label>
+        <label class="check" id="trainBulletWrap"><input type="checkbox" id="trainBullet"> Include bullet games</label>
       </div>
       <p class="small" id="trainNote" style="margin:12px 0 0"></p>
     </div>
@@ -278,6 +290,12 @@
       <ul class="small train-how">
         <li>Each puzzle is a position from one of your games, just before a move the engine marked as an inaccuracy,
           mistake or blunder. Drag a piece to play the move you think is best.</li>
+        <li>Puzzles have a level of importance. <b>★★★ Key</b>: the error changed the game (a win thrown away, a
+          playable game turned into a lost one, a mate missed or allowed). <b>★★ Costly</b>: a clear mistake or blunder.
+          <b>★ Minor</b>: an inaccuracy, or an error when the game was already decided. The most important come first.</li>
+        <li>To keep it manageable, training starts with the key and costly puzzles, leaves out bullet games and moves
+          made in time trouble (those come from the clock, not from a gap in knowledge), and adds at most 10 new
+          puzzles a day. Change any of this above; pick a theme to drill one weakness.</li>
         <li>Solve it on the first try and it moves up a level: you'll see it again after 1, 3, 7, 16 and then 35 days.
           Miss it and it drops back to the start, comes back at the end of the session, and again tomorrow.</li>
         <li>After a puzzle you can read the coach's note, play out the lines, or press 🔍 Explore to try your own ideas
