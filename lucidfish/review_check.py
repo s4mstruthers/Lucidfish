@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 
 import chess
 
+from .prompts import profile_sections
+
 ERRORS = ("inaccuracy", "mistake", "blunder")
 MAX_STRENGTHS = 2      # acknowledge what went well, briefly: the review is for improving
 
@@ -501,4 +503,163 @@ def check_review(review: str, facts: GameFacts) -> tuple[str, list[str]]:
     close()
     if not has_strengths and facts.strengths and section != "takeaways":
         out.extend(["", "## What went well", *facts.strengths])
-    return re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip(), removed
+    return order_game_review(re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()), removed
+
+
+# The post-game review's fixed structure (GAME_REVIEW_SYSTEM asks for it; this puts it back if the model drifts).
+GAME_SECTIONS = (("summary", "Summary", re.compile(r"summary|overview", re.I)),
+                 ("story", "How the game unfolded", re.compile(r"unfold|story|how the game|phases|progress", re.I)),
+                 ("strengths", "What went well", re.compile(r"went well|strength|positive|good", re.I)),
+                 ("takeaways", "Key takeaways", re.compile(r"takeaway|lesson|learn|improve", re.I)))
+
+
+def order_game_review(text: str) -> str:
+    """Headings named as in GAME_SECTIONS, in that order; text before any heading belongs to the Summary."""
+    parts: dict[str, list[str]] = {k: [] for k, _, _ in GAME_SECTIONS}
+    extra: list[str] = []
+    current = "summary"
+    for line in text.splitlines():
+        m = re.fullmatch(r"\s*(?:#{1,6}\s*(.+?)\s*#*|\*\*(.+?)\*\*:?)\s*", line)
+        title = (m.group(1) or m.group(2)) if m else None
+        kind = next((k for k, _, rx in GAME_SECTIONS if title and rx.search(title)), None)
+        if kind:
+            current = kind
+            continue
+        if title is not None and line.lstrip().startswith("#"):
+            current = None           # an unknown section: kept, after the known ones
+            extra.append(line)
+            continue
+        (parts[current] if current else extra).append(line)
+    out = []
+    for kind, name, _ in GAME_SECTIONS:
+        body = "\n".join(parts[kind]).strip()
+        if body:
+            out += [f"## {name}", body, ""]
+    if "\n".join(extra).strip():
+        out.append("\n".join(extra).strip())
+    return "\n".join(out).strip()
+
+
+# ------------------------------------------------------------------ the progress review's structure
+
+_SECTION_WORDS = (
+    ("time_controls", re.compile(r"time control|by time|bullet|blitz|rapid|classical", re.I)),
+    ("openings", re.compile(r"opening", re.I)),
+    ("train", re.compile(r"train|next|practi|plan|focus|to do", re.I)),
+    ("strengths", re.compile(r"working|strength|going well|well|positive", re.I)),
+    ("weaknesses", re.compile(r"holding|weakness|improve|work on|problem|issue|mistake", re.I)),
+)
+_THEME_TRAINING = {
+    "missed_threat": "the *Missed threats* puzzles on the Train page: before each move, ask what your opponent's "
+                     "last move threatens",
+    "hanging": "the *Hanging material* puzzles on the Train page: check every piece is defended before you move",
+    "missed_tactic": "the *Missed tactics* puzzles on the Train page: look for checks, captures and threats first",
+    "missed_mate": "the *Missed mates* puzzles on the Train page",
+    "allowed_mate": "the *Allowed mates* puzzles on the Train page: look at your king's safety every move",
+    "king_attack": "the *King safety* puzzles on the Train page",
+    "rushed": "slowing down on critical moves: take a few seconds for checks, captures and threats",
+    "time_trouble": "your time use: keep a reserve for the critical moments",
+}
+_CENTIPAWN = re.compile(r"centi-?pawn|\bACPL\b|\bcp loss\b", re.I)
+_LEVEL_LABEL = re.compile(r"\b(beginner|novice|intermediate|advanced|expert)[- ]level\b", re.I)
+
+
+def _heading_kind(line: str, sections: list[str]) -> str | None:
+    """The section a heading-like line opens ('### Weaknesses', '**Holding you back:**', 'Train next:')."""
+    text = line.strip()
+    m = re.fullmatch(r"#{1,6}\s*(.+?)\s*#*|\*\*(.+?)\*\*:?|([A-Z][^.!?]{2,40}):", text)
+    if not m:
+        return None
+    title = next(g for g in m.groups() if g)
+    return next((kind for kind, rx in _SECTION_WORDS if kind in sections and rx.search(title)), "") or ""
+
+
+def _stats_fallback(kind: str, stats: dict) -> list[str]:
+    """Bullets for a section the model left out, straight from the verified statistics."""
+    if kind == "time_controls":
+        return [f"- **{cap}**: {r['games']} games, {r['wins']}W {r['losses']}L {r['draws']}D"
+                + (f", accuracy {r['avg_accuracy']}%" if r.get("avg_accuracy") is not None else "")
+                + f", {r['blunders_per_game']} blunders per game."
+                for tc, r in (stats.get("by_time_class") or {}).items() for cap in [tc.capitalize()]]
+    if kind == "weaknesses":
+        times = lambda n: "once" if n == 1 else "twice" if n == 2 else f"{n} times"  # noqa: E731
+        return [f"- **{p['label']}**: {times(p['count'])}"
+                + (f" in {p['games']} games." if p["games"] > 1 else " in one game." if p["count"] > 1 else ".")
+                for p in (stats.get("patterns") or [])[:3]]
+    if kind == "strengths":
+        out = [f"- {f['text']}" for f in (stats.get("findings") or []) if f.get("kind") == "strength"][:2]
+        phases = {k: v for k, v in (stats.get("phase_accuracy") or {}).items() if v is not None}
+        if not out and len(phases) >= 2:
+            best = max(phases, key=phases.get)
+            out = [f"- Your strongest phase is the {best} ({phases[best]}% accuracy)."]
+        return out
+    if kind == "openings":
+        played = [o for o in stats.get("openings") or [] if o.get("games", 0) >= 2]
+        score = lambda o: (o["w"] + 0.5 * o["d"]) / o["games"]  # noqa: E731
+        if not played:
+            return []
+        record = lambda o: f"{o['w']}W {o['l']}L {o['d']}D in {o['games']} games"  # noqa: E731
+        best, worst = max(played, key=score), min(played, key=score)
+        if score(best) == score(worst):           # one opening, or all alike: no "best" to name
+            return [f"- **{o['name']}**: {record(o)}." for o in played[:2]]
+        return [f"- **{best['name']}**: your best opening ({record(best)}).",
+                f"- **{worst['name']}**: your hardest ({record(worst)})."]
+    if kind == "train":
+        return [f"- {_THEME_TRAINING[p['id']][0].upper()}{_THEME_TRAINING[p['id']][1:]}."
+                for p in (stats.get("patterns") or []) if p["id"] in _THEME_TRAINING][:3]
+    return []
+
+
+_BULLET_LIMIT = {"time_controls": 5, "weaknesses": 3, "strengths": 2, "openings": 2, "train": 3}
+
+
+def presentable_review(text: str, stats: dict, time_class: str | None = None) -> str:
+    """A stored progress review as shown: reviews written before the fixed structure are tidied into it."""
+    if not text or "\n### " in f"\n{text}":
+        return text
+    return tidy_profile_review(text, stats, time_class)
+
+
+def tidy_profile_review(text: str, stats: dict, time_class: str | None = None) -> str:
+    """Put the coach's progress review into its fixed structure: the opening line, then the sections of
+    prompts.PROFILE_SECTIONS in order with their headings. Headings written differently are recognised,
+    prose inside a section becomes bullets, sentences about centipawns go, and a section the model left out
+    is written from the statistics."""
+    sections = profile_sections(time_class)
+    kinds = [k for k, _, _ in sections]
+    if time_class is None and len(stats.get("by_time_class") or {}) < 2:
+        kinds = [k for k in kinds if k != "time_controls"]
+    intro: list[str] = []
+    body: dict[str, list[str]] = {k: [] for k in kinds}
+    current: str | None = None
+    intro_done = False                     # the opening line is the first paragraph only
+    for raw in (text or "").splitlines():
+        line = raw.strip()
+        if not line:
+            intro_done = intro_done or bool(intro)
+            continue
+        if re.match(r"(here('s| is)|below is|sure[,!])", line, re.I):
+            continue
+        kind = _heading_kind(line, kinds)
+        if kind is not None:      # a heading: a known section starts; others ("## Progress review") are dropped
+            if kind:
+                current = kind
+            continue
+        sentences = [x for x in re.split(r"(?<=[.!?])\s+", re.sub(r"^\s*(?:[-*•]|\d+[.)])\s+", "", line))
+                     if x.strip() and not _CENTIPAWN.search(x) and not _LEVEL_LABEL.search(x)]
+        if not sentences:
+            continue
+        if current is None:
+            if not intro_done:
+                intro += sentences
+        elif re.match(r"^\s*(?:[-*•]|\d+[.)])\s+", line):
+            body[current].append("- " + " ".join(sentences))
+        else:
+            body[current] += [f"- {x}" for x in sentences]     # prose in a section: one bullet per sentence
+    out = [" ".join(intro[:2])] if intro else []          # the opening line: two sentences at most
+    titles = {k: t for k, t, _ in sections}
+    for kind in kinds:
+        bullets = body[kind][:_BULLET_LIMIT[kind]] or _stats_fallback(kind, stats)
+        if bullets:
+            out += ["", f"### {titles[kind]}", *bullets]
+    return "\n".join(out).strip()
