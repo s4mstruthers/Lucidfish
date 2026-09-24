@@ -106,6 +106,16 @@ _LOCAL_BOOK: list[tuple[str, str, str]] = [
 ]
 
 
+def local_book_depth(sans: list[str]) -> int:
+    """How many opening plies of `sans` follow a line in the built-in book."""
+    best = 0
+    for seq, _, _ in _LOCAL_BOOK:
+        line = seq.split()
+        if len(line) > best and sans[:len(line)] == line:
+            best = len(line)
+    return best
+
+
 def local_opening_name(sans: list[str]) -> str:
     """Longest-prefix match against the built-in book. Returns 'Name (ECO)' or ''."""
     played = " ".join(sans)

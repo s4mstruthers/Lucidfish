@@ -2,17 +2,34 @@
 
 Design rule: the LLM NEVER analyses the position itself. It receives verified
 evidence — engine lines, winning-chance changes, board-verified tactics,
-positional facts, opening statistics — and narrates it in chess concepts.
+positional facts, plans tracked from the moves played, what actually happened
+next — and narrates it in chess concepts.
 
-Prompts are split so that everything constant for a game (coaching rules,
-player level, coach profile) sits in the system prompt. Local servers such as
-Ollama and cloud APIs with prompt caching can then reuse that prefix instead
-of re-reading it for every move, which is a large speed-up on local models.
+Two ways of writing about a game:
+
+- **Per-move notes** (``build_move_prompt``): a detailed explanation of one
+  move. Used for mistakes and critical moments, and for every move at the
+  "every move" detail level.
+- **Commentary windows** (``build_commentary_prompt``): one request covers a
+  stretch of consecutive moves and returns a short commentator-style line for
+  each. Seeing the moves together is what lets the model describe the *flow*
+  ("b4 grabs space… …c5 challenges it… axb4 opens the a-file"), and sharing
+  the context across the window roughly halves the text the model must read.
+
+Every move in every line is written with its side's name ("12. White c4,
+12... Black d4"). Small models misread bare numbered notation and attribute
+moves to the wrong player; explicit names prevent that, and the fact-checker
+verifies it afterwards.
+
+Prompts are split so that everything constant for a game (rules, player level,
+coach profile) sits in the system prompt, which local servers and cloud APIs
+can reuse between requests instead of re-reading it.
 """
 
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass, field
 
 import chess
 
@@ -28,22 +45,29 @@ LEVEL_NOTES = {
     "advanced": "an advanced player — be concrete and positional; deeper lines are fine",
 }
 
-COACH_RULES = """You are a patient, precise chess coach. Each request gives you VERIFIED \
-evidence about one move: engine lines and evaluations, tactics computed from the board, \
-and positional facts. Your job is to explain that evidence in chess concepts — you never \
-analyse the position yourself.
+COACH_RULES = """You are a chess commentator and coach. You explain what each player is \
+trying to do — their plans, intentions and strategies — and why moves work or fail. \
+Each request gives you VERIFIED evidence: engine lines and evaluations, tactics computed \
+from the board, positional facts, plans tracked from the moves played, and what actually \
+happened next in the game. You narrate that evidence; you never analyse the position yourself.
 
 Hard rules:
 - Use only claims present in the evidence. Never invent tactics, threats, moves or lines.
-- The evidence states which piece moved, what it captured, and where every piece stands. \
-Never contradict it, and never mention a piece on a square where the evidence has none.
-- Any move you name must appear in the evidence (the move played, a candidate, or a line).
+- Always name the side: say "White" or "Black" (you may add "you" for the player you coach). \
+Never write "the opponent" without naming the colour.
+- A move you name must be one the side you attribute it to can actually play: it must \
+appear in the evidence for that side (the moves played, a candidate, or a line where \
+every move is labelled with its side).
+- The evidence states which piece moved and what it captured ("pawn from a3 to b4, \
+captures the pawn on b4" means the a3 pawn did the capturing). Never reverse this, and \
+never mention a piece on a square where the evidence has none.
+- You may use what actually happened next to explain intentions ("this prepares ...a5, \
+which came two moves later"), but a move being played later does not make it good.
 - If you are unsure whether something is true, leave it out.
-- Explain with concepts (development, tempo, king safety, pawn structure, piece activity, \
-weak squares, forks, pins) and translate evaluations into words.
+- Explain with concepts (space, development, pawn breaks, open files, king safety, piece \
+activity, weak squares, forks, pins) and translate evaluations into words.
 - Never mention centipawns or numbers like +1.3; say "slightly better", "winning", \
 "about a pawn's worth".
-- Be concise: 2-4 sentences for normal moves, up to 7 for mistakes and critical moments.
 - Always answer in exactly the format requested."""
 
 
@@ -57,16 +81,18 @@ def elo_guidance(elo: int | None) -> str:
 
 
 def build_system_prompt(coached_side: str | None = None, elo: int | None = None,
-                        level: str | None = None, player_context: str = "") -> str:
-    """Per-game system prompt: identical for every move, so it can be prefix-cached."""
-    parts = [COACH_RULES, "\nCoaching context for this game:"]
+                        level: str | None = None, player_context: str = "",
+                        players: dict | None = None) -> str:
+    """Per-game system prompt: identical for every request of a game, so it can be cached."""
+    parts = [COACH_RULES, "\nContext for this game:"]
+    if players:
+        parts.append(f"- White is {players.get('White', 'White')}; Black is {players.get('Black', 'Black')}.")
     if coached_side:
         side = coached_side.capitalize()
-        parts.append(f"- You are coaching {side}; 'you' always means {side}. In numbered lines, "
-                     "moves after 'N.' are White's and moves after 'N...' are Black's.")
+        other = "Black" if side == "White" else "White"
+        parts.append(f"- You are coaching {side}: 'you' always means {side}, and {other} is their opponent.")
     else:
-        parts.append("- You are coaching both players; refer to them as White and Black. In numbered "
-                     "lines, moves after 'N.' are White's and moves after 'N...' are Black's.")
+        parts.append("- You are coaching both players; refer to them as White and Black.")
     if level and level.lower() in LEVEL_NOTES:
         parts.append(f"- The player is {LEVEL_NOTES[level.lower()]}.")
     if elo:
@@ -105,6 +131,26 @@ def move_label(board: chess.Board, san: str) -> str:
     return f"{n}. {san}" if board.turn == chess.WHITE else f"{n}... {san}"
 
 
+def side_line(board: chess.Board, sans: list[str], limit: int | None = None) -> str:
+    """'11. White axb4, 11... Black Qc7, 12. White c4' — every move carries its side."""
+    b = board.copy(stack=False)
+    out = []
+    for san in sans[:limit]:
+        n = b.fullmove_number
+        out.append(f"{n}. White {san}" if b.turn == chess.WHITE else f"{n}... Black {san}")
+        try:
+            b.push_san(san)
+        except ValueError:
+            break
+    return ", ".join(out)
+
+
+def eval_after_words(a: MoveAnalysis, mover_is_white: bool) -> str:
+    if a.game_result:
+        return "the game is over (" + ("checkmate" if a.mate_event == "delivered_mate" else "a draw") + ")"
+    return describe_eval(*_white_pov(a.eval_after_cp, a.eval_after_mate, mover_is_white))
+
+
 # --------------------------------------------------------------- per move
 
 def build_move_prompt(
@@ -123,12 +169,14 @@ def build_move_prompt(
     reply_line: Line | None = None,     # best line for the side to move AFTER the move
     opening_name: str = "",
     opening_lines: list[str] | None = None,
-    game_so_far: str = "",
+    recent: str = "",                   # labelled previous moves with gists
+    hindsight: str = "",                # labelled moves actually played next
+    plans: list[str] | None = None,     # verified plan facts (plans.plan_lines)
     time_note: str = "",
     previous: dict | None = None,       # {"san","cls","side"} of the previous (opponent) move
     want_ideas: bool = False,
 ) -> str:
-    """Assemble the grounded evidence block the LLM narrates from."""
+    """Assemble the grounded evidence block for one move."""
     mover_is_white = board.turn == chess.WHITE
     side = "White" if mover_is_white else "Black"
     opp = "Black" if mover_is_white else "White"
@@ -138,24 +186,20 @@ def build_move_prompt(
     p: list[str] = []
 
     verdict = a.classification + (" — a CRITICAL MOMENT" if critical else "")
-    p.append(f"MOVE: {move_label(board, a.played_san)} by {side}. Engine verdict: {verdict}.")
-    p.append(f"What physically happened: {describe_move(board, move)}.")
+    p.append(f"MOVE: {move_label(board, a.played_san)}, played by {side}. Engine verdict: {verdict}.")
+    p.append(f"What physically happened: {side}'s {describe_move(board, move)}.")
     p.append("Tactics of this move (verified from the board): "
              + ("; ".join(motifs_played) if motifs_played else "nothing tactical — no captures won, "
                 "no pieces left en prise, no new forks, pins or mate threats") + ".")
 
     before_w = _white_pov(a.eval_before_cp, a.eval_before_mate, mover_is_white)
-    after_w = _white_pov(a.eval_after_cp, a.eval_after_mate, mover_is_white)
-    if a.game_result:
-        after_text = "the game is over (" + ("checkmate" if a.mate_event == "delivered_mate" else "a draw") + ")"
-    else:
-        after_text = describe_eval(*after_w)
     p.append(f"Evaluation: with best play {describe_eval(*before_w)}; after the move played, "
-             f"{after_text}. {side}'s winning chances went from {a.win_before:.0f}% to {a.win_after:.0f}%.")
+             f"{eval_after_words(a, mover_is_white)}. {side}'s winning chances went from "
+             f"{a.win_before:.0f}% to {a.win_after:.0f}%.")
 
     if a.played_uci != a.best_uci and a.best_san:
-        best_desc = candidate_desc(board, a.best_san)
-        p.append(f"The engine's best move was {a.best_san} [{best_desc}]"
+        p.append(f"{side}'s best move according to the engine was {a.best_san} "
+                 f"[{candidate_desc(board, a.best_san)}]"
                  + (f" — tactically it {'; '.join(motifs_best)}" if motifs_best else "") + ".")
         if a.mate_event == "missed_mate":
             p.append(f"{side} had a forced checkmate and missed it; "
@@ -165,7 +209,7 @@ def build_move_prompt(
         elif a.cp_loss >= 30:
             p.append(f"The move concedes roughly {a.cp_loss / 100:.1f} pawns' worth of evaluation.")
     else:
-        p.append(f"{a.played_san} was the engine's top choice.")
+        p.append(f"{a.played_san} was the engine's top choice for {side}.")
 
     gives_up = any(m.startswith(("puts the", "leaves the", "loses material")) for m in motifs_played or [])
     if gives_up and a.classification in ("best", "good"):
@@ -173,11 +217,10 @@ def build_move_prompt(
                  "deliberate sacrifice and explain what it gains, using the engine lines.")
     if critical:
         p.append("This was a CRITICAL MOMENT: the best move was far stronger than any alternative, "
-                 "and the player found it. Explain what it achieves that the alternatives don't, and "
-                 "give credit.")
+                 f"and {side} found it. Explain what it achieves that the alternatives don't, and give credit.")
     if previous and previous.get("cls") in ("mistake", "blunder"):
         p.append(f"{previous['side']}'s previous move ({previous['san']}) was a {previous['cls']}; "
-                 f"the best move here ({a.best_san}) is how to exploit it — say whether {side} did.")
+                 f"the best move here ({a.best_san}) is how {side} could exploit it — say whether {side} did.")
     if time_note:
         p.append(f"Time context: {time_note} If a serious error was played very quickly or in time "
                  "trouble, recommend a habit (a blunder check of checks, captures and threats) rather "
@@ -185,27 +228,30 @@ def build_move_prompt(
 
     if opening_name:
         p.append(f"Opening: {opening_name}. Use exactly this name and never guess a different "
-                 "variation. Where relevant, relate the move to this opening's usual plans (development "
-                 "scheme, pawn breaks, where each side castles).")
+                 "variation. Where relevant, relate the move to this opening's usual plans.")
     else:
         p.append("The opening has not been identified: do not name or guess any opening.")
-    if game_so_far:
-        p.append(f"Game so far: {game_so_far}")
+    if recent:
+        p.append(f"Moves just before this one: {recent}.")
+    if plans:
+        p.append("Plans so far (verified from the moves played):")
+        p.extend("  " + ln for ln in plans)
     p.append(f"Pieces before the move — {piece_placement(board)}.")
 
-    p.append("\nEngine candidate moves before this move, best first ([brackets] state what each move "
-             "physically is — never contradict them):")
+    p.append(f"\n{side}'s engine candidate moves before this move, best first ([brackets] state what "
+             "each move physically is — never contradict them):")
     for i, line in enumerate(a.candidates, 1):
         p.append(f"  {i}. {line.move_san} [{candidate_desc(board, line.move_san)}] — "
-                 f"{line_eval_words(line, board)} — line: {line.pv_text}")
+                 f"{line_eval_words(line, board)} — line: {side_line(board, line.pv_san)}")
 
-    if a.refutation_text:
-        p.append(f"\nRefutation — {opp}'s punishing reply: {a.refutation_text}")
+    if a.refutation_san:
+        p.append(f"\nRefutation — {opp}'s punishing reply: {side_line(after, a.refutation_san)}")
         if motifs_reply:
-            p.append(f"Tactics of {a.refutation_san[0]} (verified): {'; '.join(motifs_reply)}.")
-    elif note_type == "opponent" and reply_line is not None:
-        p.append(f"\nEngine's best reply for {opp}: {reply_line.move_san} "
-                 f"[{candidate_desc(after, reply_line.move_san)}] — line: {reply_line.pv_text}")
+            p.append(f"Tactics of {opp}'s {a.refutation_san[0]} (verified): {'; '.join(motifs_reply)}.")
+    elif reply_line is not None:
+        p.append(f"\nEngine's expected continuation: {side_line(after, reply_line.pv_san, 6)}")
+    if hindsight:
+        p.append(f"What actually happened next in the game: {hindsight}.")
 
     p.append("\nPosition facts before the move:")
     p.extend("  " + ln for ln in f_before.summary_lines())
@@ -222,19 +268,19 @@ def build_move_prompt(
     p.append("")
     if note_type == "opponent":
         coached = coached_side.capitalize() if coached_side else opp
-        p.append(f"You are coaching {coached}; this move was played by their OPPONENT. Do not critique "
-                 f"it as if it were {coached}'s move. In 1-2 sentences tell {coached} what it "
-                 "accomplished (it has already happened — use the past tense for any capture) and what "
-                 f"the opponent threatens or plans next, based only on the tactics and lines above.")
+        p.append(f"This move was played by {side}, the opponent of {coached} (the player you coach). "
+                 f"In 1-2 sentences tell {coached} what {side} was trying to do with it and what {side} "
+                 "is aiming for next. It has already happened — use the past tense for any capture. "
+                 "Name the colours explicitly.")
         p.append("Reply in EXACTLY this format:\nEXPLANATION:\n<your note>")
     elif note_type == "brief":
-        p.append("This move was fine — do not critique it. In 1-3 sentences give the big picture: what "
-                 "plan it advances, what it prepares, and what opponent idea it prevents.")
+        p.append(f"This move was fine — do not critique it. In 1-3 sentences explain {side}'s intention: "
+                 "what plan it advances, what it prepares, and what idea of the other side it prevents.")
         p.append("Reply in EXACTLY this format:\nEXPLANATION:\n<your note>")
     else:
-        p.append("Reply in EXACTLY this format:\nEXPLANATION:\n<flowing prose: lead with the verdict and "
-                 "the single most important reason; if a refutation is given, walk through why it "
-                 "punishes the move>")
+        p.append("Reply in EXACTLY this format:\nEXPLANATION:\n<2-7 sentences of flowing prose: lead with "
+                 f"the verdict and the single most important reason, explain {side}'s intention and, if a "
+                 "refutation is given, walk through why it punishes the move>")
         ideas_for = [ln.move_san for ln in a.candidates[:3] if ln.move_uci != a.played_uci]
         if want_ideas and ideas_for:
             p.append("LINE IDEAS:\n<SAN>: <one short sentence on what that move achieves for "
@@ -244,11 +290,11 @@ def build_move_prompt(
     return "\n".join(p)
 
 
-def build_ideas_prompt(candidates: list[Line], board: chess.Board, game_so_far: str) -> str:
+def build_ideas_prompt(candidates: list[Line], board: chess.Board, recent: str) -> str:
     """Minimal follow-up used when the main call failed to produce line ideas."""
     side = "White" if board.turn == chess.WHITE else "Black"
     parts = [
-        f"Game so far: {game_so_far}",
+        f"Moves just played: {recent or '(game start)'}",
         f"Pieces — {piece_placement(board)}. {side} to move.",
         f"The lines below are candidate moves FOR {side}. For EACH one, state in one short sentence "
         f"what the candidate move ITSELF achieves for {side}. The [brackets] state exactly what the "
@@ -257,8 +303,106 @@ def build_ideas_prompt(candidates: list[Line], board: chess.Board, game_so_far: 
     ]
     for ln in candidates:
         parts.append(f"  {ln.move_san} [{candidate_desc(board, ln.move_san)}] — "
-                     f"{line_eval_words(ln, board)} — line: {ln.pv_text}")
+                     f"{line_eval_words(ln, board)} — line: {side_line(board, ln.pv_san)}")
     return "\n".join(parts)
+
+
+# --------------------------------------------------------------- commentary windows
+
+@dataclass
+class CommentaryMove:
+    """Verified evidence for one move inside a commentary window."""
+    label: str                     # "11. axb4" / "11... Qc7"
+    side: str                      # "White" / "Black"
+    san: str
+    what: str                      # describe_move()
+    verdict: str
+    eval_after: str
+    motifs: list[str] = field(default_factory=list)
+    changes: list[str] = field(default_factory=list)
+    engine_next: str = ""          # labelled expected continuation
+    best: str = ""                 # engine's preferred move when the played one was an error
+    book: bool = False             # known opening theory
+
+
+@dataclass
+class CommentaryContext:
+    start_label: str
+    end_label: str
+    eval_before: str
+    pieces: str
+    opening: str = ""
+    recent: str = ""
+    hindsight: str = ""
+    plans: list[str] = field(default_factory=list)
+
+
+def build_commentary_prompt(moves: list[CommentaryMove], ctx: CommentaryContext) -> str:
+    """One request for a whole stretch of moves: commentator-style lines for each."""
+    p = [f"COMMENTARY WINDOW: moves {ctx.start_label} to {ctx.end_label}."]
+    if ctx.opening:
+        p.append(f"Opening: {ctx.opening} (use exactly this name).")
+    p.append(f"Before this stretch: {ctx.eval_before}. Pieces — {ctx.pieces}.")
+    if ctx.recent:
+        p.append(f"Moves just before this stretch: {ctx.recent}.")
+    if ctx.plans:
+        p.append("Plans so far (verified from the moves played):")
+        p.extend("  " + ln for ln in ctx.plans)
+    p.append("\nTHE MOVES (verified facts; [brackets] are exact descriptions — never contradict them):")
+    for m in moves:
+        bits = [f"{m.side}'s {m.what}", f"verdict: {m.verdict}" + (f" (engine preferred {m.best})" if m.best else "")]
+        if m.book:
+            bits.append("known opening theory")
+        if m.motifs:
+            bits.append("tactics: " + "; ".join(m.motifs))
+        if m.changes:
+            bits.append("changes: " + " ".join(m.changes[:3]))
+        bits.append(f"afterwards {m.eval_after}")
+        if m.engine_next:
+            bits.append(f"engine expected: {m.engine_next}")
+        p.append(f"- {m.label} ({m.side}) [{' | '.join(bits)}]")
+    if ctx.hindsight:
+        p.append(f"\nWhat actually happened after this stretch: {ctx.hindsight}.")
+    p.append(
+        "\nWrite a commentator's line for EACH move above, in order, in exactly this format:\n"
+        "<move label exactly as given, e.g. 11. axb4>: <1-2 sentences>\n"
+        "- Say what the move is trying to do and why now: the plan it belongs to (space, a pawn break, "
+        "opening a file, bringing a piece to a wing, attacking the king, prophylaxis) and how it answers "
+        "or continues the moves around it. Use the plans, the engine's expected continuation and what "
+        "actually happened next as your evidence.\n"
+        "- Name the side in every line (White or Black).\n"
+        "- For inaccuracies, mistakes and blunders, say briefly what the move allows.\n"
+        "- Moves marked 'known opening theory': one short clause.\n"
+        "Write nothing else.")
+    return "\n".join(p)
+
+
+_COMMENT_LINE = re.compile(
+    r"^\s*(?:[-*•]\s*)?[*_]*(\d+)\s*(\.\.\.|…|\.\s*\.\.\.|\.)\s*([KQRBNa-hO][A-Za-z0-9+#=x-]*)[*_]*"
+    r"\s*(?:\((?:white|black)\))?\s*[:—–-]\s*(.+)$", re.I)
+
+
+def parse_commentary(text: str, moves: list[CommentaryMove]) -> dict[str, str]:
+    """{move label: comment}. Matches by number, side and SAN, tolerating format drift."""
+    by_key = {}
+    for m in moves:
+        n, dots = m.label.split(" ")[0].rstrip("."), "..." in m.label
+        by_key[(n, dots, norm_san(m.san))] = m.label
+    out: dict[str, str] = {}
+    unmatched: list[str] = []
+    for raw in text.splitlines():
+        hit = _COMMENT_LINE.match(raw.strip())
+        if not hit:
+            continue
+        num, dots, san, comment = hit.groups()
+        key = (num, "." != dots.replace(" ", ""), norm_san(san))
+        label = by_key.get(key) or next((lbl for (k_n, _, k_san), lbl in by_key.items()
+                                         if k_n == num and k_san == norm_san(san)), None)
+        if label and label not in out:
+            out[label] = comment.strip()
+        else:
+            unmatched.append(comment.strip())
+    return out
 
 
 # --------------------------------------------------------------- position
@@ -272,10 +416,10 @@ def build_position_prompt(board: chess.Board, lines: list[Line], features: list[
         f"Position: {side} to move. Pieces — {piece_placement(board)}.",
         f"You are coaching the {persp} player: assess the position from {persp}'s perspective — "
         "their plans, their problems, what they should aim for.",
-        "Engine candidate moves for the side to move, best first ([brackets] state what each move "
+        f"Engine candidate moves for {side} (to move), best first ([brackets] state what each move "
         "physically is — never contradict them):",
         *(f"  {i}. {ln.move_san} [{candidate_desc(board, ln.move_san)}] — {line_eval_words(ln, board)} "
-          f"— line: {ln.pv_text}" for i, ln in enumerate(lines, 1)),
+          f"— line: {side_line(board, ln.pv_san)}" for i, ln in enumerate(lines, 1)),
         "Position facts (verified):",
         *(f"  {x}" for x in features),
         "\nReply in EXACTLY this format, both sections mandatory:",
@@ -289,30 +433,30 @@ def build_position_prompt(board: chess.Board, lines: list[Line], features: list[
 
 # --------------------------------------------------------------- review
 
-GAME_REVIEW_SYSTEM = """You are a patient chess coach giving a post-game review. You \
-receive a VERIFIED move-by-move record: each move with its engine verdict, the \
-evaluation trajectory, accuracy scores, the opening identification, and the biggest swings.
+GAME_REVIEW_SYSTEM = """You are a patient chess coach and commentator giving a post-game \
+review. You receive a VERIFIED record: each move with its engine verdict, the evaluation \
+trajectory, accuracy scores, the opening, the biggest swings and, when available, the \
+commentary written for each stretch of the game.
 
-Write a SHORT review with exactly these two sections (markdown headers). Detailed \
-per-move commentary lives elsewhere in the app — do NOT walk through the game move \
-by move here.
-## Summary — 3-5 sentences: the opening (name it and say how well it was handled) \
-and the overall shape of the game — who stood better when and why, citing at most \
-the 2-3 decisive move numbers.
-## Key takeaways — 2-4 concrete, transferable lessons drawn from the mistakes in \
-THIS game, as bullet points each starting with '- ' (e.g. "- you traded a developed \
-piece for tempo twice; ask what the capture concedes before taking"). These are the \
-things to practise before the next game.
+Write the review with exactly these three sections (markdown headers):
+## Summary — 2-4 sentences: the opening (name it) and the overall result of the \
+battle — who stood better when and why.
+## How the game unfolded — 3-6 bullet points, one per phase or turning point, each \
+starting with '- ' and the move range (e.g. "- Moves 8-12: White expands on the queenside \
+with b4 and a3 while Black ..."). Tell the story of the plans each side pursued, how they \
+collided, and where the balance shifted.
+## Key takeaways — 2-4 concrete, transferable lessons drawn from THIS game, as bullet \
+points each starting with '- '. These are the things to practise before the next game.
 
 Hard rules:
 - Cite only moves and verdicts present in the record. Do not invent tactics or lines.
-- Explain in chess concepts; never mention centipawns (say "slightly worse", "winning").
-- If coaching one side, address them as "you" and focus lessons on their moves."""
+- Always name the side (White/Black); if coaching one side you may also say "you".
+- Explain in chess concepts; never mention centipawns (say "slightly worse", "winning")."""
 
 
 def build_game_review_prompt(
     headers: dict,
-    move_records: list[str],   # "9... b5 — mistake (best Na6); after it White is clearly better"
+    move_records: list[str],   # "9... Black b5 — mistake (best Na6); after it White is clearly better"
     opening_name: str,
     turning_points: list[str],
     side_filter: str | None,
@@ -320,6 +464,7 @@ def build_game_review_prompt(
     time_class: str = "",
     player_context: str = "",
     accuracy: dict | None = None,
+    commentary: list[str] | None = None,
 ) -> str:
     parts: list[str] = []
     w, b = headers.get("White", "White"), headers.get("Black", "Black")
@@ -334,7 +479,7 @@ def build_game_review_prompt(
         parts.append("Accuracy (0-100, Lichess method): " + ", ".join(
             f"{k.capitalize()} {v}%" for k, v in accuracy.items() if v is not None) + ".")
     if side_filter:
-        parts.append(f"You are coaching {side_filter.capitalize()}. Focus the review and lessons on their play.")
+        parts.append(f"You are coaching {side_filter.capitalize()}. Focus the lessons on their play.")
     if time_class:
         parts.append(f"Time control: {time_class}. Judge decisions accordingly — fast games reward "
                      "practical choices and time management, not perfect play.")
@@ -351,6 +496,9 @@ def build_game_review_prompt(
     if turning_points:
         parts.append("\nBiggest swings in winning chances (the turning points):")
         parts.extend("  " + t for t in turning_points)
+    if commentary:
+        parts.append("\nCommentary written during the analysis (verified against the board):")
+        parts.extend("  " + c for c in commentary)
     parts.append("\nWrite the post-game review.")
     return "\n".join(parts)
 
@@ -365,7 +513,8 @@ Rules:
 - Ground every tactical claim in the provided context; if the context doesn't cover the \
 question, say so honestly and answer with general chess principles instead, clearly \
 labelled as general advice.
-- Never invent concrete moves or variations that are not in the context.
+- Never invent concrete moves or variations that are not in the context, and always say \
+which side (White or Black) a move belongs to.
 - Be concise and conversational. Explain in chess concepts, never centipawns.
 - It's fine to answer general chess questions (openings, plans, rules of thumb)."""
 
@@ -402,6 +551,11 @@ def build_player_summary_prompt(stats: dict, reviews: list, profile: dict | None
                      "(lower is better; ~20 strong club, ~80 beginner)")
     parts.append(f"  Blunders per game: {stats.get('blunders_per_game', '?')}, "
                  f"mistakes per game: {stats.get('mistakes_per_game', '?')}")
+    for phase, acc in (stats.get("phase_accuracy") or {}).items():
+        if acc is not None:
+            parts.append(f"  Accuracy in the {phase}: {acc}%")
+    for pattern in stats.get("patterns", []):
+        parts.append(f"  Recurring mistake type: {pattern['label']} — {pattern['count']} times")
     for o in stats.get("openings", []):
         parts.append(f"  Opening: {o['name']} — {o['games']} games, "
                      f"{o['w']}W/{o['l']}L/{o['d']}D, avg cp loss {o['acpl']}")
@@ -451,75 +605,199 @@ def split_sections(text: str) -> tuple[str, dict[str, str]]:
 
 
 def norm_san(san: str) -> str:
-    """Loose SAN form for matching model output ('Nbxd7+' → 'Nd7', 'exd5' → 'd5')."""
+    """Loose SAN form for matching model output.
+
+    Piece moves drop disambiguation and capture marks ('Nbxd7+' → 'Nd7'), but a
+    pawn capture keeps its file ('exd5'), because 'bxa5' and the push 'a5' are
+    different moves (possibly by different sides).
+    """
     s = re.sub(r"[+#!?]", "", san).replace("=", "")
     if s.startswith("O-O"):
         return s
-    m = re.match(r"([KQRBN])?[a-h]?[1-8]?x?([a-h][1-8])([QRBN])?$", s)
+    m = re.match(r"([KQRBN])?([a-h])?[1-8]?(x)?([a-h][1-8])([QRBN])?$", s)
     if not m:
         return s
-    return (m.group(1) or "") + m.group(2) + (m.group(3) or "")
+    piece, origin, capture, dest, promo = m.groups()
+    if piece:
+        return piece + dest + (promo or "")
+    return (f"{origin}x" if capture and origin else "") + dest + (promo or "")
 
 
 # --------------------------------------------------------------- fact-check
 
-_SAN_TOKEN = re.compile(r"(?<![\w-])(O-O-O|O-O|[KQRBN][a-h]?[1-8]?x?[a-h][1-8]|[a-h]x[a-h][1-8](?:=?[QRBN])?)(?![\w-])")
+# Piece moves, pawn captures and castling are unambiguous move notation.
+_SAN_TOKEN = re.compile(r"(?<![\w.-])(O-O-O|O-O|[KQRBN][a-h]?[1-8]?x?[a-h][1-8](?:=?[QRBN])?"
+                        r"|[a-h]x[a-h][1-8](?:=?[QRBN])?)(?![\w-])")
+# A bare square is a pawn move only in move context: "...a5", "12. c4", "play a5", "the a5 break".
+_MOVE_VERB = (r"(?:play|plays|played|playing|push|pushes|pushed|pushing|prepar(?:e|es|ed|ing)(?:\s+to\s+play)?|"
+              r"threaten(?:s|ed|ing)?(?:\s+to\s+play)?|answer(?:s|ed)?\s+with|repl(?:y|ies|ied)\s+with|"
+              r"follow(?:s|ed)?\s+up\s+with|continu(?:e|es|ed)\s+with|"
+              r"move\s+(?:is|was|(?:may|might|could|would|will)\s+be)(?:\s+to\s+play)?)")
+_PAWN_MOVE = re.compile(
+    rf"(?P<dots>\.\.\.|…)\s?(?P<b>[a-h][1-8](?:=?[QRBN])?)(?![\w-])"
+    rf"|(?<![\w.])(?P<num>\d+)\.\s?(?P<w>[a-h][1-8](?:=?[QRBN])?)(?![\w-])"
+    rf"|\b{_MOVE_VERB}\s+(?:the\s+)?(?P<v>[a-h][1-8](?:=?[QRBN])?)(?![\w-])"
+    rf"|(?<![\w.-])(?P<s>[a-h][1-8])\s+(?:push|break|advance|thrust|lever)\b", re.I)
+_DOTTED_SAN = re.compile(r"(\.\.\.|…|(?<![\w.])\d+\.)\s?(O-O-O|O-O|[KQRBN][a-h]?[1-8]?x?[a-h][1-8]|[a-h]x[a-h][1-8])")
+_SIDE_WORD = re.compile(r"\b(white|black|you|your|yours|opponent)\b", re.I)
 # Only definite references ("the/your/White's knight on d5") are claims about the board;
 # "a knight on d5 would be strong" is a legitimate hypothetical and is not checked.
 _PIECE_ON = re.compile(r"\b(the|your|their|his|her|white's|black's|white|black)\s+"
                        r"(king|queen|rook|bishop|knight|pawn)\s+(?:on|at)\s+([a-h][1-8])\b", re.I)
+_CAPTURED = re.compile(
+    r"\b(?P<owner>white's|black's|white|black|your|the|their|his|her)\s+(?P<piece>king|queen|rook|bishop|knight|pawn)"
+    r"\s+(?:on|at|from)\s+(?P<sq>[a-h][1-8])\s+(?:has\s+been|had\s+been|was|is|gets|got)\s+"
+    r"(?:captured|taken|won|lost|exchanged|traded)"
+    r"|\b(?:captures|captured|takes|took|wins|won)\s+(?P<owner2>white's|black's|the|your|a)?\s*"
+    r"(?P<piece2>king|queen|rook|bishop|knight|pawn)\s+(?:on|at)\s+(?P<sq2>[a-h][1-8])", re.I)
+# Sentence breaks, but never inside move notation such as "12. Qc7" or "11... Qc7".
+_SENTENCE = re.compile(r"(?<=[.!?])(?<!\d\.)(?<!\.\.)\s+(?=[A-Z0-9\"'(“])")
 _PIECE_TYPES = {name: chess.PIECE_NAMES.index(name) for name in chess.PIECE_NAMES if name}
 
 
 class EvidenceIndex:
-    """Everything a note may legitimately mention: moves and piece placements
-    from the positions before/after the move and along every line shown."""
+    """Everything a note may legitimately mention, per side.
 
-    def __init__(self, board: chess.Board, move: chess.Move, lines: list[tuple[chess.Board, list[str]]]):
-        self.moves: set[str] = set()
+    Built from the positions before/after the move(s) being described and every
+    line shown to the model (candidates, refutations, what happened next). A
+    move token in the note must be playable by the side the sentence attributes
+    it to; piece locations and captures must match some position or move shown.
+    """
+
+    def __init__(self, anchors: list[tuple[chess.Board, chess.Move]],
+                 lines: list[tuple[chess.Board, list[str]]] = (), coached: chess.Color | None = None):
+        self.coached = coached
+        self.moves: dict[bool, set[str]] = {chess.WHITE: set(), chess.BLACK: set()}
         self.pieces: set[tuple[bool, int, int]] = set()
-        after = board.copy(stack=False)
-        after.push(move)
-        self._add_position(board)
-        self._add_position(after)
+        self.captures: set[tuple[bool, int, int]] = set()
+        self._seen: set[str] = set()
+        for board, move in anchors:
+            self._add_position(board)
+            self._add_capture(board, move)
+            after = board.copy(stack=False)
+            after.push(move)
+            self._add_position(after)
         for start, sans in lines:
+            self._add_position(start)
             b = start.copy(stack=False)
             for san in sans:
                 try:
                     mv = b.parse_san(san)
                 except ValueError:
                     break
-                self.moves.add(norm_san(san))
+                self.moves[b.turn].add(norm_san(san))
+                self._add_capture(b, mv)
                 b.push(mv)
                 self._add_position(b)
 
+    @classmethod
+    def for_move(cls, board: chess.Board, move: chess.Move, lines: list[tuple[chess.Board, list[str]]] = (),
+                 coached: chess.Color | None = None) -> EvidenceIndex:
+        return cls([(board, move)], lines, coached)
+
     def _add_position(self, b: chess.Board) -> None:
+        key = b.fen()
+        if key in self._seen:
+            return
+        self._seen.add(key)
         for sq, piece in b.piece_map().items():
             self.pieces.add((piece.color, piece.piece_type, sq))
         if not b.is_game_over():
-            self.moves.update(norm_san(b.san(mv)) for mv in b.legal_moves)
+            self.moves[b.turn].update(norm_san(b.san(mv)) for mv in b.legal_moves)
+
+    def _add_capture(self, b: chess.Board, mv: chess.Move) -> None:
+        if b.is_en_passant(mv):
+            sq = mv.to_square + (-8 if b.turn == chess.WHITE else 8)
+            self.captures.add((not b.turn, chess.PAWN, sq))
+        elif b.is_capture(mv):
+            self.captures.add((not b.turn, b.piece_type_at(mv.to_square), mv.to_square))
+
+    def _side_of(self, word: str) -> chess.Color | None:
+        w = word.lower()
+        if w == "white":
+            return chess.WHITE
+        if w == "black":
+            return chess.BLACK
+        if self.coached is None:
+            return None
+        return self.coached if w in ("you", "your", "yours") else not self.coached
+
+    def _sentence_problems(self, sentence: str) -> list[str]:
+        issues: list[str] = []
+        mentions = [(m.start(), self._side_of(m.group(1))) for m in _SIDE_WORD.finditer(sentence)]
+
+        def side_near(pos: int) -> chess.Color | None:
+            before = [s for p, s in mentions if p < pos]
+            if before:
+                return before[-1]
+            after = [s for p, s in mentions if p > pos]
+            return after[0] if after else None
+
+        def check(token: str, side: chess.Color | None) -> None:
+            key = norm_san(token)
+            sides = (side,) if side is not None else (chess.WHITE, chess.BLACK)
+            if not any(key in self.moves[s] for s in sides):
+                who = f"{'White' if side == chess.WHITE else 'Black'} can play" if side is not None else "can be played"
+                issues.append(f"'{token}' is not a move {who} in any position or line shown")
+
+        dotted = {}
+        for m in _DOTTED_SAN.finditer(sentence):
+            dotted[m.start(2)] = chess.BLACK if m.group(1) in ("...", "…") else chess.WHITE
+        for m in _SAN_TOKEN.finditer(sentence):
+            check(m.group(1), dotted.get(m.start(1), side_near(m.start(1))))
+        for m in _PAWN_MOVE.finditer(sentence):
+            if m.group("b"):
+                check(m.group("b"), chess.BLACK)
+            elif m.group("w"):
+                check(m.group("w"), chess.WHITE)
+            else:
+                token = m.group("v") or m.group("s")
+                check(token, side_near(m.start()))
+        for owner, name, sq in _PIECE_ON.findall(sentence):
+            ptype, square = _PIECE_TYPES[name.lower()], chess.parse_square(sq.lower())
+            side = self._side_of(owner.removesuffix("'s")) if owner.lower() not in ("the", "their", "his", "her") \
+                else None
+            sides = (side,) if side is not None else (chess.WHITE, chess.BLACK)
+            if not any((c, ptype, square) in self.pieces for c in sides):
+                who = f"{'White' if side == chess.WHITE else 'Black'}'s " if side is not None else ""
+                issues.append(f"there is no {who}{name.lower()} on {sq.lower()} in any position shown")
+        for m in _CAPTURED.finditer(sentence):
+            owner = (m.group("owner") or m.group("owner2") or "").lower().removesuffix("'s")
+            name = (m.group("piece") or m.group("piece2")).lower()
+            square = chess.parse_square((m.group("sq") or m.group("sq2")).lower())
+            side = self._side_of(owner) if owner in ("white", "black", "your") else None
+            sides = (side,) if side is not None else (chess.WHITE, chess.BLACK)
+            if not any((c, _PIECE_TYPES[name], square) in self.captures for c in sides):
+                who = f"{'White' if side == chess.WHITE else 'Black'}'s " if side is not None else "the "
+                issues.append(f"{who}{name} on {chess.square_name(square)} is not captured in any move shown "
+                              "(check which piece captured and which was captured)")
+        return issues
 
     def problems(self, text: str) -> list[str]:
         """Claims in `text` that the evidence does not support."""
-        issues = []
-        for tok in dict.fromkeys(_SAN_TOKEN.findall(text)):
-            if norm_san(tok) not in self.moves:
-                issues.append(f"'{tok}' is not a legal move here and appears in none of the given lines")
-        for owner, name, sq in _PIECE_ON.findall(text):
-            ptype, square = _PIECE_TYPES[name.lower()], chess.parse_square(sq.lower())
-            owner = owner.lower().removesuffix("'s")
-            colors = (owner == "white",) if owner in ("white", "black") else (True, False)
-            if not any((c, ptype, square) in self.pieces for c in colors):
-                who = f"{owner.capitalize()} " if owner in ("white", "black") else ""
-                issues.append(f"there is no {who}{name.lower()} on {sq.lower()} in any position shown")
-        return issues
+        out: list[str] = []
+        for sentence in _SENTENCE.split(text):
+            for issue in self._sentence_problems(sentence):
+                if issue not in out:
+                    out.append(issue)
+        return out
+
+    def clean(self, text: str) -> tuple[str, int]:
+        """Drop sentences that still contain unsupported claims. Returns (text, sentences removed)."""
+        kept, removed = [], 0
+        for sentence in _SENTENCE.split(text.strip()):
+            if self._sentence_problems(sentence):
+                removed += 1
+            else:
+                kept.append(sentence)
+        return " ".join(kept).strip(), removed
 
 
 def correction_prompt(problems: list[str]) -> str:
     return ("Your answer contains claims that do not match the verified evidence:\n"
             + "\n".join(f"- {p}" for p in problems)
-            + "\nRewrite your answer in the same format, using only moves, pieces and squares from the "
-              "evidence.")
+            + "\nRewrite your answer in the same format. Check which side each move belongs to, and use "
+              "only moves, pieces and squares from the evidence.")
 
 
 def time_note(side: str, think_s: float | None, clock_s: float | None, time_class: str) -> str:
@@ -534,15 +812,10 @@ def time_note(side: str, think_s: float | None, clock_s: float | None, time_clas
     return note + "."
 
 
-def game_so_far_text(root: chess.Board, sans: list[str]) -> str:
-    """Numbered movetext of the game up to (not including) the current move."""
-    from .engine import numbered_line
-    return numbered_line(root, sans) if sans else "(game start)"
-
-
 __all__ = [
     "COACH_CHAT_SYSTEM", "COACH_RULES", "GAME_REVIEW_SYSTEM", "LEVEL_NOTES", "PLAYER_SUMMARY_SYSTEM",
-    "EvidenceIndex", "build_game_review_prompt", "build_ideas_prompt", "build_move_prompt",
-    "build_player_summary_prompt", "build_position_prompt", "build_system_prompt", "candidate_desc",
-    "correction_prompt", "game_so_far_text", "norm_san", "split_sections", "time_note",
+    "CommentaryContext", "CommentaryMove", "EvidenceIndex", "build_commentary_prompt",
+    "build_game_review_prompt", "build_ideas_prompt", "build_move_prompt", "build_player_summary_prompt",
+    "build_position_prompt", "build_system_prompt", "candidate_desc", "correction_prompt",
+    "eval_after_words", "norm_san", "parse_commentary", "side_line", "split_sections", "time_note",
 ]

@@ -327,6 +327,19 @@ def save_settings(values: dict) -> dict:
     return merged
 
 
+def get_json(key: str, default=None):
+    """Small JSON documents kept in the kv table (queue state, learned timings)."""
+    try:
+        raw = _get_kv(key)
+        return json.loads(raw) if raw else default
+    except (json.JSONDecodeError, sqlite3.Error):
+        return default
+
+
+def set_json(key: str, value) -> None:
+    _set_kv(key, json.dumps(value, separators=(",", ":")))
+
+
 # ---------------------------------------------------------------- caches
 
 class EngineCache:

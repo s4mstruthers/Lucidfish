@@ -58,6 +58,8 @@ def annotated_pgn(pgn_text: str, moves: list[dict], review: str = "",
             tag = _eval_tag(m.get("eval", ""))
             if tag:
                 parts.append(f"[%eval {tag}]")
+            if m.get("flow"):
+                parts.append(m["flow"].strip())
             if m.get("expl"):
                 parts.append(m["expl"].strip())
             if parts:
@@ -118,6 +120,8 @@ def markdown_report(headers: dict, moves: list[dict], review: str = "", opening:
         if m.get("best") and m["best"] != m["san"]:
             line += f" · best {m['best']}"
         out.append(line + "  ")
+        if m.get("flow"):
+            out.append(f"*{m['flow'].strip()}*  ")
         if m.get("expl"):
             out.append(m["expl"].strip())
         out.append("")

@@ -50,7 +50,8 @@ def build_parser() -> argparse.ArgumentParser:
     coach.add_argument("--side", choices=["white", "black"], help="coach this side (auto-detected for fetched games)")
     coach.add_argument("--elo", type=int, help="your rating — tailors explanations to your level")
     coach.add_argument("--detail", choices=DETAIL_LEVELS,
-                       help="how much the coach writes (default: standard)")
+                       help="key = mistakes and critical moments only; standard = commentary on every move "
+                            "plus notes on mistakes (default); full = a detailed note on every move")
     coach.add_argument("--explain-all", action="store_true", help="same as --detail full")
     coach.add_argument("--provider", choices=list(PROVIDERS), help="AI provider (default: ollama)")
     coach.add_argument("--model", help="model name, e.g. llama3.1:8b or gpt-4.1-mini")
@@ -211,6 +212,8 @@ def _print_report(report, console: Console) -> None:
         tags = f"  [magenta]{', '.join(m.tags)}[/magenta]" if m.tags else ""
         crit = "  [cyan]critical[/cyan]" if m.critical else ""
         console.print(f"[bold]{prefix} {m.san}[/bold]  {badge}  eval {m.eval_str}{extra}{crit}{tags}")
+        if m.commentary:
+            console.print(f"   [italic]{m.commentary}[/italic]")
         if m.explanation:
             console.print(f"   [dim]{m.explanation}[/dim]\n")
     if report.review:

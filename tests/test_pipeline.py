@@ -1,3 +1,4 @@
+import re
 import threading
 
 import pytest
@@ -26,13 +27,14 @@ def test_parse_game_errors_and_warnings():
 
 def test_plan_note_matrix():
     plan = pipeline.plan_note
-    assert plan("key", "white", "White", "blunder", False, False) == "full"
-    assert plan("key", "white", "White", "good", False, False) is None
-    assert plan("standard", "white", "White", "good", False, False) == "brief"
-    assert plan("standard", "white", "Black", "good", False, False) is None
-    assert plan("standard", "white", "Black", "good", False, True) == "opponent"
-    assert plan("full", "white", "Black", "best", False, False) == "opponent"
-    assert plan("full", None, "Black", "best", False, False) == "full"
+    assert plan("key", "white", "White", "blunder", False) == "full"
+    assert plan("key", "white", "White", "good", False) is None
+    assert plan("key", "white", "White", "best", True) == "full"          # critical moment
+    assert plan("key", "white", "Black", "blunder", False) is None        # opponent's errors: no note
+    assert plan("standard", "white", "White", "good", False) is None      # covered by commentary windows
+    assert plan("standard", "white", "White", "mistake", False) == "full"
+    assert plan("full", "white", "Black", "best", False) == "opponent"
+    assert plan("full", None, "Black", "best", False) == "full"
 
 
 class FakeLLM:
@@ -40,6 +42,7 @@ class FakeLLM:
 
     def __init__(self, fail: Exception | None = None):
         self.calls = 0
+        self.windows = 0
         self.fail = fail
         self.lock = threading.Lock()
 
@@ -56,6 +59,11 @@ class FakeLLM:
         prompt = messages[-1]["content"]
         if "Write the post-game review" in prompt:
             return "## Summary\nGood game.\n## Key takeaways\n- Develop."
+        if prompt.startswith("COMMENTARY WINDOW"):
+            with self.lock:
+                self.windows += 1
+            labels = re.findall(r"^- (\S+ \S+) \((White|Black)\)", prompt, re.M)
+            return "\n".join(f"{label}: {side} continues the plan." for label, side in labels)
         return "EXPLANATION:\nA grounded note."
 
     def generate(self, system, prompt, *, max_tokens=None):
@@ -91,6 +99,22 @@ def test_notes_follow_detail_level(monkeypatch):
     assert all(m.side == "White" for m in noted)
     assert report.review.startswith("## Summary")
     assert [m.ply for m in report.moves] == list(range(33))   # in order despite parallel notes
+
+
+@needs_engine
+def test_standard_detail_comments_on_every_move_in_windows(monkeypatch):
+    llm = FakeLLM()
+    _patch_llm(monkeypatch, llm)
+    cfg = fast_config(enabled=True)
+    cfg.analysis.detail = "standard"
+    report = pipeline.analyze_game(SAMPLE_PGN, cfg, side_filter="white")
+    assert all(m.commentary.startswith(m.side) for m in report.moves)   # both players, every move
+    assert llm.windows == -(-len(report.moves) // pipeline.WINDOW)     # 8 plies per request
+    assert llm.calls < len(report.moves)                                # cheaper than one call per move
+    assert all(m.explanation for m in report.moves
+               if m.side == "White" and m.classification in pipeline.ERRORS)
+    assert report.moves[0].book and report.moves[0].phase == "opening"
+    assert report.moves[0].to_dict()["flow"] == report.moves[0].commentary
 
 
 @needs_engine
