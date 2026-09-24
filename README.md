@@ -26,6 +26,7 @@ The feedback is pitched at your level and linked to the mistakes you keep making
 - [Choosing an AI coach](#choosing-an-ai-coach)
 - [Using API keys safely](#using-api-keys-safely)
 - [Using the web app](#using-the-web-app)
+- [Sharing a profile](#sharing-a-profile)
 - [Command line](#command-line)
 - [Configuration](#configuration)
 - [How accurate is the feedback?](#how-accurate-is-the-feedback)
@@ -66,6 +67,18 @@ The feedback is pitched at your level and linked to the mistakes you keep making
   move on the board, and the engine tells you straight away whether it works and, if not,
   shows the line that refutes it. The answer to your own mistakes stays hidden until you
   have tried (or choose to see it), so you actually get to think.
+- **Train on your own mistakes.** The *Train* page turns every position where you went wrong,
+  across all your games, into a puzzle. Solve it and it comes back less and less often (after
+  1, 3, 7, 16 and 35 days); miss it and it returns at the end of the session and again the
+  next day. This is spaced repetition, the way flashcard apps make things stick.
+- **Explore any position.** Press 🔍 *Explore* (<kbd>E</kbd>) and move the pieces yourself:
+  Stockfish runs inside the browser and shows the evaluation and its three best lines as you
+  go. Take moves back and forth with the arrow keys.
+- **Share a profile with someone who doesn't run Lucidfish.** Save a profile as a single web
+  page (or keep one up to date in a shared iCloud Drive, Google Drive or Dropbox folder). It
+  opens in any browser with nothing to install and no API key, and it stays interactive:
+  practise, train, explore with the built-in engine, and draw. See
+  [Sharing a profile](#sharing-a-profile).
 - **Draw on the board.** Right-click to circle a square, right-drag to draw an arrow (Shift
   for red, Alt for blue), or use the ✎ pen on a tablet. Drawings are saved with the game
   and exported in the annotated PGN.
@@ -370,8 +383,8 @@ keychain app.
 Start it with `./scripts/start.sh`, `scripts\start.bat`, or `lucidfish web`. It opens
 `http://127.0.0.1:8420`; if that port is busy, it uses the next free one and prints the address.
 
-The app has three sections: **Home** (your progress), **Games** (your analysed games and new
-ones to analyse) and **Board editor**. Your profile is in the top-right corner; ⚙ **Settings**
+The app has four sections: **Home** (your progress), **Games** (your analysed games and new
+ones to analyse), **Train** (puzzles from your mistakes) and **Board editor**. Your profile is in the top-right corner; ⚙ **Settings**
 is next to it.
 
 1. **Create a profile** (first launch): your name, level, and chess.com / Lichess usernames.
@@ -417,11 +430,59 @@ is next to it.
    Markdown report from the game header.
 10. **Board editor:** set up any position (or paste a FEN) and ask for an assessment from
     either side's point of view.
+11. **Explore:** press *🔍 Explore* under the board (or <kbd>E</kbd>) to leave the game and move
+    the pieces yourself. The engine (Stockfish, running in your browser) shows the evaluation,
+    an arrow for its best move and its three best lines; click a line to play its first move.
+    <kbd>←</kbd>/<kbd>→</kbd> take moves back and replay them, *⟲ Reset* returns to where you
+    started, and <kbd>Esc</kbd> or *✕ Done* goes back to the game. During practice, Explore
+    unlocks once you've tried the position.
+12. **Train:** the *Train* page lists how many puzzles are new, due for review, being learned
+    and mastered. *Start training* gives you a session of 5, 10 or 20: first the ones due for
+    review, then new ones, the costliest mistakes first. Each puzzle opens in its game, so after
+    solving it you can read the coach's note, play out the lines, or explore. Solve a puzzle on
+    the first try and it moves up a level; miss it (or ask for the answer) and it starts again.
+    Progress is saved in your browser.
 
 The **Home** page shows your record, average accuracy, patterns across your games, your
 accuracy in each phase of the game (with your weakest phase highlighted), your most common
 mistake types, your openings and how you score in them, and the coach's written review of
 your progress.
+
+## Sharing a profile
+
+Lucidfish needs a reasonably fast computer for the analysis, but the *results* can go
+anywhere. Someone without Lucidfish (a partner, a student, a friend on a Chromebook) can get
+a profile as **one web page**:
+
+- Click your name in the top-right corner → **Share this profile**.
+- **Download the page** and send it by email, AirDrop or a chat app. Or
+- **keep it up to date in a shared folder**: pick a folder that syncs to their computer (a
+  shared iCloud Drive, Google Drive, Dropbox or OneDrive folder; Lucidfish suggests the ones it
+  finds). The page is rewritten after every analysis of that profile, so they always open the
+  latest version. The file is replaced in one step, so a sync app never picks up half a file.
+
+The page is the normal app with the profile's games built in. It opens from disk in any modern
+browser (Chrome, Edge, Firefox, Safari) on a laptop or desktop, works offline, needs no AI or
+API key, and never contacts a server. They can:
+
+- browse the games, the commentary, the chapters and the review, and see the Home page's
+  statistics and patterns;
+- **practise their mistakes** and **train** with spaced repetition (progress is saved in their
+  browser, and carries over when a newer copy replaces the file, as the shared folder does);
+- **explore** any position with the built-in engine;
+- draw on the board (also saved in their browser).
+
+The built-in engine is Stockfish compiled to WebAssembly, and it makes the page about 10 MB.
+Untick *Include the chess engine* (or use `lucidfish share --no-engine`) for a page under
+1 MB. Without the engine, practice moves are judged only against the engine's top moves
+stored with each game, and Explore can move the pieces but shows no evaluation.
+
+Things that need Lucidfish itself are hidden in the shared page: analysing new games, the AI
+coach chat and the board editor.
+
+On a phone the page opens in the browser too, but some phones preview downloaded HTML files
+without running them (the iPhone's Files and Mail previews, for example): use *Open in
+Safari/Chrome*, or open it on a laptop.
 
 ## Command line
 
@@ -439,6 +500,7 @@ lucidfish game.pgn --provider anthropic --model claude-sonnet-5
 lucidfish game.pgn --pgn-out annotated.pgn --out report.md --json analysis.json
 lucidfish --check                                  # diagnose Stockfish and the AI coach
 lucidfish web                                      # start the web app
+lucidfish share --profile Ann --out ~/Dropbox      # save a profile as one web page (see above)
 ```
 
 (Without installing the package, use `python -m lucidfish` instead of `lucidfish`.)
@@ -504,6 +566,14 @@ the evidence is checked in several ways:
   correct any problem, and sentences that are still wrong are removed rather than shown.
   (For example, after White's a-pawn has captured on b4, "your opponent's next move may be
   a5" is rejected: White has no a-pawn left.)
+- **The post-game review is checked too.** The coach is given verified facts about the game
+  as a whole: how it ended (for example, lost on time with a forced mate on the board), which
+  kinds of endgame it reached, if any, and the clock. Afterwards, sentences about an endgame
+  the game never reached ("review king and pawn endings" after a game that ended with queens
+  and rooks on the board) or about time trouble the clocks don't show are removed. Each key
+  takeaway must point at a move or a verified fact, so stock advice ("work on your pawn
+  structure") is dropped. When no takeaway survives, Lucidfish writes them from the facts:
+  the costliest mistakes and what was better.
 - **Accuracy percentages** use the formula Lichess publishes, so they are directly comparable.
 
 Limits: at low depth (the *Fast* preset), very deep combinations can still be misjudged, so use
@@ -586,12 +656,15 @@ folder and the network is disabled. CI runs the suite on Linux, macOS and Window
 
 - Real-time coaching from a connected board (e.g. ChessUp 2 over Bluetooth)
 - "What would a human play?" suggestions (Maia)
-- Spaced-repetition review of the positions you got wrong
 
 ## Acknowledgements and licences
 
-- [Stockfish](https://stockfishchess.org) — the engine (GPL-3.0). It is installed separately
-  and not distributed with Lucidfish.
+- [Stockfish](https://stockfishchess.org) — the engine (GPL-3.0). The engine that analyses your
+  games is installed separately. For Explore mode and shared pages, Lucidfish bundles
+  [Stockfish.js](https://github.com/nmrugg/stockfish.js) 18 (the "lite, single-threaded"
+  WebAssembly build, GPL-3.0; source code at that link) in `lucidfish/static/vendor/`, and a
+  shared page carries a copy of it with its licence notice.
+- [chess.js](https://github.com/jhlywa/chess.js) (BSD-2-Clause) — legal moves in the browser.
 - [python-chess](https://github.com/niklasf/python-chess) (GPL-3.0+) — move generation, PGN,
   UCI, and the classic "Cburnett" piece images shown on the board.
 - [chessboard.js](https://chessboardjs.com) and [jQuery](https://jquery.com) (both MIT) —

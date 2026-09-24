@@ -21,7 +21,7 @@ import time
 import uuid
 from collections import deque
 
-from . import settings, store
+from . import settings, share, store
 from .config import Config
 from .llm import PROVIDERS, LLMError
 from .pipeline import DETAIL_LEVELS, analyze_game, build_coach, parse_game, prefetch_engine
@@ -484,6 +484,8 @@ class AnalysisQueue:
                 if game_id and cfg.llm.enabled:
                     with self._cond:
                         self._touched.add(profile["id"])
+                if game_id:
+                    share.sync_profile(profile["id"])   # keep a shared copy up to date, if enabled
         # Only now is the result final: a page that sees "done" can rely on the game being saved.
         with job.lock:
             job.game_id = game_id
@@ -581,4 +583,5 @@ def refresh_player_summary(pid: int) -> tuple[str, str]:
     except LLMError as e:
         return "", str(e)
     store.set_summary(pid, summary)
+    share.sync_profile(pid)
     return summary, ""

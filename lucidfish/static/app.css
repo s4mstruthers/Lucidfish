@@ -394,6 +394,18 @@ legend { font-weight: 700; margin-bottom: 8px; font-size: .95rem; }
 
 .dropzone.drag { outline: 2px dashed var(--accent); outline-offset: 4px; }
 
+/* ------------------------------------------------------------ sharing */
+.export-only { display: none !important; }
+body.export-mode .export-only { display: inline-flex !important; }
+body.export-mode .server-only { display: none !important; }
+.share-chip { align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; font-size: .82rem;
+  background: var(--surface-2); border: 1px solid var(--border); color: var(--muted); white-space: nowrap; }
+.share-opt { border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 14px 16px; }
+.share-opt .pf-h { margin-bottom: 6px; }
+.share-opt p { margin: 0 0 10px; }
+#shareStatus.ok { color: var(--c-best); }
+#shareStatus.bad { color: var(--c-blunder); }
+
 /* ------------------------------------------------------------ queue */
 .queue-pill {
   display: flex; align-items: center; gap: 8px; position: relative; overflow: hidden;
@@ -617,7 +629,7 @@ label.field.inline { flex-direction: row; align-items: center; gap: 8px; }
 
 /* ------------------------------------------------------------ drawing on the board */
 .draw-bar { display: flex; align-items: center; justify-content: center; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
-#btnDraw.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+#btnDraw.active, #btnExplore.active { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
 .swatches { display: flex; gap: 6px; }
 .swatch { width: 22px; height: 22px; min-width: 0; padding: 0; border-radius: 50%; border: 2px solid var(--surface); }
 .swatch.active { outline: 2px solid var(--text); outline-offset: 1px; }
@@ -636,3 +648,27 @@ kbd { font-family: var(--mono); font-size: .72rem; padding: 1px 5px; border-radi
 .board-holder { touch-action: manipulation; user-select: none; -webkit-user-select: none; }
 body.no-select, body.no-select * { user-select: none !important; -webkit-user-select: none !important; }
 .board-holder.drawing { touch-action: none; }
+
+/* ------------------------------------------------------------ explore */
+.explore-bar { background: color-mix(in srgb, var(--c-best) 14%, var(--surface)); flex-wrap: wrap; }
+.explore-path { margin: 0 0 10px; line-height: 1.6; }
+
+/* ------------------------------------------------------------ train */
+.train-stats { margin-bottom: 10px; }
+.train-stats .tl-due b { color: var(--accent); }
+.train-stats .tl-learning b { color: var(--c-mistake); }
+.train-stats .tl-reviewing b { color: var(--c-inaccuracy); }
+.train-stats .tl-mastered b { color: var(--c-best); }
+.tl-bar { display: flex; height: 10px; border-radius: 999px; overflow: hidden; background: var(--surface-3); }
+.tl-bar > div { min-width: 0; }
+.tl-bar .tl-new { background: var(--surface-3); }
+.tl-bar .tl-learning { background: var(--c-mistake); }
+.tl-bar .tl-reviewing { background: var(--c-inaccuracy); }
+.tl-bar .tl-mastered { background: var(--c-best); }
+.train-how { margin: 0; padding-left: 18px; display: grid; gap: 6px; }
+.train-done .chip.good { background: color-mix(in srgb, var(--c-best) 18%, transparent); color: var(--c-best); }
+.train-done .chip.bad { background: color-mix(in srgb, var(--c-blunder) 16%, transparent); color: var(--c-blunder); }
+.train-bar { padding: 12px 16px; border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.train-bar .row { gap: 12px; flex-wrap: wrap; }
+.train-bar .bar.grow { flex: 1 1 120px; min-width: 80px; }
+.train-bar .bar > div { background: var(--c-best); }

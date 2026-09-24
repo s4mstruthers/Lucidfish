@@ -40,7 +40,7 @@ import chess
 import chess.pgn
 
 from . import features as feat
-from . import plans, tactics
+from . import plans, review_check, tactics
 from .config import Config
 from .engine import EngineAnalyzer, Line, MoveAnalysis, build_move_analysis, describe_move
 from .llm import LLMError, LLMProvider, make_provider
@@ -685,9 +685,12 @@ def analyze_game(
     if coach.available and report.moves and not user_stopped():
         if progress:
             progress("review", total, total, "Writing the post-game review…")
-        prompt = _review_prompt(report, side_filter, cfg, player_context)
+        facts = review_check.game_facts(report.moves, report.headers,
+                                        side_filter.capitalize() if side_filter else None, report.opening, base_s)
+        prompt = _review_prompt(report, side_filter, cfg, player_context, facts.lines)
         try:
-            report.review = coach.hard(lambda llm: llm.generate(GAME_REVIEW_SYSTEM, prompt))
+            text = coach.hard(lambda llm: llm.generate(GAME_REVIEW_SYSTEM, prompt))
+            report.review, _removed = review_check.check_review(text, facts)
         except LLMError as e:
             report.warnings.append(f"The post-game review could not be written: {e}")
     return report
@@ -913,7 +916,8 @@ def _ensure_line_ideas(llm: LLMProvider, system: str, ev: _Evidence, ideas: dict
     return out
 
 
-def _review_prompt(report: GameReport, side_filter: str | None, cfg: Config, player_context: str) -> str:
+def _review_prompt(report: GameReport, side_filter: str | None, cfg: Config, player_context: str,
+                   game_facts: list[str] | None = None) -> str:
     records, swings, flow = [], [], []
     for m in report.moves:
         a = m.analysis
@@ -934,7 +938,7 @@ def _review_prompt(report: GameReport, side_filter: str | None, cfg: Config, pla
                                        f"from {a.win_before:.0f}% to {a.win_after:.0f}%; {m.best_san} was "
                                        f"better.{event}{spent}"))
     swings.sort(key=lambda s: -s[0])
-    facts = []
+    facts = list(game_facts or [])
     coached = side_filter.capitalize() if side_filter else None
     for i, m in enumerate(report.moves):
         prefix = f"{m.move_number}. White" if m.side == "White" else f"{m.move_number}... Black"

@@ -521,10 +521,16 @@ starting with '- ' and the move range (e.g. "- Moves 8-12: White expands on the 
 with b4 and a3 while Black ..."). Tell the story of the plans each side pursued, how they \
 collided, and where the balance shifted.
 ## Key takeaways — 2-4 concrete, transferable lessons drawn from THIS game, as bullet \
-points each starting with '- '. These are the things to practise before the next game.
+points each starting with '- '. Each one names the move it comes from (e.g. "Move 31 (Qf5): \
+...") or the verified fact it rests on. These are the things to practise before the next game.
 
 Hard rules:
 - Cite only moves and verdicts present in the record. Do not invent tactics or lines.
+- No generic advice that this game doesn't show (e.g. "study pawn structures", "practise trades").
+- Mention endgames only of the kinds the verified facts say this game reached. If it never \
+reached an endgame, give no endgame advice.
+- Mention time trouble or time management only if the clock facts or the way the game ended \
+show it.
 - Always name the side (White/Black); if coaching one side you may also say "you".
 - Explain in chess concepts; never mention centipawns (say "slightly worse", "winning")."""
 
