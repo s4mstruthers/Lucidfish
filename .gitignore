@@ -30,6 +30,8 @@ env/
 # Engine & model binaries (large, download separately)
 stockfish
 stockfish*
+# ...except the in-browser engine (WebAssembly) that the web page ships with
+!lucidfish/static/vendor/stockfish-*
 *.nnue
 models/
 *.gguf

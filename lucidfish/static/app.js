@@ -10,7 +10,9 @@
 /* ================================================================ utilities */
 
 const $ = (id) => document.getElementById(id);
-const PIECES = "/pieces/{piece}.svg";
+/* A shared copy (see share.py) carries its data inside the page and has no server behind it. */
+const EXPORT = window.LUCIDFISH_EXPORT || null;
+const PIECES = EXPORT ? (piece) => EXPORT.pieces[piece] : "/pieces/{piece}.svg";
 const SYMBOLS = { best: "✓", good: "○", inaccuracy: "?!", mistake: "?", blunder: "??" };
 const LABELS = { best: "Best", good: "Good", inaccuracy: "Inaccuracy", mistake: "Mistake", blunder: "Blunder" };
 const ERRORS = ["inaccuracy", "mistake", "blunder"];
@@ -59,6 +61,7 @@ const RESTART_MESSAGE = "Lucidfish needs a restart to finish updating: this page
 
 /** fetch() wrapper: JSON in/out, the CSRF header, and readable errors. */
 async function api(path, { method = "GET", body, raw = false } = {}) {
+  if (EXPORT) return exportApi(path, { method, body });
   const opts = { method, headers: { "X-Lucidfish": "1" } };
   if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
   let res;
@@ -213,15 +216,21 @@ renderThemeButton();
 function showPage(name, fromRoute = false) {
   state.page = name;
   document.querySelectorAll("[data-page-section]").forEach((s) => s.classList.toggle("hidden", s.id !== `page-${name}`));
+  const section = name === "game" && train.session ? "train" : name;   // a puzzle opens in its game
   document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("active",
-    b.dataset.page === name || (b.dataset.also || "").split(" ").includes(name)));
+    b.dataset.page === section || (b.dataset.also || "").split(" ").includes(section)));
   document.querySelectorAll(".page-tabs [data-page]").forEach((b) => b.classList.toggle("active", b.dataset.page === name));
   if (name === "games" || name === "analyze") renderResume();
   if (name === "dashboard") loadDashboard();
   if (name === "games") loadDashboard().then(renderGames);
   if (name === "analyze" && !state.recent.length) loadRecentGames();
   if (name === "editor") ensureEditor();
-  if (name === "game") { ensureBoard(); setTimeout(() => { board.resize(); refreshBoard(); renderGraph(); }, 0); }
+  if (name === "train") showTrainPage();
+  if (name !== "game" && state.explore) Engine.stop();   // don't keep analysing a board nobody sees
+  if (name === "game") {
+    ensureBoard();
+    setTimeout(() => { board.resize(); refreshBoard(); renderGraph(); if (state.explore) exploreUpdate(false); }, 0);
+  }
   if (!fromRoute) syncRoute();
   window.scrollTo({ top: 0 });
 }
@@ -254,10 +263,12 @@ function routeFor() {
 function syncRoute(replace = false) {
   const r = routeFor();
   if (location.hash === r) return;
-  history[replace ? "replaceState" : "pushState"](null, "", r);
+  try { history[replace ? "replaceState" : "pushState"](null, "", r); }
+  catch { location.hash = r; }   // some browsers restrict history on pages opened from a file
 }
 async function route() {
-  const [, page, id] = location.hash.match(/^#\/(\w+)(?:\/([\w-]+))?$/) || [];
+  let [, page, id] = location.hash.match(/^#\/(\w+)(?:\/([\w-]+))?$/) || [];
+  if (EXPORT && (page === "analyze" || page === "editor" || page === "job")) page = "games";   // need the server
   if (page === "game" && id) {
     if (state.game?.gameId === Number(id)) showPage("game", true);
     else await openStoredGame(Number(id), true);
@@ -266,7 +277,7 @@ async function route() {
   } else if (page === "game" && state.game) {
     showPage("game", true);
   } else {
-    showPage(["dashboard", "games", "analyze", "editor"].includes(page) ? page : "dashboard", true);
+    showPage(["dashboard", "games", "train", "analyze", "editor"].includes(page) ? page : "dashboard", true);
   }
 }
 window.addEventListener("popstate", route);
@@ -369,6 +380,13 @@ function renderAccount() {
   $("accountAvatar").textContent = p ? initials(p.name) : "+";
   $("accountAvatar").setAttribute("style", p ? avatarStyle(p.name) : "");
   $("accountName").textContent = p ? p.name : "Create profile";
+  if (EXPORT) {
+    $("accountMenu").innerHTML = `<div class="am-current">${avatar(p.name, "lg")}<div class="grow"><b>${esc(p.name)}</b>`
+      + `<div class="small">${[LEVEL_NAMES[p.level], ratingsText(p)].filter(Boolean).map(esc).join(" · ")}</div></div></div>`
+      + `<p class="small" style="margin:8px 10px">A shared copy made with Lucidfish on ${esc(sharedDate())}. New games appear `
+      + `when the person who shared it analyses them and sends or syncs a new copy.</p>`;
+    return;
+  }
   const others = state.profiles.filter((x) => x.id !== p?.id);
   const accounts = p ? [p.chesscom_user && `chess.com · ${esc(p.chesscom_user)}`, p.lichess_user && `Lichess · ${esc(p.lichess_user)}`]
     .filter(Boolean).join("<br>") : "";
@@ -377,6 +395,7 @@ function renderAccount() {
       + `<div class="small">${[LEVEL_NAMES[p.level], ratingsText(p)].filter(Boolean).map(esc).join(" · ") || "No level or ratings yet"}</div>`
       + (accounts ? `<div class="small">${accounts}</div>` : "")
       + `</div></div><button class="am-item" data-am="edit">✎ Edit profile</button>`
+      + `<button class="am-item" data-am="share">⇪ Share this profile…</button>`
     : `<div class="am-current"><div class="grow small">Create a profile so the coach can remember your games.</div></div>`)
     + (others.length ? `<div class="am-label">Switch profile</div>` + others.map((o) =>
       `<button class="am-item" data-am="switch" data-id="${o.id}">${avatar(o.name, "sm")}<span class="grow">${esc(o.name)}</span>`
@@ -400,6 +419,7 @@ $("accountMenu").addEventListener("click", async (e) => {
   if (!item) return;
   toggleAccountMenu(false);
   if (item.dataset.am === "edit") openProfile(state.profile);
+  else if (item.dataset.am === "share") openShare();
   else if (item.dataset.am === "new") openProfile(null);
   else if (item.dataset.am === "switch") switchProfile(Number(item.dataset.id));
 });
@@ -518,6 +538,373 @@ $("pfDelete").addEventListener("click", async () => {
   toast("Profile deleted.");
 });
 
+/* ================================================================ share this profile */
+
+async function openShare() {
+  let d;
+  try { d = await api("/api/share"); } catch (e) { toast(e.message, true); return; }
+  $("shareTitle").textContent = `Share ${state.profile?.name || "this profile"}'s games`;
+  $("shareFolder").value = d.folder || "";
+  $("shareAuto").checked = d.folder ? d.auto : true;
+  $("shareEngine").checked = d.engine !== false;
+  $("shareSuggestions").innerHTML = d.suggestions.length
+    ? `<span class="small">Found on this computer:</span>` + d.suggestions.map((s) =>
+      `<button class="secondary sm" data-folder="${esc(s.path)}">${esc(s.label)}</button>`).join("") : "";
+  renderShareStatus(d);
+  openModal("shareModal");
+}
+
+let shareCfg = null;
+function renderShareStatus(d) {
+  shareCfg = d;
+  const out = $("shareStatus");
+  const when = d.last_synced ? new Date(d.last_synced * 1000).toLocaleString(undefined,
+    { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
+  out.className = "small" + (d.last_error ? " bad" : d.last_synced ? " ok" : "");
+  out.textContent = d.last_error ? `✗ ${d.last_error}`
+    : d.last_synced ? `✓ Written ${when}: ${d.file}${d.auto ? " — updated automatically after every analysis." : ""}`
+      : d.folder ? "Not written yet." : "Not syncing to a folder.";
+  $("shareSyncNow").disabled = !d.folder;
+  $("shareStop").classList.toggle("hidden", !d.folder);
+}
+
+$("shareSuggestions").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-folder]");
+  if (b) $("shareFolder").value = `${b.dataset.folder}/Lucidfish`;
+});
+$("shareSave").addEventListener("click", async () => {
+  try {
+    const d = await api("/api/share", { method: "POST", body: {
+      folder: $("shareFolder").value.trim(), auto: $("shareAuto").checked, engine: $("shareEngine").checked } });
+    renderShareStatus(d);
+    if (d.last_synced && !d.last_error) toast("Saved. The page is in the folder.");
+  } catch (e) { $("shareStatus").className = "small bad"; $("shareStatus").textContent = `✗ ${e.message}`; }
+});
+$("shareEngine").addEventListener("change", async (e) => {
+  if (!shareCfg?.folder) return;   // only the downloads use it
+  try {
+    renderShareStatus(await api("/api/share", { method: "POST", body: {
+      folder: shareCfg.folder, auto: shareCfg.auto, engine: e.target.checked } }));
+    toast(e.target.checked ? "The copy in the folder now includes the engine." : "The copy in the folder no longer includes the engine.");
+  } catch (err) { toast(err.message, true); }
+});
+$("shareSyncNow").addEventListener("click", async () => {
+  try { renderShareStatus(await api("/api/share/sync", { method: "POST" })); } catch (e) { toast(e.message, true); }
+});
+$("shareStop").addEventListener("click", async () => {
+  try {
+    renderShareStatus(await api("/api/share", { method: "POST", body: { folder: "", auto: false, engine: $("shareEngine").checked } }));
+    $("shareFolder").value = "";
+    toast("Stopped syncing. The last copy stays in the folder.");
+  } catch (e) { toast(e.message, true); }
+});
+$("shareDownload").addEventListener("click", async () => {
+  try {
+    const res = await api(`/api/share/download?engine=${$("shareEngine").checked}`, { raw: true });
+    const blob = await res.blob();
+    const cd = res.headers.get("content-disposition") || "";
+    const name = decodeURIComponent(cd.match(/filename\*=UTF-8''(.+)$/)?.[1] || "Lucidfish.html");
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  } catch (e) { toast(e.message, true); }
+});
+
+/* ================================================================ engine in the browser */
+
+/* Stockfish compiled to WebAssembly, running in a Web Worker: Explore mode uses it in the app and in shared
+ * copies, and a shared copy (which has no server) also uses it to judge practice moves. In the app the worker
+ * loads /static/vendor/stockfish-…; a shared copy carries the engine as text blocks, because a page opened
+ * from disk can't load a worker or a .wasm file. */
+const Engine = (() => {
+  let worker = null, booting = null, job = null, error = "";
+  const waiting = [];
+  const supported = typeof Worker === "function" && typeof WebAssembly === "object";
+
+  function available() {
+    if (!supported || error) return false;
+    return EXPORT ? !!document.getElementById("lfEngineWasm") : true;
+  }
+
+  function makeWorker() {
+    if (!EXPORT) return new Worker("/static/vendor/stockfish-18-lite-single.js");
+    const bin = atob(document.getElementById("lfEngineWasm").textContent.trim());
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    // The engine downloads its .wasm with fetch(): answer that with the embedded bytes, then start it.
+    const prelude = `let lfWasm = null; const lfFetch = self.fetch.bind(self);
+self.fetch = (url, opts) => String(url).includes("lucidfish-engine.wasm")
+  ? Promise.resolve(new Response(lfWasm, { headers: { "Content-Type": "application/wasm" } })) : lfFetch(url, opts);
+self.onmessage = (e) => { lfWasm = e.data; self.onmessage = null; lfStart(); };
+function lfStart() {
+`;
+    const src = prelude + document.getElementById("lfEngineJs").textContent + "\n}";
+    const url = URL.createObjectURL(new Blob([src], { type: "text/javascript" }));
+    // The part after # names the .wasm file for the engine's loader (",worker" there would mean a helper thread).
+    const w = new Worker(`${url}#lucidfish-engine.wasm`);
+    w.postMessage(bytes, [bytes.buffer]);
+    return w;
+  }
+
+  function boot() {
+    if (booting) return booting;
+    booting = new Promise((resolve, reject) => {
+      const fail = (msg) => { error = msg; clearTimeout(timer); worker?.terminate(); worker = null; reject(new Error(msg)); };
+      const timer = setTimeout(() => fail("The engine didn't start in this browser."), 30000);
+      let ready = false;
+      try { worker = makeWorker(); } catch (e) { fail(`The engine can't run here (${e.message}).`); return; }
+      worker.onmessage = (e) => {
+        const line = String(e.data);
+        if (!ready) {
+          if (line === "readyok") { ready = true; clearTimeout(timer); resolve(); }
+          return;
+        }
+        onLine(line);
+      };
+      worker.onerror = (e) => {
+        e.preventDefault?.();
+        if (!ready) { fail(`The engine can't run here (${e.message || "unknown error"}).`); return; }
+        error = "The engine stopped working. Reload the page to restart it.";
+        if (job) { job.reject(new Error(error)); job = null; }
+        waiting.splice(0).forEach((j) => j.reject(new Error(error)));
+      };
+      worker.postMessage("uci");
+      worker.postMessage("isready");
+    });
+    return booting;
+  }
+
+  function parseInfo(line) {
+    const t = line.split(" ");
+    if (t.includes("lowerbound") || t.includes("upperbound")) return null;
+    const at = (k) => t.indexOf(k);
+    const si = at("score"), pi = at("pv");
+    if (si < 0 || pi < 0) return null;
+    return {
+      depth: Number(t[at("depth") + 1]) || 0, multipv: Number(at("multipv") >= 0 ? t[at("multipv") + 1] : 1) || 1,
+      cp: t[si + 1] === "cp" ? Number(t[si + 2]) : null, mate: t[si + 1] === "mate" ? Number(t[si + 2]) : null,
+      pv: t.slice(pi + 1),
+    };
+  }
+
+  function onLine(line) {
+    if (!job) return;
+    if (line.startsWith("info ") && line.includes(" pv ")) {
+      const info = parseInfo(line);
+      if (!info) return;
+      job.lines[info.multipv - 1] = info;
+      job.onInfo?.(job.lines.filter(Boolean));
+    } else if (line.startsWith("bestmove")) {
+      const j = job;
+      job = null;
+      j.resolve({ lines: j.lines.filter(Boolean), bestmove: line.split(" ")[1] });
+      next();
+    }
+  }
+
+  function next() {
+    while (!job && waiting.length) {
+      const j = waiting.shift();
+      if (j.stale?.()) { j.resolve(null); continue; }
+      job = j;
+      worker.postMessage(`setoption name MultiPV value ${j.multipv}`);
+      worker.postMessage(`position fen ${j.fen}`);
+      worker.postMessage(`go depth ${j.depth}${j.movetime ? ` movetime ${j.movetime}` : ""}`
+        + `${j.searchmoves ? ` searchmoves ${j.searchmoves.join(" ")}` : ""}`);
+    }
+  }
+
+  /** Search a position. Resolves {lines: [{depth, multipv, cp, mate, pv}], bestmove} (scores for the side to
+   * move), or null if `stale()` said it was no longer wanted before it started. `interrupt` stops the search
+   * in progress first; `onInfo(lines)` sees every improvement. */
+  async function search(fen, opts = {}) {
+    await boot();
+    return new Promise((resolve, reject) => {
+      waiting.push({ multipv: 1, depth: 16, ...opts, fen, lines: [], resolve, reject });
+      if (!job) next();
+      else if (opts.interrupt) worker.postMessage("stop");
+    });
+  }
+
+  function stop() { if (job) worker.postMessage("stop"); }
+
+  return { available, boot, search, stop, error: () => error };
+})();
+
+/* ---------------------------------------------------------------- chess helpers (chess.js) */
+
+const hasChess = typeof window.Chess === "function";
+const sideToMove = (fen) => (fen.split(" ")[1] === "b" ? "b" : "w");
+
+/** Engine score (side to move) as a White-perspective eval string: '+0.35', '#3', '#-2'. */
+function engineEval(line, fen) {
+  const sign = sideToMove(fen) === "w" ? 1 : -1;
+  if (!line) return "";
+  if (line.mate != null) return `#${sign * line.mate}`;
+  const v = (sign * line.cp) / 100;
+  return `${v >= 0 ? "+" : ""}${v.toFixed(2)}`;
+}
+/** UCI moves as playable steps [{san, from, to, fen}] (the same shape the analysis stores). */
+function uciSteps(fen, ucis, max = 14) {
+  const c = new Chess(fen), steps = [];
+  for (const u of ucis.slice(0, max)) {
+    let mv;
+    try { mv = c.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] }); } catch { break; }
+    steps.push({ san: mv.san, from: mv.from, to: mv.to, fen: c.fen() });
+  }
+  return steps;
+}
+/** "14…Nf6 15.e5 Nd5" for steps starting from `fen`. */
+function stepsText(fen, steps) {
+  const f = fen.split(" ");
+  let n = Number(f[5]) || 1, white = f[1] !== "b";
+  return steps.map((s, k) => {
+    const label = white ? `${n}.` : k === 0 ? `${n}…` : "";
+    if (!white) n += 1;
+    white = !white;
+    return label + s.san;
+  }).join(" ");
+}
+
+/** A move's verdict from the best move's score and its own ({cp, mate}, both for the side that moved), with the
+ * rules of the analysis (lucidfish/engine.py): mates are judged the Lichess way (allowing a forced mate is a
+ * blunder unless you were lost anyway), everything else by the winning chances given away. */
+function classifyMove(best, mine, playedIsBest) {
+  if (playedIsBest) return "best";
+  const clamp = (x) => (x.mate != null ? (x.mate > 0 ? 1000 : -1000) : Math.max(-1000, Math.min(1000, x.cp)));
+  const raw = (x) => (x.mate != null ? (x.mate > 0 ? 1e6 : -1e6) : x.cp);
+  if ((best.mate ?? 0) > 0 && !((mine.mate ?? 0) > 0)) {                  // missed a forced mate
+    const a = raw(mine);
+    return a > 999 ? "inaccuracy" : a > 700 ? "mistake" : "blunder";
+  }
+  if ((mine.mate ?? 0) < 0 && !((best.mate ?? 0) < 0)) {                  // allowed a forced mate
+    const b = raw(best);
+    return b < -999 ? "inaccuracy" : b < -700 ? "mistake" : "blunder";
+  }
+  const loss = Math.max(0, winPct(clamp(best)) - winPct(clamp(mine)));
+  if (loss >= 15) return "blunder";
+  if (loss >= 10) return "mistake";
+  if (loss >= 5) return "inaccuracy";
+  return clamp(best) - clamp(mine) <= 10 ? "best" : "good";
+}
+
+/** A stored candidate's score for the side to move: {cp, mate} (the stored mate is in the White-view score). */
+function candidateScore(c, fen) {
+  const mate = c.score?.[0] === "#" ? parseInt(c.score.slice(1), 10) * (sideToMove(fen) === "w" ? 1 : -1) : null;
+  return { cp: c.cp, mate };
+}
+
+/** Judge a practice move with the in-browser engine: its best move and the tried move, searched alike. */
+async function engineVerdict(fen, uci, fenAfter) {
+  const opts = { depth: 16, movetime: 5000 };
+  const best = await Engine.search(fen, opts);
+  const mine = await Engine.search(fen, { ...opts, searchmoves: [uci] });
+  const b = best.lines[0], m = mine.lines[0];
+  const cls = !b || !m ? "unknown" : classifyMove({ cp: b.cp, mate: b.mate }, { cp: m.cp, mate: m.mate }, best.bestmove === uci);
+  const solved = cls === "best" || cls === "good";
+  const refutation = solved ? [] : uciSteps(fenAfter, (m?.pv || []).slice(1));
+  const bestSteps = uciSteps(fen, b?.pv || []);
+  return {
+    cls, solved, eval: engineEval(m, fen),
+    best: bestSteps[0]?.san || "", best_uci: best.bestmove, best_steps: bestSteps,
+    refutation: stepsText(fenAfter, refutation), refutation_steps: refutation,
+  };
+}
+
+/* ================================================================ shared copy (no server) */
+
+function sharedDate() {
+  return EXPORT ? fmtDate(new Date(EXPORT.generated)) : "";
+}
+
+/** Your own drawings in a shared copy stay in this browser, keyed by the game (stable across new copies). */
+function drawingsKey(id) {
+  const row = EXPORT.games.find((g) => String(g.id) === String(id));
+  return `lucidfish-shared-drawings-${row?.fingerprint || id}`;
+}
+
+function winPct(cp) { return 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * cp)) - 1); }
+
+/** Every analysed position of the shared copy, to find the stored engine lines of a practice position. */
+let storedByFen = null;
+function storedMove(fen) {
+  if (!storedByFen) {
+    storedByFen = new Map();
+    for (const g of Object.values(EXPORT.details)) {
+      for (const m of g.moves) if (m.fen_before && !storedByFen.has(m.fen_before)) storedByFen.set(m.fen_before, m);
+    }
+  }
+  return storedByFen.get(fen);
+}
+
+/** Practice without the server. A move among the engine's top moves stored with the game is judged from them
+ * (same verdicts as the analysis); any other move by the in-browser engine, if this copy includes it. */
+async function offlineCheck({ fen, uci }) {
+  const c = new Chess(fen);
+  let mv;
+  try { mv = c.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] }); }
+  catch { throw new Error("That move is not legal in this position."); }
+  const fenAfter = c.fen(), whiteMoved = mv.color === "w";
+  const m = storedMove(fen), cands = m?.candidates || [];
+  const best = cands[0], hit = cands.find((x) => x.uci === uci);
+  const base = { san: mv.san, uci, fen_after: fenAfter, best: m?.best || best?.san || "",
+    best_uci: m?.best_uci || best?.uci || "", best_steps: best?.steps || [] };
+  const none = { refutation: "", refutation_steps: [] };
+  if (c.isCheckmate()) return { ...base, ...none, cls: "best", solved: true, eval: whiteMoved ? "1-0" : "0-1" };
+  if (hit && best) {
+    const cls = classifyMove(candidateScore(best, fen), candidateScore(hit, fen), hit === best);
+    const solved = cls === "best" || cls === "good";
+    return { ...base, cls, solved, eval: hit.score,
+      refutation: solved ? "" : stepsText(fenAfter, (hit.steps || []).slice(1)),
+      refutation_steps: solved ? [] : (hit.steps || []).slice(1) };
+  }
+  if (Engine.available()) {
+    const v = await engineVerdict(fen, uci, fenAfter);
+    return { ...base, ...v, best: base.best || v.best, best_uci: base.best_uci || v.best_uci,
+      best_steps: base.best_steps.length ? base.best_steps : v.best_steps };
+  }
+  return { ...base, ...none, cls: "unknown", solved: false, eval: "" };
+}
+
+function exportApi(path, { method = "GET", body } = {}) {
+  const E = EXPORT, p = path.split("?")[0];
+  let m;
+  try {
+    if (method === "GET") {
+      if (p === "/api/health") {
+        return Promise.resolve({ version: E.version, busy: false, engine: { ok: true, name: "Saved analysis" },
+          coach: { enabled: false, ok: true } });
+      }
+      if (p === "/api/profiles") return Promise.resolve({ profiles: [E.profile], active: E.profile.id });
+      if (p === "/api/profile") return Promise.resolve({ profile: E.profile, stats: E.stats, games: E.games });
+      if ((m = p.match(/^\/api\/profile\/game\/(\d+)$/))) {
+        const g = E.details[m[1]];
+        if (!g) return Promise.reject(new Error("unknown game"));
+        const copy = JSON.parse(JSON.stringify(g));   // the page changes games (drawings); keep the original
+        try {
+          const mine = localStorage.getItem(drawingsKey(g.id));
+          if (mine) copy.annotations = JSON.parse(mine);
+        } catch { /* storage unavailable: show the shared drawings */ }
+        return Promise.resolve(copy);
+      }
+    }
+    if (method === "GET" && p === "/api/train") return Promise.resolve({ items: E.train || [] });
+    if (method === "POST" && p === "/api/check_move") return offlineCheck(body);
+    if (method === "POST" && (m = p.match(/^\/api\/profile\/game\/(\d+)\/annotations$/))) {
+      try { localStorage.setItem(drawingsKey(m[1]), JSON.stringify(body.annotations || {})); }
+      catch { /* private mode: drawings last until the page is closed */ }
+      return Promise.resolve({ ok: true });
+    }
+  } catch (e) { return Promise.reject(e); }
+  return Promise.reject(new Error("This shared copy can't do that: it needs Lucidfish running on the computer that made it."));
+}
+
+if (EXPORT) {
+  document.body.classList.add("export-mode");
+  $("shareChip").textContent = `📤 Shared copy · ${sharedDate()}`;
+}
+
 /* ================================================================ modals */
 
 function openModal(id) { $(id).classList.remove("hidden"); }
@@ -562,6 +949,7 @@ async function loadDashboard() {
     ? md(d.profile.summary)
     : `<div class="empty small">${s.games ? "Analyse one more game and your coach will write a review of your play." : "Analyse a couple of your games and your coach will write a review of your play here."}</div>`;
   renderSavedGames();
+  loadTrainItems().then(() => renderGoTrain());
   $("openings").innerHTML = (s.openings || []).length
     ? s.openings.map((o) => `<div class="item static"><span class="title">${esc(o.name)}</span>
         <span class="meta">${o.games} game${o.games === 1 ? "" : "s"} · ${o.w}W ${o.l}L ${o.d}D${o.acpl != null ? ` · ${o.acpl} ACPL` : ""}</span></div>`).join("")
@@ -621,7 +1009,7 @@ function renderSavedGames() {
     el.className = "item";
     el.innerHTML = `<span class="title">${esc(g.white)} vs ${esc(g.black)}</span>${resultChip(resultFor(g))}
       <span class="meta">${esc([g.accuracy != null ? `${g.accuracy}%` : "", g.time_class, g.date && !g.date.includes("?") ? g.date : ""].filter(Boolean).join(" · "))}</span>
-      <button class="ghost icon" title="Delete this analysis" aria-label="Delete">🗑</button>`;
+      <button class="ghost icon server-only" title="Delete this analysis" aria-label="Delete">🗑</button>`;
     el.addEventListener("click", () => openStoredGame(g.id));
     el.querySelector("button").addEventListener("click", async (e) => {
       e.stopPropagation();
@@ -704,7 +1092,7 @@ function gameRow(g) {
     <div class="g-main"><div class="g-title">${colour}${title}</div><div class="g-meta">${esc(meta)}</div></div>
     <div class="g-acc">${g.accuracy != null ? `<b class="${accClass(g.accuracy)}">${g.accuracy}%</b>` : "<b>—</b>"}<span>accuracy</span></div>
     <div class="g-errs">${errs}</div>
-    <div class="g-actions">
+    <div class="g-actions server-only">
       <button class="ghost icon" data-ga="reanalyse" title="Analyse again with your current settings" aria-label="Re-analyse">↻</button>
       <button class="ghost icon" data-ga="delete" title="Delete this analysis" aria-label="Delete">🗑</button>
     </div>
@@ -1302,6 +1690,7 @@ async function openStoredGame(id, fromRoute = false) {
 }
 
 function resetGameView() {
+  exitExplore(false);
   state.cur = -1; state.preview = null; state.practice = null; state.gameChat.length = 0;
   state.revealed = new Set();
   $("gameChatLog").innerHTML = ""; $("moveList").innerHTML = ""; $("explain").innerHTML = "";
@@ -1352,18 +1741,27 @@ function ensureBoard() {
   if (board) return;
   board = Chessboard("board", {
     position: "start", pieceTheme: PIECES, showNotation: true, moveSpeed: 120, snapSpeed: 60,
-    draggable: true,   // pieces only move in practice mode (see onDragStart)
+    draggable: true,   // pieces only move in practice and Explore mode (see onDragStart)
     onDragStart: (source, piece) => {
+      const x = state.explore;
+      if (x) return !x.chess.isGameOver() && piece[0] === x.chess.turn();
       const p = state.practice;
       if (!p || p.busy || p.result || state.preview) return false;
       return piece[0] === p.fen.split(" ")[1];   // only the side to move
     },
     onDrop: (source, target, piece) => {
+      if (state.explore) {
+        const promotes = piece[1] === "P" && (target[1] === "8" || target[1] === "1");
+        if (target === "offboard" || source === target || !exploreMove(source + target + (promotes ? "q" : ""))) return "snapback";
+        exploreUpdate(false, false);   // the board catches up (castling, en passant, promotion) in onSnapEnd
+        return undefined;
+      }
       if (!state.practice || target === "offboard" || source === target) return "snapback";
       const promotes = piece[1] === "P" && (target[1] === "8" || target[1] === "1");
       tryPracticeMove(source + target + (promotes ? "q" : ""));
       return undefined;
     },
+    onSnapEnd: () => { if (state.explore) board.position(state.explore.chess.fen(), false); },
   });
 }
 
@@ -1371,6 +1769,7 @@ function orientation() { return board ? board.orientation() : "white"; }
 
 function refreshBoard() {
   if (!board || !state.game) return;
+  if (state.explore) { board.position(state.explore.chess.fen(), false); renderExplore(); return; }
   if (state.preview) { stepPreview(0); return; }
   if (state.practice) { practiceBoard(); return; }
   if (state.game.mode === "position") {
@@ -1614,7 +2013,7 @@ function flip() {
   if (!board) return;
   board.flip();
   refreshBoard();
-  if (state.game?.mode === "game" && state.cur >= 0 && !state.practice) setEvalBar(winOf(state.game.moves[state.cur]), evalWords(state.game.moves[state.cur].eval));
+  if (state.game?.mode === "game" && state.cur >= 0 && !state.practice && !state.explore) setEvalBar(winOf(state.game.moves[state.cur]), evalWords(state.game.moves[state.cur].eval));
 }
 
 /* ================================================================ moves */
@@ -1623,6 +2022,7 @@ function goTo(i, rerender = true) {
   const g = state.game;
   if (!g || g.mode !== "game" || !g.moves.length) return;
   ensureBoard();
+  exitExplore(false);
   state.preview = null; $("previewBar").classList.add("hidden");
   state.practice = null;
   const prev = state.cur;
@@ -1643,6 +2043,7 @@ function goTo(i, rerender = true) {
   renderMoveList();
   renderExplain(m);
   renderGraph();
+  renderTrainBar();
 }
 
 function renderMoveList() {
@@ -1780,7 +2181,7 @@ function renderExplain(m) {
       <p class="small">The coach's note and the better move are hidden so you can try first. Play your move on the board and the engine will judge it.</p>
       <div class="row"><button data-practice="${state.cur}">Find a better move</button>
         <button class="secondary" data-reveal="${state.cur}">Show the answer</button></div>
-      <p class="small" style="margin:8px 0 0">You can switch this off in Settings → Analysis.</p></div>`;
+      <p class="small" style="margin:8px 0 0">You can switch this off under 👁 Board, below the board.</p></div>`;
     return;
   }
   const opp = m.side === "White" ? "Black" : "White";
@@ -1826,6 +2227,8 @@ function renderExplain(m) {
   $("explain").innerHTML = html;
 }
 $("explain").addEventListener("click", (e) => {
+  const xm = e.target.closest("[data-xmove]");
+  if (xm && state.explore) { if (exploreMove(xm.dataset.xmove)) exploreUpdate(true); return; }
   const el = e.target.closest("[data-prev]");
   if (el) { startPreview(el.dataset.prev); return; }
   const pr = e.target.closest("[data-practice]");
@@ -1855,6 +2258,7 @@ function startPractice(i) {
   board.orientation(m.side.toLowerCase());
   practiceBoard();
   renderPractice();
+  renderTrainBar();
   $("board").scrollIntoView({ block: "nearest", behavior: "smooth" });
 }
 
@@ -1875,14 +2279,27 @@ function practiceBoard() {
 function renderPractice() {
   const p = state.practice, g = state.game, m = g.moves[p.i];
   const label = `${m.side === "White" ? `${m.n}.` : `${m.n}…`}`;
-  const others = myMistakes().filter((i) => i !== p.i);
-  let html = `<div class="expl-title"><span class="san">🎯 Practice · ${esc(label)}</span>`
-    + `<span class="small">In the game you played <b>${esc(m.san)}</b> ${badge(m.cls)} — can you find something better?</span></div>`;
+  const puzzle = currentPuzzle();
+  const others = puzzle ? [] : myMistakes().filter((i) => i !== p.i);
+  let html;
+  if (puzzle) {
+    const t = train.session;
+    html = `<div class="expl-title"><span class="san">🎯 Puzzle ${t.pos + 1} of ${t.queue.length}</span>`
+      + `<span class="small">From your game against <b>${esc(puzzle.opponent)}</b>${playedDate(puzzle) ? ` (${esc(fmtDate(playedDate(puzzle)))})` : ""}, `
+      + `move ${m.n}. You played <b>${esc(label)} ${esc(m.san)}</b> ${badge(m.cls)} here. Find a better move.</span></div>`
+      + (t.again.has(puzzle.id) && t.queue.indexOf(puzzle) !== t.pos ? `<div class="callout">🔁 Again: you missed this one earlier in the session.</div>` : "");
+  } else {
+    html = `<div class="expl-title"><span class="san">🎯 Practice · ${esc(label)}</span>`
+      + `<span class="small">In the game you played <b>${esc(m.san)}</b> ${badge(m.cls)} — can you find something better?</span></div>`;
+  }
   state.previewMap = {};
   if (p.busy) html += `<div class="callout">Checking your move with the engine…</div>`;
   else if (!p.result) {
     html += `<div class="callout">Drag a ${esc(m.side)} piece to play your move. Take your time: look for checks, captures and threats first. `
       + `(Pawns promote to a queen.)</div>`;
+  } else if (p.result.cls === "unknown") {
+    html += `<div class="callout bad"><b>✗ ${esc(p.result.san)} isn't one of the engine's top moves here,</b> so it's unlikely `
+      + `to be the answer. (This shared copy was made without the engine, so it can only judge the engine's top choices.)</div>`;
   } else if (p.result.solved) {
     const r = p.result;
     html += `<div class="callout good"><b>✓ ${esc(r.san)} — ${esc(LABELS[r.cls] || r.cls)}!</b> `
@@ -1900,7 +2317,15 @@ function renderPractice() {
   else html += `<div class="row" style="margin-top:12px">`;
   if (!p.result?.solved) html += `<button class="secondary sm" data-pa="answer">Show the answer</button>`;
   if (others.length) html += `<button class="secondary sm" data-pa="next">Next mistake →</button>`;
-  html += `<div class="spacer"></div><button class="ghost sm" data-pa="exit">Exit practice</button></div>`;
+  if (puzzle) {
+    const last = train.session.pos + 1 >= train.session.queue.length;
+    html += `<button class="${p.result?.solved || p.showAnswer ? "" : "secondary "}sm" data-pa="puzzle">${last ? "Finish ✓" : "Next puzzle →"}</button>`;
+  }
+  if (p.result || p.showAnswer) html += `<button class="secondary sm" data-pa="explore" title="Move the pieces yourself; the engine analyses (E)">🔍 Explore</button>`;
+  html += `<div class="spacer"></div><button class="ghost sm" data-pa="exit">${puzzle ? "See the game" : "Exit practice"}</button></div>`;
+  if (puzzle && (p.result?.solved || p.showAnswer) && m.expl) {
+    html += `<div class="section-label">Coach's note on ${esc(m.san)}</div><div class="md">${md(m.expl)}</div>`;
+  }
   if (p.showAnswer) {
     const best = m.candidates?.[0];
     state.previewMap.pbest = { steps: best?.steps || [], base: p.fen, label: "the engine's line" };
@@ -1923,6 +2348,7 @@ async function tryPracticeMove(uci) {
   }
   if (state.practice !== p) return;   // left practice while the engine was thinking
   p.busy = false; p.result = r;
+  gradePuzzle(r.solved);
   if (r.solved) { p.showAnswer = false; state.revealed.add(p.i); }
   practiceBoard();
   renderPractice();
@@ -1932,7 +2358,9 @@ function practiceAction(action) {
   const p = state.practice;
   if (!p) return;
   if (action === "retry") { p.result = null; practiceBoard(); renderPractice(); }
-  else if (action === "answer") { p.showAnswer = true; state.revealed.add(p.i); renderPractice(); }
+  else if (action === "answer") { gradePuzzle(false); p.showAnswer = true; state.revealed.add(p.i); renderPractice(); }
+  else if (action === "puzzle") nextPuzzle();
+  else if (action === "explore") startExplore();
   else if (action === "exit") { goTo(p.i); }
   else if (action === "next") {
     const list = myMistakes();
@@ -1950,6 +2378,343 @@ $("practiceAll").addEventListener("click", () => {
   if (!list.length) return;
   startPractice(list.find((i) => i >= state.cur) ?? list[0]);
 });
+
+/* ================================================================ explore: move the pieces, the engine follows */
+
+/** Full FEN of what the board shows now: a game move, a previewed line, practice, or a board-editor position. */
+function boardFen() {
+  const g = state.game;
+  if (!g) return "";
+  if (state.preview) { const p = state.preview; return p.idx >= 0 ? p.steps[p.idx].fen : p.base; }
+  if (state.practice) { const p = state.practice; return p.result ? p.result.fen_after : p.fen; }
+  if (g.mode === "position") return g.position.fen;
+  if (state.cur >= 0) return g.moves[state.cur].fen_after;
+  return g.moves[0]?.fen_before || "";
+}
+
+function startExplore() {
+  if (!state.game || state.page !== "game") return;
+  if (!hasChess) { toast("Explore isn't available in this page.", true); return; }
+  const p = state.practice;
+  if (p && !p.result && !p.showAnswer) { toast("Try the position first: Explore shows the engine's best move."); return; }
+  const fen = boardFen();
+  let chess;
+  try { chess = new Chess(fen); } catch { toast("Explore can't set up this position.", true); return; }
+  state.preview = null;
+  $("previewBar").classList.add("hidden");
+  state.explore = { start: fen, chess, redo: [], lines: [], token: 0, error: "" };
+  $("exploreBar").classList.remove("hidden");
+  $("btnExplore").classList.add("active");
+  $("btnExplore").setAttribute("aria-pressed", "true");
+  exploreUpdate(false);
+}
+
+function exitExplore(render = true) {
+  if (!state.explore) return;
+  state.explore = null;
+  Engine.stop();
+  $("exploreBar").classList.add("hidden");
+  $("btnExplore").classList.remove("active");
+  $("btnExplore").setAttribute("aria-pressed", "false");
+  if (!render) return;
+  if (state.practice) { practiceBoard(); renderPractice(); }
+  else if (state.game?.mode === "position") renderPosition();
+  else goTo(state.cur, false);
+}
+
+/** The position changed (a move, undo, redo, reset): show it and let the engine analyse it. */
+function exploreUpdate(animate = true, moveBoard = true) {
+  const x = state.explore;
+  const fen = x.chess.fen();
+  if (moveBoard) board.position(fen, animate);
+  x.lines = []; x.error = ""; x.done = false;
+  const token = ++x.token;
+  const current = () => state.explore === x && x.token === token;
+  renderExplore();
+  if (x.chess.isGameOver() || !Engine.available()) return;
+  Engine.search(fen, {
+    multipv: 3, depth: 20, interrupt: true, stale: () => !current(),
+    onInfo: (lines) => {
+      if (!current()) return;
+      x.lines = lines;
+      if (!x.renderTimer) x.renderTimer = setTimeout(() => { x.renderTimer = null; if (current()) renderExplore(); }, 200);
+    },
+  }).then((res) => {
+    if (!res || !current()) return;
+    x.lines = res.lines; x.done = true;
+    renderExplore();
+  }).catch((e) => { if (current()) { x.error = e.message; renderExplore(); } });
+}
+
+function exploreMove(uci) {
+  const x = state.explore;
+  try { x.chess.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion: uci[4] }); } catch { return false; }
+  x.redo = [];
+  return true;
+}
+
+function exploreStep(dir) {
+  const x = state.explore;
+  if (!x) return;
+  if (dir < 0) { const mv = x.chess.undo(); if (!mv) return; x.redo.push(mv.lan || mv.from + mv.to + (mv.promotion || "")); }
+  else { const u = x.redo.pop(); if (!u) return; x.chess.move({ from: u.slice(0, 2), to: u.slice(2, 4), promotion: u[4] }); }
+  exploreUpdate(true);
+}
+
+function exploreResult(c) {
+  if (c.isCheckmate()) return c.turn() === "w" ? "0-1" : "1-0";
+  if (c.isGameOver()) return "1/2-1/2";
+  return "";
+}
+
+function renderExplore() {
+  const x = state.explore;
+  if (!x) return;
+  const c = x.chess, fen = c.fen();
+  const hist = c.history({ verbose: true });
+  const over = exploreResult(c), top = x.lines[0];
+  const ev = over || (top ? engineEval(top, fen) : "");
+  setEvalBar(ev ? winFromEval(ev) : winFromEval(state.practice?.result?.eval || ""), ev ? evalWords(ev) : "");
+  const arrows = [], squares = [];
+  if (state.view.bestArrow && top?.pv?.[0] && !over) arrows.push({ from: top.pv[0].slice(0, 2), to: top.pv[0].slice(2, 4), color: "#1f9d6b" });
+  const last = hist[hist.length - 1];
+  if (last && state.view.highlight) squares.push({ sq: last.from, color: "rgba(255, 214, 10, .38)" }, { sq: last.to, color: "rgba(255, 214, 10, .55)" });
+  drawOverlay({ arrows, squares });
+  $("explorePos").textContent = hist.length ? `· ${hist.length} move${hist.length === 1 ? "" : "s"} from where you started` : "";
+  $("exploreUndo").disabled = !hist.length;
+  $("exploreRedo").disabled = !x.redo.length;
+  $("exploreReset").disabled = !hist.length;
+
+  const turn = c.turn() === "w" ? "White" : "Black";
+  let html = `<div class="expl-title"><span class="san">🔍 Explore</span>`
+    + `<span class="small">${over ? "Game over" : `${turn} to move`}</span></div>`;
+  html += `<div class="explore-path">${hist.length
+    ? `<span class="small">Your line:</span> <b>${esc(stepsText(x.start, hist))}</b>`
+    : `<span class="small">Drag a piece to try a move. Take moves back with ← and replay them with →.</span>`}</div>`;
+  if (over) {
+    html += `<div class="callout">${c.isCheckmate() ? `Checkmate: ${turn === "White" ? "Black" : "White"} wins.`
+      : c.isStalemate() ? "Stalemate: a draw." : "A draw."}</div>`;
+  } else if (!Engine.available()) {
+    html += `<div class="callout">${Engine.error() ? esc(Engine.error())
+      : "This copy was made without the engine, so there's no evaluation. You can still move the pieces to try your ideas."}</div>`;
+  } else if (x.error) {
+    html += `<div class="callout bad">${esc(x.error)}</div>`;
+  } else if (!x.lines.length) {
+    html += `<div class="callout">⏳ The engine is thinking…</div>`;
+  } else {
+    html += `<div class="section-label">Engine · depth ${top.depth}${x.done ? "" : " …"} · click a line to play its first move</div>`;
+    x.lines.forEach((ln, k) => {
+      const steps = uciSteps(fen, ln.pv, 10);
+      if (!steps.length) return;
+      html += `<div class="line clickable" data-xmove="${esc(ln.pv[0])}" title="Play ${esc(steps[0].san)}">`
+        + `<b>${esc(steps[0].san)}</b><span class="ev">${esc(engineEval(ln, fen))}</span>`
+        + `<span class="pv">${esc(stepsText(fen, steps))}</span></div>`;
+    });
+  }
+  $("explain").innerHTML = html;
+}
+
+$("btnExplore").addEventListener("click", () => (state.explore ? exitExplore() : startExplore()));
+$("exploreExit").addEventListener("click", () => exitExplore());
+$("exploreUndo").addEventListener("click", () => exploreStep(-1));
+$("exploreRedo").addEventListener("click", () => exploreStep(1));
+$("exploreReset").addEventListener("click", () => {
+  const x = state.explore;
+  if (!x) return;
+  x.chess = new Chess(x.start); x.redo = [];
+  exploreUpdate(true);
+});
+
+/* ================================================================ train: your mistakes, with spaced repetition */
+
+/* Leitner system: a solved puzzle moves up a level and comes back after TRAIN_DAYS[level] days; a missed one
+ * drops to level 1, comes back at the end of the session (for practice) and again the next day. */
+const TRAIN_DAYS = [0, 1, 3, 7, 16, 35];
+const DAY_MS = 86400000;
+const train = { items: null, session: null, summary: null };
+
+function trainKey() {
+  return EXPORT ? `lucidfish-train-shared-${EXPORT.profile.id}-${EXPORT.profile.name}` : `lucidfish-train-${state.profile?.id || 0}`;
+}
+function trainRecords() {
+  try { return JSON.parse(localStorage.getItem(trainKey()) || "{}") || {}; } catch { return train.memory || {}; }
+}
+function saveTrainRecords(rec) {
+  train.memory = rec;   // private browsing: progress lasts until the page closes
+  try { localStorage.setItem(trainKey(), JSON.stringify(rec)); } catch { /* see above */ }
+}
+
+async function loadTrainItems() {
+  try { train.items = (await api("/api/train")).items || []; } catch { train.items = train.items || []; }
+  return train.items;
+}
+
+function trainPool() {
+  const serious = $("trainFilter").value === "serious";
+  return (train.items || []).filter((it) => !serious || it.cls !== "inaccuracy");
+}
+
+function trainCounts(pool, rec, now = Date.now()) {
+  const c = { total: pool.length, due: 0, fresh: 0, learning: 0, reviewing: 0, mastered: 0, nextDue: Infinity };
+  for (const it of pool) {
+    const r = rec[it.id];
+    if (!r) { c.fresh += 1; continue; }
+    if (r.due <= now) c.due += 1; else c.nextDue = Math.min(c.nextDue, r.due);
+    if (r.box >= 5) c.mastered += 1; else if (r.box >= 3) c.reviewing += 1; else c.learning += 1;
+  }
+  return c;
+}
+
+function whenText(ts) {
+  const days = Math.round((ts - Date.now()) / DAY_MS);
+  return days <= 0 ? "later today" : days === 1 ? "tomorrow" : `in ${days} days`;
+}
+
+async function showTrainPage() {
+  $("trainLevels").innerHTML = `<div class="small">Loading your puzzles…</div>`;
+  await loadTrainItems();
+  renderTrainPage();
+}
+
+function renderTrainPage() {
+  const pool = trainPool(), rec = trainRecords(), c = trainCounts(pool, rec);
+  const tile = (cls, n, label, hint) => `<div class="stat tl-${cls}" title="${esc(hint)}"><b>${n}</b><span>${label}</span></div>`;
+  $("trainLevels").innerHTML = pool.length
+    ? `<div class="stats train-stats">${tile("due", c.due + c.fresh, "to do now", "Puzzles due for review, plus the ones you haven't tried yet")}`
+      + tile("new", c.fresh, "new", "Never tried")
+      + tile("learning", c.learning, "learning", "Levels 1–2: missed recently or solved once or twice")
+      + tile("reviewing", c.reviewing, "reviewing", "Levels 3–4: solved several times")
+      + tile("mastered", c.mastered, "mastered", "Level 5: solved every time; comes back every 35 days") + `</div>`
+      + `<div class="tl-bar" aria-hidden="true">${["new", "learning", "reviewing", "mastered"].map((k) =>
+        `<div class="tl-${k}" style="flex:${c[k === "new" ? "fresh" : k]}"></div>`).join("")}</div>`
+    : `<div class="empty small">${(train.items || []).length
+      ? "No mistakes or blunders yet: choose “All my mistakes” to train on your inaccuracies."
+      : "No puzzles yet. They come from analysed games in which Lucidfish knows which side you played."}</div>`;
+  const todo = c.due + c.fresh;
+  $("trainStart").disabled = !pool.length;
+  $("trainStart").textContent = todo || !pool.length ? "▶ Start training" : "▶ Practise anyway";
+  $("trainNote").textContent = !pool.length ? ""
+    : todo ? `${pool.length} puzzle${pool.length === 1 ? "" : "s"} from your games · ${c.due} due for review · ${c.fresh} new.`
+      : `All caught up! The next puzzle is due ${whenText(c.nextDue)}. You can still practise the ones you know least.`;
+  const s = train.summary;
+  $("trainDone").classList.toggle("hidden", !s);
+  if (s) {
+    $("trainDone").innerHTML = `<div class="row"><b>${s.early ? "Session ended" : "Session complete"}</b>`
+      + `<span class="chip good">✓ ${s.solved} solved first try</span>`
+      + (s.missed ? `<span class="chip bad">✗ ${s.missed} missed</span>` : "")
+      + `<div class="spacer"></div><button class="ghost sm" id="trainDoneClose" aria-label="Dismiss">✕</button></div>`
+      + `<p class="small" style="margin:8px 0 0">${s.missed ? "The ones you missed come back tomorrow. " : ""}`
+      + `${s.solved ? "The ones you solved come back later, a little further apart each time." : ""}</p>`;
+    $("trainDoneClose").addEventListener("click", () => { train.summary = null; renderTrainPage(); });
+  }
+  renderGoTrain(c);
+}
+
+/** The dashboard button, with how many puzzles are waiting. */
+function renderGoTrain(c) {
+  const pool = train.items || [];
+  if (!c) c = trainCounts(pool, trainRecords());
+  const todo = c.due + c.fresh;
+  $("goTrain").classList.toggle("hidden", !pool.length);
+  $("goTrain").textContent = todo ? `🎯 Train · ${todo} to do` : "🎯 Train";
+}
+
+function startTraining() {
+  const pool = trainPool(), rec = trainRecords(), now = Date.now();
+  const size = Number($("trainSize").value) || 10;
+  const due = pool.filter((it) => rec[it.id] && rec[it.id].due <= now)
+    .sort((a, b) => rec[a.id].box - rec[b.id].box || rec[a.id].due - rec[b.id].due);
+  const fresh = pool.filter((it) => !rec[it.id]).sort((a, b) => b.loss - a.loss);   // the costliest first
+  let queue = [...due, ...fresh].slice(0, size);
+  const extra = !queue.length;   // nothing due: practise the least-known puzzles, without moving them up
+  if (extra) {
+    queue = [...pool].sort((a, b) => (rec[a.id]?.box ?? 0) - (rec[b.id]?.box ?? 0)
+      || (rec[a.id]?.due ?? 0) - (rec[b.id]?.due ?? 0)).slice(0, size);
+  }
+  if (!queue.length) return;
+  train.summary = null;
+  train.session = { queue, pos: 0, graded: {}, again: new Set(), solved: 0, missed: 0, extra };
+  openPuzzle();
+}
+
+function currentPuzzle() {
+  const t = train.session, it = t?.queue[t.pos], p = state.practice;
+  return it && p && state.game?.gameId === it.game_id && p.i === it.i ? it : null;
+}
+
+async function openPuzzle() {
+  const t = train.session, it = t.queue[t.pos];
+  if (state.game?.gameId !== it.game_id) await openStoredGame(it.game_id);
+  else if (state.page !== "game") showPage("game");
+  if (train.session !== t) return;
+  const m = state.game?.gameId === it.game_id ? state.game.moves[it.i] : null;
+  if (!m || m.fen_before !== it.fen) {   // the game was deleted or re-analysed since the list was made
+    toast("That puzzle's game has changed; skipping it.");
+    nextPuzzle();
+    return;
+  }
+  startPractice(it.i);
+}
+
+function nextPuzzle() {
+  const t = train.session;
+  if (!t) return;
+  t.pos += 1;
+  if (t.pos >= t.queue.length) finishTraining(false);
+  else openPuzzle();
+}
+
+function finishTraining(early) {
+  const t = train.session;
+  if (!t) return;
+  train.session = null;
+  train.summary = { solved: t.solved, missed: t.missed, early };
+  renderTrainBar();
+  if (state.practice) goTo(state.practice.i, false);
+  showPage("train");
+}
+
+/** First answer to a puzzle in a session: move it up (solved) or back to the start (missed). */
+function gradePuzzle(ok) {
+  const t = train.session, it = currentPuzzle();
+  if (!it || t.graded[t.pos] !== undefined) return;
+  t.graded[t.pos] = ok;
+  const repeat = t.again.has(it.id) && t.queue.indexOf(it) !== t.pos;   // the end-of-session repeat is practice only
+  if (!repeat) {
+    const rec = trainRecords(), now = Date.now();
+    const r = rec[it.id] || { box: 0, seen: 0, right: 0, due: now };
+    r.seen += 1; r.last = now;
+    if (ok) {
+      t.solved += 1; r.right += 1;
+      if (!t.extra) { r.box = Math.min(5, r.box + 1); r.due = now + TRAIN_DAYS[r.box] * DAY_MS; }
+    } else {
+      t.missed += 1; r.box = 1; r.due = now + DAY_MS;
+    }
+    rec[it.id] = r;
+    saveTrainRecords(rec);
+  }
+  if (!ok && !t.again.has(it.id)) { t.again.add(it.id); t.queue.push(it); }
+  renderTrainBar();
+}
+
+function renderTrainBar() {
+  const t = train.session;
+  $("trainBar").classList.toggle("hidden", !t);
+  if (!t) return;
+  const answered = Object.keys(t.graded).length;
+  $("trainBarLabel").textContent = `🎯 Puzzle ${Math.min(t.pos + 1, t.queue.length)} of ${t.queue.length}`;
+  $("trainBarFill").style.width = `${Math.round((answered / t.queue.length) * 100)}%`;
+  $("trainBarScore").textContent = `✓ ${t.solved} · ✗ ${t.missed}`;
+  $("trainBack").classList.toggle("hidden", !!currentPuzzle());
+  $("trainNext").textContent = t.pos + 1 >= t.queue.length ? "Finish ✓" : "Next puzzle →";
+}
+
+$("trainStart").addEventListener("click", startTraining);
+$("trainFilter").addEventListener("change", renderTrainPage);
+$("goTrain").addEventListener("click", () => showPage("train"));
+$("trainNext").addEventListener("click", nextPuzzle);
+$("trainEnd").addEventListener("click", () => finishTraining(true));
+$("trainBack").addEventListener("click", () => { if (train.session) openPuzzle(); });
 
 /* ================================================================ eval graph */
 
@@ -2076,7 +2841,13 @@ $("edAnalyze").addEventListener("click", async () => {
 /** Board-editor mode: arrow for the engine's top move. */
 /* ================================================================ board display options */
 
+$("viewHideAnswers").addEventListener("change", (e) => {
+  try { localStorage.setItem("lucidfish-hide-answers", e.target.checked ? "1" : "0"); } catch { /* ignore */ }
+  if (state.page === "game" && state.game?.mode === "game" && state.cur >= 0) goTo(state.cur, false);
+});
+
 function applyView() {
+  $("viewHideAnswers").checked = hideAnswers();
   $("evalbar").classList.toggle("off", !state.view.evalBar);
   $("evalLabel").classList.toggle("hidden", !state.view.evalBar);
   document.querySelectorAll("[data-view-opt]").forEach((cb) => { cb.checked = !!state.view[cb.dataset.viewOpt]; });
@@ -2441,6 +3212,11 @@ document.addEventListener("keydown", (e) => {
   if (e.key === "Escape" && modalOpen()) { document.querySelectorAll(".modal-back").forEach((m) => closeModal(m.id)); return; }
   if (modalOpen() || state.page !== "game" || ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName)) return;
   if (e.key === "Escape" && state.preview) { exitPreview(); return; }
+  if (state.explore) {
+    if (e.key === "Escape") { exitExplore(); return; }
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") { e.preventDefault(); exploreStep(e.key === "ArrowLeft" ? -1 : 1); return; }
+  }
+  if (e.key.toLowerCase() === "e" && !e.metaKey && !e.ctrlKey) { state.explore ? exitExplore() : startExplore(); return; }
   if (e.key === "ArrowLeft") { e.preventDefault(); state.preview ? stepPreview(-1) : goTo(state.cur - 1); }
   else if (e.key === "ArrowRight") { e.preventDefault(); state.preview ? stepPreview(1) : goTo(state.cur + 1); }
   else if (e.key === "Home") { e.preventDefault(); goTo(0); }
@@ -2470,6 +3246,7 @@ window.addEventListener("resize", debounce(() => {
     await route();
     if (!d.profiles.length) openProfile(null);
   } catch (e) { toast(e.message, true); }
+  if (EXPORT) return;   // a shared copy has no queue
   // Live queue progress (also picks up games restored from the last session).
   await pollQueue();
   if (queue.data?.restored && queue.data.paused) openQueue();

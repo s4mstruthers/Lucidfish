@@ -19,18 +19,20 @@
   <nav class="nav" id="nav" aria-label="Main">
     <button data-page="dashboard" class="active">Home</button>
     <button data-page="games" data-also="analyze game">Games</button>
-    <button data-page="editor">Board editor</button>
+    <button data-page="train">Train</button>
+    <button data-page="editor" class="server-only">Board editor</button>
   </nav>
   <div class="spacer"></div>
-  <button class="queue-pill hidden" id="queuePill" title="Analysis queue — click to see progress and manage it">
+  <span class="share-chip export-only" id="shareChip" title="A shared copy made with Lucidfish"></span>
+  <button class="queue-pill hidden server-only" id="queuePill" title="Analysis queue — click to see progress and manage it">
     <span class="dot busy" id="queueDot"></span><span id="queueText">Queue</span>
     <span class="mini-bar" aria-hidden="true"><span id="queueMiniBar"></span></span>
   </button>
-  <button class="status-pill" id="statusPill" title="Engine and AI coach status — click for settings">
+  <button class="status-pill server-only" id="statusPill" title="Engine and AI coach status — click for settings">
     <span class="dot busy" id="statusDot"></span><span id="statusText">Checking setup…</span>
   </button>
   <button class="ghost icon theme-btn" id="themeBtn" title="Switch light / dark theme" aria-label="Switch theme">◐</button>
-  <button class="settings-btn" id="settingsBtn" title="Settings" aria-label="Settings">
+  <button class="settings-btn server-only" id="settingsBtn" title="Settings" aria-label="Settings">
     <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
     <span>Settings</span>
   </button>
@@ -55,13 +57,14 @@
         <p>Your progress across every analysed game, written by your coach.</p>
       </div>
       <div class="spacer"></div>
-      <button id="goAnalyze">Analyze a game</button>
+      <button id="goTrain" class="secondary hidden" title="Puzzles from your own mistakes, with spaced repetition">🎯 Train</button>
+      <button id="goAnalyze" class="server-only">Analyze a game</button>
     </div>
     <div class="card">
       <div class="stats" id="stats"></div>
       <div class="card-head"><h2>Coach review</h2><div class="spacer"></div>
         <span class="small" id="summaryStatus"></span>
-        <button class="secondary sm" id="refreshSummary">⟳ Update review</button>
+        <button class="secondary sm server-only" id="refreshSummary">⟳ Update review</button>
       </div>
       <div class="md" id="summary"></div>
     </div>
@@ -90,7 +93,7 @@
         <div class="list" id="openings"></div>
       </div>
     </div>
-    <div class="card">
+    <div class="card server-only">
       <div class="card-head"><h2>Talk to your coach</h2></div>
       <div class="chat-log" id="reviewChatLog"></div>
       <div class="chat-input">
@@ -112,7 +115,7 @@
     </div>
     <div class="page-tabs" role="tablist">
       <button data-page="games" role="tab">Analysed games</button>
-      <button data-page="analyze" role="tab">＋ Analyse new games</button>
+      <button data-page="analyze" role="tab" class="server-only">＋ Analyse new games</button>
     </div>
     <div class="card">
       <div class="games-toolbar">
@@ -151,7 +154,7 @@
     </div>
     <div class="page-tabs" role="tablist">
       <button data-page="games" role="tab">Analysed games</button>
-      <button data-page="analyze" role="tab">＋ Analyse new games</button>
+      <button data-page="analyze" role="tab" class="server-only">＋ Analyse new games</button>
     </div>
     <div class="grid-2">
       <div class="card">
@@ -244,6 +247,46 @@
     </div>
   </section>
 
+  <!-- ============================================================ TRAIN -->
+  <section id="page-train" class="hidden" data-page-section>
+    <div class="page-head">
+      <div>
+        <h1>Train</h1>
+        <p>Puzzles from your own games: every position where you went wrong. Find a better move. Puzzles you solve come
+          back less and less often; the ones you miss come back soon, until they stick.</p>
+      </div>
+    </div>
+    <div class="card train-done hidden" id="trainDone"></div>
+    <div class="card">
+      <div class="train-levels" id="trainLevels"></div>
+      <div class="games-toolbar" style="margin-top:16px">
+        <label class="field inline">Puzzles
+          <select id="trainFilter">
+            <option value="all">All my mistakes</option>
+            <option value="serious">Only mistakes and blunders</option>
+          </select></label>
+        <label class="field inline">Session
+          <select id="trainSize"><option value="5">5 puzzles</option><option value="10" selected>10 puzzles</option>
+            <option value="20">20 puzzles</option></select></label>
+        <div class="spacer"></div>
+        <button id="trainStart">▶ Start training</button>
+      </div>
+      <p class="small" id="trainNote" style="margin:12px 0 0"></p>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>How it works</h2></div>
+      <ul class="small train-how">
+        <li>Each puzzle is a position from one of your games, just before a move the engine marked as an inaccuracy,
+          mistake or blunder. Drag a piece to play the move you think is best.</li>
+        <li>Solve it on the first try and it moves up a level: you'll see it again after 1, 3, 7, 16 and then 35 days.
+          Miss it and it drops back to the start, comes back at the end of the session, and again tomorrow.</li>
+        <li>After a puzzle you can read the coach's note, play out the lines, or press 🔍 Explore to try your own ideas
+          against the engine.</li>
+        <li>Your progress is saved in this browser.</li>
+      </ul>
+    </div>
+  </section>
+
   <!-- ============================================================ GAME -->
   <section id="page-game" class="hidden" data-page-section>
     <div class="crumbs">
@@ -265,6 +308,17 @@
       <p class="small" id="progressHint" style="margin:10px 0 0"></p>
     </div>
 
+    <div class="card train-bar hidden" id="trainBar">
+      <div class="row">
+        <b id="trainBarLabel"></b>
+        <div class="bar grow"><div id="trainBarFill"></div></div>
+        <span class="small" id="trainBarScore"></span>
+        <button class="secondary sm hidden" id="trainBack">↩ Back to the puzzle</button>
+        <button class="sm" id="trainNext">Next puzzle →</button>
+        <button class="ghost sm" id="trainEnd">End session</button>
+      </div>
+    </div>
+
     <div class="analysis-grid">
       <div>
         <div class="card">
@@ -283,6 +337,14 @@
             <div class="spacer"></div>
             <button class="secondary sm" id="previewExit">✕ Back to game</button>
           </div>
+          <div class="preview-bar explore-bar hidden" id="exploreBar">
+            <span>🔍 <b>Exploring</b> <span class="muted" id="explorePos"></span></span>
+            <div class="spacer"></div>
+            <button class="secondary icon sm" id="exploreUndo" title="Take back a move (←)" aria-label="Take back a move">↶</button>
+            <button class="secondary icon sm" id="exploreRedo" title="Replay the move (→)" aria-label="Replay the move">↷</button>
+            <button class="secondary sm" id="exploreReset" title="Back to the position you started from">⟲ Reset</button>
+            <button class="secondary sm" id="exploreExit" title="Leave Explore (Esc)">✕ Done</button>
+          </div>
           <div class="board-toolbar">
             <button class="secondary icon" id="btnFirst" title="First move (Home)" aria-label="First move">⏮</button>
             <button class="secondary icon key-nav" id="btnPrevKey" title="Previous key moment (P)" aria-label="Previous key moment">◀ ⚑</button>
@@ -293,6 +355,7 @@
             <button class="secondary icon" id="btnFlip" title="Flip board (F)" aria-label="Flip board">⇅</button>
           </div>
           <div class="draw-bar">
+            <button class="secondary sm" id="btnExplore" aria-pressed="false" title="Move the pieces yourself and let the engine analyse any position (E)">🔍 Explore</button>
             <button class="secondary sm" id="btnDraw" aria-pressed="false" title="Draw arrows and circles with a normal click or a finger (D)">✎ Draw</button>
             <div class="swatches" id="drawSwatches" role="radiogroup" aria-label="Pen colour">
               <button class="swatch green active" data-color="green" role="radio" aria-checked="true" aria-label="Green"></button>
@@ -308,17 +371,18 @@
                 <label class="check"><input type="checkbox" data-view-opt="highlight"> Highlight the last move</label>
                 <label class="check"><input type="checkbox" data-view-opt="evalBar"> Evaluation bar</label>
                 <label class="check"><input type="checkbox" data-view-opt="graph"> Evaluation graph</label>
+                <label class="check"><input type="checkbox" id="viewHideAnswers"> Hide the answers to my mistakes until I try</label>
                 <p class="small" style="margin:6px 0 0">Turn them off to think for yourself before looking at the engine.</p>
               </div>
             </div>
           </div>
-          <div class="hint">← → step · N / P key moments · Home/End · F flips · right-click a square to circle it, right-drag to draw an arrow (Shift red · Alt blue)</div>
+          <div class="hint">← → step · N / P key moments · Home/End · F flips · E explores · right-click a square to circle it, right-drag to draw an arrow (Shift red · Alt blue)</div>
           <div class="graph" id="graphWrap">
             <svg id="graph" viewBox="0 0 400 100" preserveAspectRatio="none" role="img" aria-label="Evaluation graph"></svg>
             <div class="graph-tip" id="graphTip"></div>
           </div>
         </div>
-        <div class="card">
+        <div class="card server-only">
           <div class="card-head"><h2>Ask the coach</h2></div>
           <div class="chat-log" id="gameChatLog"></div>
           <div class="chat-input">
@@ -339,10 +403,10 @@
             <div class="acc-pills" id="accPills"></div>
           </div>
           <div class="row" style="margin-top:12px" id="exportRow">
-            <button class="secondary sm" id="exportPgn" title="Annotated PGN for Lichess studies, ChessBase, …">⬇ Annotated PGN</button>
-            <button class="secondary sm" id="exportMd">⬇ Report (.md)</button>
+            <button class="secondary sm server-only" id="exportPgn" title="Annotated PGN for Lichess studies, ChessBase, …">⬇ Annotated PGN</button>
+            <button class="secondary sm server-only" id="exportMd">⬇ Report (.md)</button>
             <button class="secondary sm" id="copyFen" title="Copy the FEN of the current position">Copy FEN</button>
-            <button class="secondary sm hidden" id="reanalyseBtn" title="Analyse this game again with your current settings">↻ Re-analyse</button>
+            <button class="secondary sm hidden server-only" id="reanalyseBtn" title="Analyse this game again with your current settings">↻ Re-analyse</button>
             <button class="sm hidden" id="practiceAll" title="Replay the positions where you went wrong and look for a better move">🎯 Practise my mistakes</button>
           </div>
           <div id="gameWarnings"></div>
@@ -582,6 +646,43 @@
   </div>
 </div>
 
+<!-- ============================================================ SHARE -->
+<div class="modal-back hidden" id="shareModal" role="dialog" aria-modal="true" aria-labelledby="shareTitle">
+  <div class="modal" style="width:min(640px,100%)">
+    <div class="modal-head"><h2 id="shareTitle">Share this profile</h2><div class="spacer"></div>
+      <button class="ghost icon" data-close aria-label="Close">✕</button></div>
+    <div class="modal-body stack" style="gap:18px">
+      <p class="small" style="margin:0">Lucidfish makes <b>one web page</b> with this profile's analysed games, coach review and
+        patterns. It opens in any web browser on a laptop or desktop: nothing to install, no AI or API key, and it works
+        offline. They can browse the games and read the commentary, practise their mistakes, train on puzzles from all
+        their games, explore positions with a built-in engine, and draw on the board.</p>
+      <label class="check"><input type="checkbox" id="shareEngine" checked> Include the chess engine (about 10 MB), so they
+        can explore any position and every practice move gets judged</label>
+      <section class="share-opt">
+        <h3 class="pf-h">Send a copy</h3>
+        <p class="small">Download the page and send it by email, AirDrop, WhatsApp, …</p>
+        <button id="shareDownload">⬇ Download the page</button>
+      </section>
+      <section class="share-opt">
+        <h3 class="pf-h">Keep it up to date in a shared folder</h3>
+        <p class="small">Choose a folder that syncs to their computer, such as a shared iCloud Drive, Google Drive or Dropbox
+          folder. Lucidfish rewrites the page after every analysis of this profile, so opening the same file always shows
+          the latest games.</p>
+        <div class="row" id="shareSuggestions"></div>
+        <label class="field">Folder <input id="shareFolder" spellcheck="false" autocomplete="off" placeholder="/Users/you/Dropbox/Lucidfish"></label>
+        <label class="check"><input type="checkbox" id="shareAuto" checked> Update automatically after every analysis</label>
+        <div class="row">
+          <button id="shareSave">Save and write it now</button>
+          <button class="secondary" id="shareSyncNow">Update now</button>
+          <div class="spacer"></div>
+          <button class="ghost sm" id="shareStop">Stop syncing</button>
+        </div>
+        <div class="small" id="shareStatus"></div>
+      </section>
+    </div>
+  </div>
+</div>
+
 <!-- ============================================================ QUEUE -->
 <div class="modal-back hidden" id="queueModal" role="dialog" aria-modal="true" aria-labelledby="queueTitle">
   <div class="modal" style="width:min(780px,100%)">
@@ -609,6 +710,7 @@
 
 <script src="/static/vendor/jquery-3.7.1.min.js"></script>
 <script src="/static/vendor/chessboard-1.0.0.min.js"></script>
+<script src="/static/vendor/chess-1.4.0.js"></script>
 <script src="/static/app.js"></script>
 </body>
 </html>

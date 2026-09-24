@@ -78,6 +78,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
+    if argv[:1] == ["share"]:
+        return _share_command(argv[1:])
     if argv[:1] == ["web"]:
         from .web import main as web_main
         return web_main(argv[1:])
@@ -228,6 +230,39 @@ def _print_report(report, console: Console) -> None:
             console.print(f"   [dim]{m.explanation}[/dim]\n")
     if report.review:
         console.print(Panel(report.review, title="Post-game review", border_style="cyan"))
+
+
+def _share_command(argv: list[str]) -> int:
+    """`lucidfish share`: write a profile as a single web page anyone can open."""
+    parser = argparse.ArgumentParser(prog="lucidfish share",
+                                     description="Save a profile's analysed games as one web page that opens in any "
+                                                 "browser, with nothing to install.")
+    parser.add_argument("--profile", help="profile name (default: the active profile)")
+    parser.add_argument("--out", help="file or folder to write to (default: the current folder)")
+    parser.add_argument("--no-engine", action="store_true",
+                        help="leave out the in-browser Stockfish (about 10 MB smaller; practice moves are then "
+                             "judged only against the engine's stored top moves, and Explore shows no evaluation)")
+    args = parser.parse_args(argv)
+    from . import settings, share, store
+    settings.load_config()
+    profiles = store.list_profiles()
+    if args.profile:
+        match = [p for p in profiles if p["name"].lower() == args.profile.lower()]
+        if not match:
+            print(f"No profile called {args.profile!r}. Profiles: {', '.join(p['name'] for p in profiles) or 'none'}")
+            return 1
+        pid = match[0]["id"]
+    else:
+        pid = store.active_id()
+        if not pid:
+            print("There are no profiles yet. Create one in the web app first.")
+            return 1
+    profile = store.get_profile(pid)
+    out = Path(args.out).expanduser() if args.out else Path.cwd()
+    target = out / share.file_name(profile) if out.is_dir() else out
+    target.write_text(share.build_html(pid, engine=not args.no_engine), encoding="utf-8")
+    print(f"Wrote {target} ({target.stat().st_size / 1e6:.1f} MB) — open it in any web browser.")
+    return 0
 
 
 def _check(cfg, console: Console) -> int:

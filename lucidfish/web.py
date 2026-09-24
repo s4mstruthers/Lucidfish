@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import mimetypes
 import os
 import re
 import socket
@@ -31,7 +32,7 @@ import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
 import chess
 import chess.svg
@@ -40,7 +41,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import __version__, credentials, jobs, settings, store
+from . import __version__, credentials, jobs, settings, share, store, training
 from .engine import EngineAnalyzer
 from .export import annotated_pgn, markdown_report
 from .llm import PROVIDERS, LLMError, make_provider
@@ -49,6 +50,9 @@ from .prompts import COACH_CHAT_SYSTEM
 
 STATIC = Path(__file__).parent / "static"
 DEFAULT_PORT = 8420
+# Some systems map these wrongly (e.g. the Windows registry); the browser refuses to run the engine then.
+mimetypes.add_type("application/wasm", ".wasm")
+mimetypes.add_type("text/javascript", ".js")
 _LOOPBACK = {"127.0.0.1", "localhost", "::1", "[::1]"}
 
 
@@ -95,7 +99,9 @@ app = FastAPI(title="Lucidfish", version=__version__, docs_url=None, redoc_url=N
               openapi_url=None, lifespan=_lifespan)
 app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
-_CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; "
+# 'wasm-unsafe-eval' lets the page compile Stockfish's WebAssembly (Explore mode, Train); it doesn't allow eval().
+_CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
+        "script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; "
         "connect-src 'self' https://api.chess.com https://lichess.org; frame-ancestors 'none'; "
         "base-uri 'none'; form-action 'self'")
 
@@ -527,6 +533,7 @@ def update_profile(pid: int, req: ProfileReq):
         store.update_profile(pid, **req.model_dump())
     except Exception:
         return _error("A profile with that name already exists.")
+    share.sync_profile(pid)
     return {"ok": True}
 
 
@@ -535,6 +542,7 @@ def delete_profile(pid: int):
     if store.get_profile(pid) is None:
         return _error("unknown profile", 404)
     store.delete_profile(pid)
+    share.forget(pid)
     return {"ok": True, "active": store.active_id()}
 
 
@@ -573,9 +581,19 @@ def profile_game(game_id: int):
     }
 
 
+@app.get("/api/train")
+def train():
+    """Puzzles from the active profile's own mistakes (the page schedules them with spaced repetition)."""
+    pid = store.active_id()
+    return {"items": training.train_items(pid) if pid else []}
+
+
 @app.delete("/api/profile/game/{game_id}")
 def delete_game(game_id: int):
+    g = store.get_game(game_id)
     store.delete_game(game_id)
+    if g:
+        share.sync_profile(g["profile_id"])
     return {"ok": True}
 
 
@@ -630,6 +648,64 @@ def reanalyse_game(game_id: int, req: ReanalyseReq | None = None):
                    profile_id=g["profile_id"], source="single", replace=True)
     QUEUE.add([job], front=True)
     return {"job_id": job.id}
+
+
+# ================================================================ sharing
+
+def _share_profile() -> tuple[int | None, dict | None]:
+    pid = store.active_id()
+    return pid, store.get_profile(pid) if pid else None
+
+
+@app.get("/api/share")
+def share_status():
+    """Sharing status of the active profile, plus sync folders found on this computer."""
+    pid, profile = _share_profile()
+    if profile is None:
+        return _error("Create a profile first.")
+    return {**share.get_config(pid), "file_name": share.file_name(profile),
+            "suggestions": share.folder_suggestions()}
+
+
+class ShareReq(BaseModel):
+    folder: str = Field(default="", max_length=1000)
+    auto: bool = True
+    engine: bool = True
+
+
+@app.post("/api/share")
+def share_configure(req: ShareReq):
+    """Choose (or clear) the folder that keeps an up-to-date copy; writes it straight away."""
+    pid, profile = _share_profile()
+    if profile is None:
+        return _error("Create a profile first.")
+    try:
+        cfg = share.configure(pid, req.folder, req.auto, req.engine)
+    except ValueError as e:
+        return _error(str(e))
+    return share.sync_now(pid) if cfg["folder"] else cfg
+
+
+@app.post("/api/share/sync")
+def share_sync():
+    pid, profile = _share_profile()
+    if profile is None:
+        return _error("Create a profile first.")
+    try:
+        return share.sync_now(pid)
+    except ValueError as e:
+        return _error(str(e))
+
+
+@app.get("/api/share/download")
+def share_download(engine: bool = True):
+    """The shared page for the active profile, as a download (engine=false: without Stockfish, ~10 MB smaller)."""
+    pid, profile = _share_profile()
+    if profile is None:
+        return _error("Create a profile first.")
+    name = share.file_name(profile)
+    return Response(share.build_html(pid, engine=engine), media_type="text/html; charset=utf-8",
+                    headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
 
 
 # ================================================================ export
