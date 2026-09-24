@@ -33,8 +33,22 @@ def _eval_tag(ev: str) -> str:
     return ev.lstrip("+") if not ev.startswith("#") else ev
 
 
+_COLOR_CODES = {"green": "G", "red": "R", "blue": "B", "yellow": "Y"}
+
+
+def _drawing_tags(drawing: dict | None) -> str:
+    """Your arrows and circles as PGN [%cal]/[%csl] tags (shown by Lichess, ChessBase, ...)."""
+    if not drawing:
+        return ""
+    arrows = ",".join(f"{_COLOR_CODES.get(a.get('color'), 'G')}{a['from']}{a['to']}"
+                      for a in drawing.get("arrows", []))
+    circles = ",".join(f"{_COLOR_CODES.get(c.get('color'), 'G')}{c['sq']}" for c in drawing.get("circles", []))
+    return " ".join(filter(None, [f"[%cal {arrows}]" if arrows else "", f"[%csl {circles}]" if circles else ""]))
+
+
 def annotated_pgn(pgn_text: str, moves: list[dict], review: str = "",
-                  accuracy: dict | None = None, chapters: list[dict] | None = None) -> str:
+                  accuracy: dict | None = None, chapters: list[dict] | None = None,
+                  annotations: dict | None = None) -> str:
     """The original game with Lucidfish's verdicts, evals, notes and best lines."""
     game = chess.pgn.read_game(io.StringIO(pgn_text))
     if game is None:
@@ -62,6 +76,9 @@ def annotated_pgn(pgn_text: str, moves: list[dict], review: str = "",
             tag = _eval_tag(m.get("eval", ""))
             if tag:
                 parts.append(f"[%eval {tag}]")
+            drawn = _drawing_tags((annotations or {}).get(m.get("fen_after", "").split(" ")[0]))
+            if drawn:
+                parts.append(drawn)
             if m.get("flow"):
                 parts.append(m["flow"].strip())
             if m.get("expl"):

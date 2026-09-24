@@ -168,7 +168,21 @@ const state = {
   dismissed: new Set(),
   moveView: "moves",     // "moves" grid or "story" transcript
   practice: null,        // "practise your mistakes" attempt in progress
+  revealed: new Set(),   // your mistakes whose answer you chose to see (practice-first mode)
+  draw: { mode: false, color: "green" },   // board drawing: pen mode for touch / left mouse, colour
+  view: { bestArrow: true, highlight: true, evalBar: true, graph: true },   // what the board shows
 };
+try { Object.assign(state.view, JSON.parse(localStorage.getItem("lucidfish-view") || "{}")); } catch { /* defaults */ }
+
+/** Practice first: hide the answer to your own mistakes until you've tried (Settings → Analysis). */
+function hideAnswers() {
+  try { return localStorage.getItem("lucidfish-hide-answers") !== "0"; } catch { return true; }
+}
+function isSpoiler(i) {
+  const g = state.game, m = g?.moves?.[i];
+  if (!m || g.mode !== "game" || !ERRORS.includes(m.cls) || !hideAnswers() || state.revealed.has(i)) return false;
+  return !g.side || m.side.toLowerCase() === g.side;
+}
 
 let board = null;
 let editorBoard = null;
@@ -199,7 +213,10 @@ renderThemeButton();
 function showPage(name, fromRoute = false) {
   state.page = name;
   document.querySelectorAll("[data-page-section]").forEach((s) => s.classList.toggle("hidden", s.id !== `page-${name}`));
-  document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("active", b.dataset.page === name));
+  document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("active",
+    b.dataset.page === name || (b.dataset.also || "").split(" ").includes(name)));
+  document.querySelectorAll(".page-tabs [data-page]").forEach((b) => b.classList.toggle("active", b.dataset.page === name));
+  if (name === "games" || name === "analyze") renderResume();
   if (name === "dashboard") loadDashboard();
   if (name === "games") loadDashboard().then(renderGames);
   if (name === "analyze" && !state.recent.length) loadRecentGames();
@@ -208,7 +225,21 @@ function showPage(name, fromRoute = false) {
   if (!fromRoute) syncRoute();
   window.scrollTo({ top: 0 });
 }
-document.querySelectorAll("#nav button").forEach((b) => b.addEventListener("click", () => showPage(b.dataset.page)));
+document.querySelectorAll("#nav button, .page-tabs [data-page]").forEach((b) =>
+  b.addEventListener("click", () => showPage(b.dataset.page)));
+$("backBtn").addEventListener("click", () => showPage(state.game?.mode === "position" ? "editor" : "games"));
+
+/** "Continue reviewing …" on the Games pages, for the game you were looking at. */
+function renderResume() {
+  const g = state.game;
+  const title = g?.mode === "position" ? "your board-editor position"
+    : g ? `${g.headers?.White || "White"} vs ${g.headers?.Black || "Black"}` : "";
+  document.querySelectorAll("[data-resume]").forEach((el) => {
+    el.innerHTML = g ? `<button class="resume" data-resume-open>▶ Continue reviewing <b>${esc(title)}</b>`
+      + `${g.jobId ? " (still analysing)" : ""}</button>` : "";
+  });
+}
+document.addEventListener("click", (e) => { if (e.target.closest("[data-resume-open]")) showPage("game"); });
 $("goAnalyze").addEventListener("click", () => showPage("analyze"));
 
 /* Pages and games have addresses (#/games, #/game/12, …), so the browser's Back button
@@ -305,57 +336,169 @@ $("statusPill").addEventListener("click", () => openSettings("coach"));
 
 /* ================================================================ profiles */
 
+const LEVEL_NAMES = { beginner: "Beginner", casual: "Casual", club: "Club player", advanced: "Advanced" };
+
+/** Initials on a colour derived from the name: a recognisable avatar with no image upload. */
+function initials(name) {
+  const parts = String(name || "?").trim().split(/\s+/).filter(Boolean);
+  return ((parts[0]?.[0] || "?") + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
+function avatarStyle(name) {
+  let h = 0;
+  for (const ch of String(name || "")) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return `background: hsl(${h}, 55%, 46%)`;
+}
+function avatar(name, cls = "") {
+  return `<span class="avatar ${cls}" style="${avatarStyle(name)}" aria-hidden="true">${esc(initials(name))}</span>`;
+}
+function ratingsText(p) {
+  return [["rapid", p.elo_rapid], ["blitz", p.elo_blitz], ["bullet", p.elo_bullet]]
+    .filter(([, v]) => v).map(([k, v]) => `${cap(k)} ${v}`).join(" · ");
+}
+
 async function loadProfiles() {
   const d = await api("/api/profiles");
   state.profiles = d.profiles;
-  const sel = $("profileSel");
-  sel.innerHTML = d.profiles.length
-    ? d.profiles.map((p) => `<option value="${p.id}" ${p.id === d.active ? "selected" : ""}>${esc(p.name)}</option>`).join("")
-    : `<option value="">No profile</option>`;
-  sel.disabled = !d.profiles.length;
   state.profile = d.profiles.find((p) => p.id === d.active) || null;
+  renderAccount();
   return d;
 }
 
-$("profileSel").addEventListener("change", async (e) => {
-  try { await api(`/api/profiles/${e.target.value}/activate`, { method: "POST" }); }
+function renderAccount() {
+  const p = state.profile;
+  $("accountAvatar").textContent = p ? initials(p.name) : "+";
+  $("accountAvatar").setAttribute("style", p ? avatarStyle(p.name) : "");
+  $("accountName").textContent = p ? p.name : "Create profile";
+  const others = state.profiles.filter((x) => x.id !== p?.id);
+  const accounts = p ? [p.chesscom_user && `chess.com · ${esc(p.chesscom_user)}`, p.lichess_user && `Lichess · ${esc(p.lichess_user)}`]
+    .filter(Boolean).join("<br>") : "";
+  $("accountMenu").innerHTML = (p
+    ? `<div class="am-current">${avatar(p.name, "lg")}<div class="grow"><b>${esc(p.name)}</b>`
+      + `<div class="small">${[LEVEL_NAMES[p.level], ratingsText(p)].filter(Boolean).map(esc).join(" · ") || "No level or ratings yet"}</div>`
+      + (accounts ? `<div class="small">${accounts}</div>` : "")
+      + `</div></div><button class="am-item" data-am="edit">✎ Edit profile</button>`
+    : `<div class="am-current"><div class="grow small">Create a profile so the coach can remember your games.</div></div>`)
+    + (others.length ? `<div class="am-label">Switch profile</div>` + others.map((o) =>
+      `<button class="am-item" data-am="switch" data-id="${o.id}">${avatar(o.name, "sm")}<span class="grow">${esc(o.name)}</span>`
+      + `<span class="small">${o.games} game${o.games === 1 ? "" : "s"}</span></button>`).join("") : "")
+    + `<button class="am-item" data-am="new">＋ Add a profile</button>`;
+}
+
+function toggleAccountMenu(open) {
+  const menu = $("accountMenu"), show = open ?? menu.classList.contains("hidden");
+  menu.classList.toggle("hidden", !show);
+  $("accountBtn").setAttribute("aria-expanded", show);
+}
+$("accountBtn").addEventListener("click", (e) => {
+  e.stopPropagation();
+  if (!state.profile && !state.profiles.length) { openProfile(null); return; }
+  toggleAccountMenu();
+});
+document.addEventListener("click", (e) => { if (!e.target.closest("#account")) toggleAccountMenu(false); });
+$("accountMenu").addEventListener("click", async (e) => {
+  const item = e.target.closest("[data-am]");
+  if (!item) return;
+  toggleAccountMenu(false);
+  if (item.dataset.am === "edit") openProfile(state.profile);
+  else if (item.dataset.am === "new") openProfile(null);
+  else if (item.dataset.am === "switch") switchProfile(Number(item.dataset.id));
+});
+
+async function switchProfile(id) {
+  try { await api(`/api/profiles/${id}/activate`, { method: "POST" }); }
   catch (err) { toast(err.message, true); return; }
   await loadProfiles();
   state.reviewChat.length = 0; $("reviewChatLog").innerHTML = "";
   state.recent = []; state.selected.clear();
   loadDashboard().then(() => { if (state.page === "games") renderGames(); });
   if (state.page === "analyze") loadRecentGames();
-});
+  toast(`Switched to ${state.profile?.name}.`);
+}
 
 let editingProfile = null;
+let pfLevel = "";
+
 function openProfile(existing) {
   editingProfile = existing;
-  $("profileTitle").textContent = existing ? "Edit profile" : "Create your profile";
+  $("profileTitle").textContent = existing ? "Edit profile" : state.profiles.length ? "Add a profile" : "Welcome to Lucidfish";
+  $("pfIntro").classList.toggle("hidden", !!existing);
   $("pfName").value = existing?.name || "";
-  $("pfLevel").value = existing?.level || "";
+  pfLevel = existing?.level || "";
   $("pfChesscom").value = existing?.chesscom_user || "";
   $("pfLichess").value = existing?.lichess_user || "";
   $("pfBullet").value = existing?.elo_bullet || "";
   $("pfBlitz").value = existing?.elo_blitz || "";
   $("pfRapid").value = existing?.elo_rapid || "";
-  $("pfDelete").classList.toggle("hidden", !existing);
+  $("pfChesscomStatus").textContent = ""; $("pfLichessStatus").textContent = "";
+  $("pfDanger").classList.toggle("hidden", !existing);
   $("pfError").textContent = "";
+  renderProfileForm();
   openModal("profileModal");
   $("pfName").focus();
 }
-$("profileBtn").addEventListener("click", () => openProfile(state.profile));
+
+function renderProfileForm() {
+  const name = $("pfName").value.trim();
+  $("pfAvatar").textContent = name ? initials(name) : "+";
+  $("pfAvatar").setAttribute("style", name ? avatarStyle(name) : "");
+  document.querySelectorAll("#pfLevel [data-level]").forEach((b) => {
+    b.classList.toggle("active", b.dataset.level === pfLevel);
+    b.setAttribute("aria-checked", b.dataset.level === pfLevel);
+  });
+}
+$("pfName").addEventListener("input", renderProfileForm);
+$("pfLevel").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-level]");
+  if (!b) return;
+  pfLevel = pfLevel === b.dataset.level ? "" : b.dataset.level;   // click again to clear
+  renderProfileForm();
+});
+
+/** Fill the ratings from the site's public profile (the browser talks to chess.com / Lichess directly). */
+async function lookupRatings(site) {
+  const user = $(site === "chesscom" ? "pfChesscom" : "pfLichess").value.trim();
+  const out = $(site === "chesscom" ? "pfChesscomStatus" : "pfLichessStatus");
+  if (!user) { out.textContent = "Enter a username first."; return; }
+  out.className = "small lookup"; out.textContent = "Looking up…";
+  try {
+    let ratings;
+    if (site === "chesscom") {
+      const r = await fetch(`https://api.chess.com/pub/player/${encodeURIComponent(user.toLowerCase())}/stats`);
+      if (r.status === 404) throw new Error(`No chess.com player called "${user}".`);
+      if (!r.ok) throw new Error(`chess.com answered HTTP ${r.status}.`);
+      const d = await r.json();
+      ratings = { bullet: d.chess_bullet?.last?.rating, blitz: d.chess_blitz?.last?.rating, rapid: d.chess_rapid?.last?.rating };
+    } else {
+      const r = await fetch(`https://lichess.org/api/user/${encodeURIComponent(user)}`);
+      if (r.status === 404) throw new Error(`No Lichess player called "${user}".`);
+      if (!r.ok) throw new Error(`Lichess answered HTTP ${r.status}.`);
+      const d = await r.json();
+      ratings = { bullet: d.perfs?.bullet?.rating, blitz: d.perfs?.blitz?.rating, rapid: d.perfs?.rapid?.rating };
+    }
+    const found = Object.entries(ratings).filter(([, v]) => v);
+    for (const [k, v] of found) $(`pf${cap(k)}`).value = v;
+    out.className = "small lookup ok";
+    out.textContent = found.length ? `✓ Found: ${found.map(([k, v]) => `${k} ${v}`).join(", ")}. Ratings filled in below.`
+      : "✓ Found the player, but they have no rated bullet, blitz or rapid games yet.";
+  } catch (e) {
+    out.className = "small lookup bad";
+    out.textContent = e.message.startsWith("No ") || e.message.includes("HTTP") ? e.message
+      : "Couldn't reach the site — check your connection, or type the ratings yourself.";
+  }
+}
+document.querySelectorAll("[data-lookup]").forEach((b) => b.addEventListener("click", () => lookupRatings(b.dataset.lookup)));
 
 $("pfSave").addEventListener("click", async () => {
   const num = (id) => { const v = parseInt($(id).value, 10); return Number.isFinite(v) ? v : null; };
   const body = {
-    name: $("pfName").value.trim(), level: $("pfLevel").value,
+    name: $("pfName").value.trim(), level: pfLevel,
     chesscom_user: $("pfChesscom").value.trim(), lichess_user: $("pfLichess").value.trim(),
     elo_bullet: num("pfBullet"), elo_blitz: num("pfBlitz"), elo_rapid: num("pfRapid"),
   };
-  if (!body.name) { $("pfError").textContent = "Please enter a name."; return; }
+  if (!body.name) { $("pfError").textContent = "Please enter a name."; $("pfName").focus(); return; }
   try {
     if (editingProfile) await api(`/api/profiles/${editingProfile.id}`, { method: "POST", body });
-    else await api("/api/profiles", { method: "POST", body });
+    else await api("/api/profiles", { method: "POST", body });   // a new profile becomes the active one
   } catch (e) { $("pfError").textContent = e.message; return; }
   closeModal("profileModal");
   await loadProfiles();
@@ -427,7 +570,15 @@ async function loadDashboard() {
 
 const perGame = (n) => `${n} mistake${n === 1 ? "" : "s"} per game`;
 
+const FINDING_ICONS = { weakness: "⚠", strength: "✓", info: "•" };
+
 function renderInsights(s) {
+  $("findingsCard").classList.toggle("hidden", !s.games);
+  $("findings").innerHTML = (s.findings || []).length
+    ? s.findings.map((f) => `<div class="finding ${esc(f.kind)}"><span class="f-icon">${FINDING_ICONS[f.kind] || "•"}</span>`
+      + `<span>${esc(f.text)}</span></div>`).join("")
+    : `<div class="empty small">Patterns across your games appear after about 3 analysed games where Lucidfish knows which side
+        you played (it detects this from your chess.com / Lichess username).</div>`;
   $("insightsRow").classList.toggle("hidden", !s.games);
   if (!s.games) return;
   const phases = ["opening", "middlegame", "endgame"], pa = s.phase_accuracy || {};
@@ -462,7 +613,7 @@ const RECENT_ON_DASHBOARD = 6;
 function renderSavedGames() {
   const box = $("savedGames"), n = state.savedGames.length;
   $("seeAllGames").classList.toggle("hidden", !n);
-  $("seeAllGames").textContent = n > RECENT_ON_DASHBOARD ? `See all ${n} games →` : "Open My games →";
+  $("seeAllGames").textContent = n > RECENT_ON_DASHBOARD ? `See all ${n} games →` : "All games →";
   if (!n) { box.innerHTML = `<div class="empty small">No analysed games yet.</div>`; return; }
   box.innerHTML = "";
   for (const g of state.savedGames.slice(0, RECENT_ON_DASHBOARD)) {
@@ -600,7 +751,7 @@ const rerenderGames = () => { gamesView.limit = 50; renderGames(); };
 $("gSearch").addEventListener("input", debounce(rerenderGames, 120));
 ["gResult", "gColor", "gTime", "gSort"].forEach((id) => $(id).addEventListener("change", rerenderGames));
 $("gMore").addEventListener("click", () => { gamesView.limit += 50; renderGames(); });
-$("gamesAnalyze").addEventListener("click", () => showPage("analyze"));
+
 
 async function reanalyse(id) {
   const d = await api(`/api/profile/game/${id}/reanalyse`, { method: "POST", body: {} });
@@ -1032,9 +1183,8 @@ async function startAnalysis(pgn, side, rating) {
 function openJob(jobId, pgn = "", fromRoute = false) {
   clearTimeout(pollTimer);
   state.game = { mode: "game", pgn, jobId, status: "queued", headers: {}, side: null, moves: [], review: "",
-    opening: "", accuracy: {}, warnings: [], total: 0, coach: "" };
+    opening: "", accuracy: {}, warnings: [], total: 0, coach: "", chapters: [], annotations: {} };
   resetGameView();
-  $("navGame").classList.remove("hidden");
   showPage("game", fromRoute);
   $("progressCard").classList.remove("hidden");
   // Engine-only mode has nothing for a "Coach" bar to show.
@@ -1073,7 +1223,8 @@ async function poll() {
     return;
   }
   Object.assign(g, { review: j.review, opening: j.opening, accuracy: j.accuracy, coach: j.coach, jobId: null,
-    pgn: g.pgn || "", gameId: j.game_id || null });
+    pgn: g.pgn || "", gameId: j.game_id || null, chapters: j.chapters || [] });
+  if (g.gameId && Object.keys(g.annotations || {}).length) saveDrawings();   // drawn while it was analysing
   if (state.page === "game") syncRoute(true);   // #/job/… → #/game/12 (the job itself is gone after a restart)
   if (!g.pgn && j.game_id) {
     try { g.pgn = (await api(`/api/profile/game/${j.game_id}`)).pgn; } catch { /* export needs it; not critical */ }
@@ -1142,9 +1293,9 @@ async function openStoredGame(id, fromRoute = false) {
   }
   clearTimeout(pollTimer);
   state.game = { mode: "game", gameId: d.id, pgn: d.pgn, headers: d.headers, side: d.side, moves: d.moves,
-    review: d.review, opening: d.opening, accuracy: d.accuracy || {}, warnings: [], total: d.moves.length, status: "done" };
+    review: d.review, opening: d.opening, accuracy: d.accuracy || {}, warnings: [], total: d.moves.length, status: "done",
+    chapters: d.chapters || [], annotations: d.annotations || {} };
   resetGameView();
-  $("navGame").classList.remove("hidden");
   showPage("game", fromRoute);
   renderHeader(); renderReview();
   goTo(d.moves.length ? 0 : -1);
@@ -1152,6 +1303,7 @@ async function openStoredGame(id, fromRoute = false) {
 
 function resetGameView() {
   state.cur = -1; state.preview = null; state.practice = null; state.gameChat.length = 0;
+  state.revealed = new Set();
   $("gameChatLog").innerHTML = ""; $("moveList").innerHTML = ""; $("explain").innerHTML = "";
   $("review").innerHTML = ""; $("previewBar").classList.add("hidden");
   $("progressCard").classList.add("hidden");
@@ -1180,6 +1332,9 @@ function renderHeader() {
   }
   $("practiceAll").classList.toggle("hidden", !(g.mode === "game" && !g.jobId && myMistakes().length));
   $("reanalyseBtn").classList.toggle("hidden", !(g.mode === "game" && g.gameId && !g.jobId));
+  $("crumbTitle").textContent = g.mode === "position" ? "Board editor position"
+    : `${(g.headers || {}).White || "White"} vs ${(g.headers || {}).Black || "Black"}`;
+  $("backBtn").textContent = g.mode === "position" ? "← Board editor" : "← Games";
   $("gameWarnings").innerHTML = (g.warnings || []).map((w) =>
     `<div class="banner" style="margin:12px 0 0"><div class="grow small">${esc(w)}</div></div>`).join("");
 }
@@ -1233,7 +1388,10 @@ function sqXY(sq) {
   return [(white ? f : 7 - f) + 0.5, (white ? 7 - r : r) + 0.5];
 }
 
+let lastOverlay = { arrows: [], squares: [] };
+
 function drawOverlay({ arrows = [], squares = [] }) {
+  lastOverlay = { arrows, squares };
   const svg = $("overlay"), el = document.querySelector("#board .board-b72b1");
   if (!el) return;
   const holder = $("boardHolder").getBoundingClientRect(), rect = el.getBoundingClientRect();
@@ -1255,8 +1413,173 @@ function drawOverlay({ arrows = [], squares = [] }) {
     out += `<line x1="${x1}" y1="${y1}" x2="${hx}" y2="${hy}" stroke="${a.color}" stroke-width="0.16" stroke-linecap="round" opacity="0.85"/>`
       + `<polygon points="${x2 - ux * 0.08},${y2 - uy * 0.08} ${hx - uy * 0.22},${hy + ux * 0.22} ${hx + uy * 0.22},${hy - ux * 0.22}" fill="${a.color}" opacity="0.85"/>`;
   }
-  svg.innerHTML = out;
+  svg.innerHTML = out + drawingsSvg();
+  renderDrawBar();
 }
+const redrawOverlay = () => drawOverlay(lastOverlay);
+
+/* ================================================================ your drawings */
+
+const PEN = { green: "#15781b", red: "#b3261e", blue: "#1f5fbf", yellow: "#e08e00" };
+let drawDrag = null;   // {from, to, color} while drawing
+
+/** Drawings belong to the position on the board (placement part of the FEN), so they
+ * come back whenever that position is shown, in the game, a variation or practice. */
+function drawingKey() { return board ? board.fen() : ""; }
+function currentDrawing() {
+  const g = state.game;
+  return g?.annotations?.[drawingKey()] || { arrows: [], circles: [] };
+}
+
+function arrowSvg(a, width, opacity) {
+  const [x1, y1] = sqXY(a.from), [x2, y2] = sqXY(a.to);
+  const len = Math.hypot(x2 - x1, y2 - y1), ux = (x2 - x1) / len, uy = (y2 - y1) / len;
+  const hx = x2 - ux * 0.42, hy = y2 - uy * 0.42, c = PEN[a.color] || PEN.green;
+  return `<line x1="${x1}" y1="${y1}" x2="${hx}" y2="${hy}" stroke="${c}" stroke-width="${width}" stroke-linecap="round" opacity="${opacity}"/>`
+    + `<polygon points="${x2 - ux * 0.06},${y2 - uy * 0.06} ${hx - uy * 0.26},${hy + ux * 0.26} ${hx + uy * 0.26},${hy - ux * 0.26}" fill="${c}" opacity="${opacity}"/>`;
+}
+
+function drawingsSvg() {
+  if (!state.game || !board) return "";
+  const d = currentDrawing();
+  let out = "";
+  for (const c of d.circles) {
+    const [x, y] = sqXY(c.sq);
+    out += `<circle cx="${x}" cy="${y}" r="0.45" fill="none" stroke="${PEN[c.color] || PEN.green}" stroke-width="0.07" opacity="0.85"/>`;
+  }
+  for (const a of d.arrows) out += arrowSvg(a, 0.2, 0.8);
+  if (drawDrag && drawDrag.from !== drawDrag.to) out += arrowSvg(drawDrag, 0.2, 0.5);
+  else if (drawDrag) {
+    const [x, y] = sqXY(drawDrag.from);
+    out += `<circle cx="${x}" cy="${y}" r="0.45" fill="none" stroke="${PEN[drawDrag.color]}" stroke-width="0.07" opacity="0.5"/>`;
+  }
+  return out;
+}
+
+function squareAt(clientX, clientY) {
+  const el = document.querySelector("#board .board-b72b1");
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  const x = Math.floor(((clientX - r.left) / r.width) * 8), y = Math.floor(((clientY - r.top) / r.height) * 8);
+  if (x < 0 || x > 7 || y < 0 || y > 7) return null;
+  const white = orientation() === "white";
+  return "abcdefgh"[white ? x : 7 - x] + ((white ? 7 - y : y) + 1);
+}
+
+function penFor(e) {
+  if (e.shiftKey && e.altKey) return "yellow";
+  if (e.shiftKey) return "red";
+  if (e.altKey || e.ctrlKey || e.metaKey) return "blue";
+  return state.draw.color;
+}
+
+function finishDrawing() {
+  const g = state.game, d = drawDrag;
+  drawDrag = null;
+  document.body.classList.remove("no-select");
+  document.getSelection()?.removeAllRanges();
+  if (!g || !d) return;
+  g.annotations = g.annotations || {};
+  const key = drawingKey();
+  const cur = g.annotations[key] || { arrows: [], circles: [] };
+  if (d.from === d.to) {
+    const old = cur.circles.find((c) => c.sq === d.from);
+    cur.circles = cur.circles.filter((c) => c.sq !== d.from);
+    if (!old || old.color !== d.color) cur.circles.push({ sq: d.from, color: d.color });
+  } else {
+    const old = cur.arrows.find((a) => a.from === d.from && a.to === d.to);
+    cur.arrows = cur.arrows.filter((a) => !(a.from === d.from && a.to === d.to));
+    if (!old || old.color !== d.color) cur.arrows.push({ from: d.from, to: d.to, color: d.color });
+  }
+  if (cur.arrows.length || cur.circles.length) g.annotations[key] = cur; else delete g.annotations[key];
+  redrawOverlay();
+  saveDrawingsSoon();
+}
+
+function clearDrawing() {
+  const g = state.game;
+  if (!g?.annotations?.[drawingKey()]) return;
+  delete g.annotations[drawingKey()];
+  redrawOverlay();
+  saveDrawingsSoon();
+}
+
+async function saveDrawings() {
+  const g = state.game;
+  if (!g?.gameId) return;   // not saved yet: kept in memory and saved once the analysis is stored
+  try { await api(`/api/profile/game/${g.gameId}/annotations`, { method: "POST", body: { annotations: g.annotations } }); }
+  catch (e) { toast(`Couldn't save your drawing: ${e.message}`, true); }
+}
+const saveDrawingsSoon = debounce(saveDrawings, 700);
+
+function renderDrawBar() {
+  const has = !!(state.game && currentDrawing() && (currentDrawing().arrows.length || currentDrawing().circles.length));
+  $("btnClearDrawing").classList.toggle("hidden", !has);
+  $("btnDraw").classList.toggle("active", state.draw.mode);
+  $("btnDraw").setAttribute("aria-pressed", state.draw.mode);
+  $("drawSwatches").classList.toggle("hidden", !state.draw.mode);
+  $("boardHolder").classList.toggle("drawing", state.draw.mode);
+}
+
+function startDrawing(e, point) {
+  const sq = squareAt(point.clientX, point.clientY);
+  if (!sq || !state.game) return false;
+  // Shift+click would otherwise extend a text selection (and scroll the page) mid-drag.
+  document.getSelection()?.removeAllRanges();
+  document.body.classList.add("no-select");
+  drawDrag = { from: sq, to: sq, color: penFor(e) };
+  redrawOverlay();
+  return true;
+}
+document.addEventListener("selectstart", (e) => { if (drawDrag) e.preventDefault(); });
+function moveDrawing(point) {
+  if (!drawDrag) return;
+  const sq = squareAt(point.clientX, point.clientY);
+  if (sq && sq !== drawDrag.to) { drawDrag.to = sq; redrawOverlay(); }
+}
+
+// Capture phase, so chessboard.js never sees a drawing gesture as a piece drag.
+$("boardHolder").addEventListener("mousedown", (e) => {
+  const drawing = e.button === 2 || (e.button === 0 && state.draw.mode);
+  if (!drawing) {
+    if (e.button === 0 && !state.practice) clearDrawingOnClick = true;
+    return;
+  }
+  e.preventDefault(); e.stopPropagation();
+  startDrawing(e, e);
+}, true);
+let clearDrawingOnClick = false;
+$("boardHolder").addEventListener("click", () => {
+  // A plain left click on the board clears the drawing on this position (as on Lichess).
+  if (clearDrawingOnClick && !state.draw.mode) clearDrawing();
+  clearDrawingOnClick = false;
+});
+window.addEventListener("mousemove", (e) => moveDrawing(e));
+window.addEventListener("mouseup", () => { if (drawDrag) finishDrawing(); });
+$("boardHolder").addEventListener("contextmenu", (e) => e.preventDefault());
+$("boardHolder").addEventListener("touchstart", (e) => {
+  if (!state.draw.mode || e.touches.length !== 1) return;
+  e.preventDefault(); e.stopPropagation();
+  startDrawing(e, e.touches[0]);
+}, { capture: true, passive: false });
+$("boardHolder").addEventListener("touchmove", (e) => {
+  if (!drawDrag) return;
+  e.preventDefault();
+  moveDrawing(e.touches[0]);
+}, { passive: false });
+$("boardHolder").addEventListener("touchend", () => { if (drawDrag) finishDrawing(); });
+
+$("btnDraw").addEventListener("click", () => { state.draw.mode = !state.draw.mode; renderDrawBar(); });
+$("btnClearDrawing").addEventListener("click", clearDrawing);
+$("drawSwatches").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-color]");
+  if (!b) return;
+  state.draw.color = b.dataset.color;
+  document.querySelectorAll("#drawSwatches [data-color]").forEach((x) => {
+    x.classList.toggle("active", x === b);
+    x.setAttribute("aria-checked", x === b);
+  });
+});
 
 function setEvalBar(win, label) {
   $("evalWhite").style.height = `${Math.max(2, Math.min(98, win))}%`;
@@ -1310,8 +1633,12 @@ function goTo(i, rerender = true) {
   }
   board.position(m.fen_after, rerender && Math.abs(state.cur - prev) === 1);
   const arrows = [];
-  if (m.best_from && m.cls !== "best" && m.best !== m.san) arrows.push({ from: m.best_from, to: m.best_to, color: "#1f9d6b" });
-  drawOverlay({ arrows, squares: [{ sq: m.from, color: "rgba(255, 214, 10, .38)" }, { sq: m.to, color: "rgba(255, 214, 10, .55)" }] });
+  if (state.view.bestArrow && m.best_from && m.cls !== "best" && m.best !== m.san && !isSpoiler(state.cur)) {
+    arrows.push({ from: m.best_from, to: m.best_to, color: "#1f9d6b" });
+  }
+  const squares = state.view.highlight
+    ? [{ sq: m.from, color: "rgba(255, 214, 10, .38)" }, { sq: m.to, color: "rgba(255, 214, 10, .55)" }] : [];
+  drawOverlay({ arrows, squares });
   setEvalBar(winOf(m), evalWords(m.eval));
   renderMoveList();
   renderExplain(m);
@@ -1359,21 +1686,37 @@ $("moveList").addEventListener("click", (e) => {
   if (cell) goTo(parseInt(cell.dataset.i, 10));
 });
 
-/** The game as a running commentary: every move with the commentator's line. */
+/** The game as a running commentary: every move with the commentator's line, grouped into
+ * chapters when the coach wrote them (otherwise by game phase). Every row has the same columns
+ * (number · side · move · verdict · text), so White's and Black's moves line up. */
 function renderStory() {
   const g = state.game, box = $("storyList");
   if (!g || g.mode !== "game") return;
   const hasFlow = g.moves.some((m) => m.flow);
   let html = hasFlow || !g.moves.length ? "" : `<p class="small story-note">This game was analysed without running commentary, `
     + `so the story shows the coach's notes only. Choose <b>Commentary</b> in Settings → Analysis for a line on every move.</p>`;
+  const chapters = new Map((g.chapters || []).map((c, k) => [c.start, { ...c, k }]));
   let phase = "";
   g.moves.forEach((m, i) => {
-    if (m.phase && m.phase !== phase) { phase = m.phase; html += `<div class="story-phase">${esc(cap(phase))}</div>`; }
-    const text = m.flow || (m.expl ? m.expl.split(/(?<=[.!?])\s/)[0] : "");
+    const ch = chapters.get(i);
+    if (ch) {
+      html += `<div class="story-chapter" data-i="${i}" title="Go to the start of this chapter">`
+        + `<div class="ch-head"><span>Chapter ${ch.k + 1}</span><span>moves ${esc(ch.range)}</span></div>`
+        + `<div class="ch-title">${esc(ch.title)}</div><p>${esc(ch.summary)}</p></div>`;
+    } else if (!chapters.size && m.phase && m.phase !== phase) {
+      phase = m.phase;
+      html += `<div class="story-phase">${esc(cap(phase))}</div>`;
+    }
+    const white = m.side === "White";
+    const hidden = isSpoiler(i);
+    const text = hidden ? "" : m.flow || (m.expl ? m.expl.split(/(?<=[.!?])\s/)[0] : "");
     const mark = ERRORS.includes(m.cls) ? badge(m.cls) : m.critical ? `<span class="crit" title="Critical moment">⚡</span>` : "";
-    html += `<div class="story-row${i === state.cur ? " sel" : ""}${m.side === "White" ? " w" : " b"}" data-i="${i}">`
-      + `<span class="story-move">${m.side === "White" ? `${m.n}.` : `${m.n}…`} ${esc(m.san)} ${mark}</span>`
-      + `<span class="story-text">${text ? esc(text) : `<span class="muted">${m.book ? "Opening theory." : "—"}</span>`}</span></div>`;
+    html += `<div class="story-row${i === state.cur ? " sel" : ""}" data-i="${i}">`
+      + `<span class="s-num">${white ? `${m.n}.` : `${m.n}…`}</span>`
+      + `<span class="s-side ${white ? "w" : "b"}" title="${m.side}"></span>`
+      + `<span class="s-san">${esc(m.san)}</span><span class="s-mark">${mark}</span>`
+      + `<span class="story-text">${hidden ? `<span class="muted">🎯 Your ${esc(m.cls)} — try to find the better move first.</span>`
+        : text ? esc(text) : `<span class="muted">${m.book ? "Opening theory." : "—"}</span>`}</span></div>`;
   });
   if (g.jobId && g.moves.length < g.total) html += `<div class="story-row pending">analysing… ${g.moves.length}/${g.total}</div>`;
   box.innerHTML = html;
@@ -1381,7 +1724,7 @@ function renderStory() {
   if (sel) sel.scrollIntoView({ block: "nearest" });
 }
 $("storyList").addEventListener("click", (e) => {
-  const row = e.target.closest(".story-row[data-i]");
+  const row = e.target.closest(".story-row[data-i], .story-chapter[data-i]");
   if (row) goTo(parseInt(row.dataset.i, 10));
 });
 document.querySelectorAll("#moveViewSeg button").forEach((b) => b.addEventListener("click", () => {
@@ -1427,10 +1770,28 @@ function renderExplain(m) {
     + (m.critical ? `<span class="chip tag">⚡ critical moment</span>` : "")
     + (m.book ? `<span class="chip" title="A known opening move">📖 book</span>` : "")
     + (opponent ? `<span class="chip">opponent</span>` : "") + `</div>`;
-  if (m.tags && m.tags.length) html += `<div class="row" style="margin-bottom:10px">${m.tags.map((t) => `<span class="chip tag">${esc(t)}</span>`).join("")}</div>`;
+  const hidden = isSpoiler(state.cur);
+  const tags = (m.tags || []).filter((t) => !hidden || !["missed threat", "left book"].includes(t));
+  if (tags.length) html += `<div class="row" style="margin-bottom:10px">${tags.map((t) => `<span class="chip tag">${esc(t)}</span>`).join("")}</div>`;
+  if (hidden) {
+    state.previewMap = {};
+    $("explain").innerHTML = html + `<div class="spoiler">
+      <b>🎯 Can you find a better move?</b>
+      <p class="small">The coach's note and the better move are hidden so you can try first. Play your move on the board and the engine will judge it.</p>
+      <div class="row"><button data-practice="${state.cur}">Find a better move</button>
+        <button class="secondary" data-reveal="${state.cur}">Show the answer</button></div>
+      <p class="small" style="margin:8px 0 0">You can switch this off in Settings → Analysis.</p></div>`;
+    return;
+  }
+  const opp = m.side === "White" ? "Black" : "White";
+  if (m.threat) {
+    html += `<div class="fact warn">⚠ <b>Missed threat.</b> Before this move, ${opp} was already threatening ${esc(m.threat)}, `
+      + `and that is exactly how ${m.side}'s move gets punished.</div>`;
+  }
+  if (m.left_book) html += `<div class="fact book">📖 This move ${esc(m.left_book)}.</div>`;
   if (m.flow) html += `<div class="flow"><span class="flow-label">🎙 Commentary</span>${esc(m.flow)}</div>`;
   if (!opponent && ERRORS.includes(m.cls) && !g.jobId) {
-    html += `<div class="row" style="margin:4px 0 10px"><button class="sm" data-practice="${state.cur}">🎯 Find a better move yourself</button></div>`;
+    html += `<div class="row" style="margin:4px 0 10px"><button class="secondary sm" data-practice="${state.cur}">🎯 Practise this position</button></div>`;
   }
   if (m.expl) {
     html += (opponent ? `<span class="opp-label">What your opponent is up to</span>` : m.flow ? `<div class="section-label">Coach's note</div>` : "")
@@ -1469,6 +1830,8 @@ $("explain").addEventListener("click", (e) => {
   if (el) { startPreview(el.dataset.prev); return; }
   const pr = e.target.closest("[data-practice]");
   if (pr) { startPractice(parseInt(pr.dataset.practice, 10)); return; }
+  const rv = e.target.closest("[data-reveal]");
+  if (rv) { state.revealed.add(parseInt(rv.dataset.reveal, 10)); goTo(state.cur, false); return; }
   const act = e.target.closest("[data-pa]");
   if (act) practiceAction(act.dataset.pa);
 });
@@ -1560,7 +1923,7 @@ async function tryPracticeMove(uci) {
   }
   if (state.practice !== p) return;   // left practice while the engine was thinking
   p.busy = false; p.result = r;
-  if (r.solved) p.showAnswer = false;
+  if (r.solved) { p.showAnswer = false; state.revealed.add(p.i); }
   practiceBoard();
   renderPractice();
 }
@@ -1569,7 +1932,7 @@ function practiceAction(action) {
   const p = state.practice;
   if (!p) return;
   if (action === "retry") { p.result = null; practiceBoard(); renderPractice(); }
-  else if (action === "answer") { p.showAnswer = true; renderPractice(); }
+  else if (action === "answer") { p.showAnswer = true; state.revealed.add(p.i); renderPractice(); }
   else if (action === "exit") { goTo(p.i); }
   else if (action === "next") {
     const list = myMistakes();
@@ -1592,7 +1955,7 @@ $("practiceAll").addEventListener("click", () => {
 
 function renderGraph() {
   const svg = $("graph"), g = state.game;
-  const show = g && g.mode === "game" && g.moves.length;
+  const show = g && g.mode === "game" && g.moves.length && state.view.graph;
   $("graphWrap").classList.toggle("hidden", !show);
   if (!show) return;
   const W = Math.max(200, svg.clientWidth || 400), H = 110;
@@ -1703,17 +2066,39 @@ $("edAnalyze").addEventListener("click", async () => {
   catch (e) { toast(e.message, true); return; }
   finally { btn.disabled = false; btn.textContent = "Analyze position"; }
   clearTimeout(pollTimer);
-  state.game = { mode: "position", position: d, moves: [], warnings: d.warnings || [], headers: {} };
+  state.game = { mode: "position", position: d, moves: [], warnings: d.warnings || [], headers: {}, annotations: {} };
   resetGameView();
-  $("navGame").classList.remove("hidden");
   showPage("game");
   board.orientation($("edPersp").value);
   renderHeader(); renderReview(); renderPosition();
 });
 
 /** Board-editor mode: arrow for the engine's top move. */
+/* ================================================================ board display options */
+
+function applyView() {
+  $("evalbar").classList.toggle("off", !state.view.evalBar);
+  $("evalLabel").classList.toggle("hidden", !state.view.evalBar);
+  document.querySelectorAll("[data-view-opt]").forEach((cb) => { cb.checked = !!state.view[cb.dataset.viewOpt]; });
+  try { localStorage.setItem("lucidfish-view", JSON.stringify(state.view)); } catch { /* ignore */ }
+  renderGraph();
+  if (state.page === "game") refreshBoard();
+}
+$("btnView").addEventListener("click", (e) => {
+  e.stopPropagation();
+  const menu = $("viewMenu"), open = menu.classList.contains("hidden");
+  menu.classList.toggle("hidden", !open);
+  $("btnView").setAttribute("aria-expanded", open);
+});
+document.addEventListener("click", (e) => { if (!e.target.closest(".view-opts")) $("viewMenu").classList.add("hidden"); });
+$("viewMenu").addEventListener("change", (e) => {
+  const opt = e.target.dataset.viewOpt;
+  if (opt) { state.view[opt] = e.target.checked; applyView(); }
+});
+applyView();
+
 function positionOverlay() {
-  const first = state.game.position.lines[0]?.steps?.[0];
+  const first = state.view.bestArrow ? state.game.position.lines[0]?.steps?.[0] : null;
   drawOverlay({ arrows: first ? [{ from: first.from, to: first.to, color: "#1f9d6b" }] : [], squares: [] });
 }
 
@@ -1745,7 +2130,7 @@ async function exportGame(format) {
   try {
     const res = await api("/api/export", { method: "POST", raw: true, body: {
       format, pgn: g.pgn, headers: g.headers, moves: g.moves, review: g.review || "", opening: g.opening || "",
-      accuracy: g.accuracy || {}, side: g.side || null } });
+      accuracy: g.accuracy || {}, side: g.side || null, chapters: g.chapters || [], annotations: g.annotations || {} } });
     const blob = await res.blob();
     const name = (res.headers.get("content-disposition") || "").match(/filename="(.+?)"/)?.[1] || `game.${format}`;
     const a = document.createElement("a");
@@ -1855,6 +2240,7 @@ async function openSettings(tab = "coach") {
   $("testExpertResult").textContent = "";
   renderExpert();
   $("setPrefetch").checked = s.prefetch !== false;
+  $("setHideAnswers").checked = hideAnswers();
   $("setConcurrency").value = s.concurrency || "";
   $("setDepth").value = s.depth;
   $("setThreads").value = s.threads; $("setThreads").max = s.max_threads;
@@ -2040,6 +2426,8 @@ $("saveSettings").addEventListener("click", async () => {
   if (p.local) body.base_url = $("setBaseUrl").value.trim();
   try { await api("/api/settings", { method: "POST", body }); }
   catch (e) { $("settingsError").textContent = e.message; return; }
+  try { localStorage.setItem("lucidfish-hide-answers", $("setHideAnswers").checked ? "1" : "0"); } catch { /* ignore */ }
+  if (state.page === "game" && state.game?.mode === "game" && state.cur >= 0) goTo(state.cur, false);
   closeModal("settingsModal");
   state.dismissed.clear();
   toast("Settings saved.");
@@ -2049,6 +2437,7 @@ $("saveSettings").addEventListener("click", async () => {
 /* ================================================================ keyboard + resize */
 
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("accountMenu").classList.contains("hidden")) { toggleAccountMenu(false); return; }
   if (e.key === "Escape" && modalOpen()) { document.querySelectorAll(".modal-back").forEach((m) => closeModal(m.id)); return; }
   if (modalOpen() || state.page !== "game" || ["INPUT", "TEXTAREA", "SELECT"].includes(e.target.tagName)) return;
   if (e.key === "Escape" && state.preview) { exitPreview(); return; }
@@ -2057,6 +2446,12 @@ document.addEventListener("keydown", (e) => {
   else if (e.key === "Home") { e.preventDefault(); goTo(0); }
   else if (e.key === "End") { e.preventDefault(); goTo((state.game?.moves.length || 0) - 1); }
   else if (e.key.toLowerCase() === "f") flip();
+  else if (e.key.toLowerCase() === "d") { state.draw.mode = !state.draw.mode; renderDrawBar(); }
+  else if (e.key.toLowerCase() === "a") {
+    state.view.bestArrow = !state.view.bestArrow;
+    applyView();
+    toast(state.view.bestArrow ? "Best-move arrow on." : "Best-move arrow off.");
+  }
   else if (e.key.toLowerCase() === "n") jumpKeyMoment(1);
   else if (e.key.toLowerCase() === "p") jumpKeyMoment(-1);
 });

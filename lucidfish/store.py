@@ -79,6 +79,7 @@ _MIGRATIONS = [
     ("profiles", "lichess_user", "TEXT DEFAULT ''"),
     ("games", "insights", "TEXT"),
     ("games", "chapters_json", "TEXT"),
+    ("games", "annotations_json", "TEXT"),
 ]
 
 PROFILE_FIELDS = ("name", "chesscom_user", "lichess_user", "level", "elo_bullet", "elo_blitz", "elo_rapid")
@@ -165,7 +166,8 @@ def delete_profile(pid: int) -> None:
 def list_profiles() -> list[dict]:
     with _db() as c:
         return [dict(r) for r in c.execute(
-            "SELECT id, name, chesscom_user, lichess_user, level, elo_bullet, elo_blitz, elo_rapid "
+            "SELECT id, name, chesscom_user, lichess_user, level, elo_bullet, elo_blitz, elo_rapid, "
+            "(SELECT COUNT(*) FROM games WHERE games.profile_id = profiles.id) AS games "
             "FROM profiles ORDER BY id").fetchall()]
 
 
@@ -262,7 +264,16 @@ def get_game(game_id: int) -> dict | None:
     d = dict(r)
     d["moves"] = json.loads(d.pop("moves_json") or "[]")
     d["chapters"] = json.loads(d.pop("chapters_json", None) or "[]")
+    d["annotations"] = json.loads(d.pop("annotations_json", None) or "{}")
     return d
+
+
+def set_annotations(game_id: int, annotations: dict) -> bool:
+    """Your own arrows and circles on the board, keyed by position (board part of the FEN)."""
+    with _db(write=True) as c:
+        cur = c.execute("UPDATE games SET annotations_json=? WHERE id=?",
+                        (json.dumps(annotations, separators=(",", ":")), game_id))
+    return cur.rowcount > 0
 
 
 def delete_game(game_id: int) -> None:

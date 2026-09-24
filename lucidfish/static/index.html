@@ -17,11 +17,9 @@
     <div class="brand-name">Lucid<span>fish</span></div>
   </a>
   <nav class="nav" id="nav" aria-label="Main">
-    <button data-page="dashboard" class="active">Dashboard</button>
-    <button data-page="games">My games</button>
-    <button data-page="analyze">Analyze games</button>
+    <button data-page="dashboard" class="active">Home</button>
+    <button data-page="games" data-also="analyze game">Games</button>
     <button data-page="editor">Board editor</button>
-    <button data-page="game" class="hidden" id="navGame">Current game</button>
   </nav>
   <div class="spacer"></div>
   <button class="queue-pill hidden" id="queuePill" title="Analysis queue — click to see progress and manage it">
@@ -31,10 +29,19 @@
   <button class="status-pill" id="statusPill" title="Engine and AI coach status — click for settings">
     <span class="dot busy" id="statusDot"></span><span id="statusText">Checking setup…</span>
   </button>
-  <select id="profileSel" aria-label="Active profile" title="Switch profile"></select>
-  <button class="ghost icon" id="profileBtn" title="Edit profile" aria-label="Edit profile">👤</button>
-  <button class="ghost icon" id="themeBtn" title="Switch light / dark theme" aria-label="Switch theme">◐</button>
-  <button class="ghost icon" id="settingsBtn" title="Settings" aria-label="Settings">⚙</button>
+  <button class="ghost icon theme-btn" id="themeBtn" title="Switch light / dark theme" aria-label="Switch theme">◐</button>
+  <button class="settings-btn" id="settingsBtn" title="Settings" aria-label="Settings">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
+    <span>Settings</span>
+  </button>
+  <div class="account" id="account">
+    <button class="account-btn" id="accountBtn" aria-haspopup="menu" aria-expanded="false" title="Your profile">
+      <span class="avatar" id="accountAvatar">?</span>
+      <span class="account-name" id="accountName">Profile</span>
+      <span class="caret" aria-hidden="true">▾</span>
+    </button>
+    <div class="account-menu hidden" id="accountMenu" role="menu"></div>
+  </div>
 </header>
 
 <main class="wrap">
@@ -57,6 +64,10 @@
         <button class="secondary sm" id="refreshSummary">⟳ Update review</button>
       </div>
       <div class="md" id="summary"></div>
+    </div>
+    <div class="card hidden" id="findingsCard">
+      <div class="card-head"><h2>Patterns across your games</h2></div>
+      <div class="findings" id="findings"></div>
     </div>
     <div class="grid-2 hidden" id="insightsRow">
       <div class="card">
@@ -93,11 +104,15 @@
   <section id="page-games" class="hidden" data-page-section>
     <div class="page-head">
       <div>
-        <h1>My games</h1>
+        <h1>Games</h1>
         <p>Every game you've analysed, saved on this computer. Click a game to review it.</p>
       </div>
       <div class="spacer"></div>
-      <button id="gamesAnalyze">Analyze more games</button>
+      <div data-resume></div>
+    </div>
+    <div class="page-tabs" role="tablist">
+      <button data-page="games" role="tab">Analysed games</button>
+      <button data-page="analyze" role="tab">＋ Analyse new games</button>
     </div>
     <div class="card">
       <div class="games-toolbar">
@@ -128,9 +143,15 @@
   <section id="page-analyze" class="hidden" data-page-section>
     <div class="page-head">
       <div>
-        <h1>Analyze games</h1>
-        <p>Pick a recent game from chess.com or Lichess, or paste any PGN.</p>
+        <h1>Games</h1>
+        <p>Pick recent games from chess.com or Lichess, or paste any PGN.</p>
       </div>
+      <div class="spacer"></div>
+      <div data-resume></div>
+    </div>
+    <div class="page-tabs" role="tablist">
+      <button data-page="games" role="tab">Analysed games</button>
+      <button data-page="analyze" role="tab">＋ Analyse new games</button>
     </div>
     <div class="grid-2">
       <div class="card">
@@ -225,6 +246,10 @@
 
   <!-- ============================================================ GAME -->
   <section id="page-game" class="hidden" data-page-section>
+    <div class="crumbs">
+      <button class="ghost sm" id="backBtn">← Games</button>
+      <span class="crumb-title" id="crumbTitle"></span>
+    </div>
     <div class="card progress-card hidden" id="progressCard">
       <div class="row">
         <span class="dot busy" id="progressDot"></span><b id="progressLabel">Starting…</b>
@@ -267,7 +292,27 @@
             <button class="secondary icon" id="btnLast" title="Last move (End)" aria-label="Last move">⏭</button>
             <button class="secondary icon" id="btnFlip" title="Flip board (F)" aria-label="Flip board">⇅</button>
           </div>
-          <div class="hint">← → step · N / P jump between key moments · Home/End · F flips · Esc leaves a preview</div>
+          <div class="draw-bar">
+            <button class="secondary sm" id="btnDraw" aria-pressed="false" title="Draw arrows and circles with a normal click or a finger (D)">✎ Draw</button>
+            <div class="swatches" id="drawSwatches" role="radiogroup" aria-label="Pen colour">
+              <button class="swatch green active" data-color="green" role="radio" aria-checked="true" aria-label="Green"></button>
+              <button class="swatch red" data-color="red" role="radio" aria-checked="false" aria-label="Red"></button>
+              <button class="swatch blue" data-color="blue" role="radio" aria-checked="false" aria-label="Blue"></button>
+              <button class="swatch yellow" data-color="yellow" role="radio" aria-checked="false" aria-label="Yellow"></button>
+            </div>
+            <button class="ghost sm hidden" id="btnClearDrawing" title="Remove your drawings from this position">✕ Clear drawing</button>
+            <div class="view-opts">
+              <button class="secondary sm" id="btnView" aria-haspopup="true" aria-expanded="false" title="Choose what the board shows">👁 Board</button>
+              <div class="view-menu hidden" id="viewMenu">
+                <label class="check"><input type="checkbox" data-view-opt="bestArrow"> Best-move arrow <kbd>A</kbd></label>
+                <label class="check"><input type="checkbox" data-view-opt="highlight"> Highlight the last move</label>
+                <label class="check"><input type="checkbox" data-view-opt="evalBar"> Evaluation bar</label>
+                <label class="check"><input type="checkbox" data-view-opt="graph"> Evaluation graph</label>
+                <p class="small" style="margin:6px 0 0">Turn them off to think for yourself before looking at the engine.</p>
+              </div>
+            </div>
+          </div>
+          <div class="hint">← → step · N / P key moments · Home/End · F flips · right-click a square to circle it, right-drag to draw an arrow (Shift red · Alt blue)</div>
           <div class="graph" id="graphWrap">
             <svg id="graph" viewBox="0 0 400 100" preserveAspectRatio="none" role="img" aria-label="Evaluation graph"></svg>
             <div class="graph-tip" id="graphTip"></div>
@@ -423,6 +468,7 @@
             <button data-detail="full">Every move</button>
           </div>
           <p class="small" id="detailNote"></p>
+          <label class="check" style="margin-top:8px"><input type="checkbox" id="setHideAnswers"> Hide the answer to my mistakes until I've tried to find it myself</label>
         </fieldset>
         <fieldset>
           <legend>Engine strength</legend>
@@ -475,31 +521,61 @@
 
 <!-- ============================================================ PROFILE -->
 <div class="modal-back hidden" id="profileModal" role="dialog" aria-modal="true" aria-labelledby="profileTitle">
-  <div class="modal" style="width:min(560px,100%)">
-    <div class="modal-head"><h2 id="profileTitle">Create your profile</h2><div class="spacer"></div>
-      <button class="ghost icon" data-close aria-label="Close">✕</button></div>
-    <div class="modal-body">
-      <p class="small" style="margin-top:0">Your profile lets the coach remember your games, spot recurring patterns, and pitch explanations at your level. It's stored only on this computer.</p>
-      <div class="form-grid">
-        <label class="field">Display name <input id="pfName" maxlength="40" autocomplete="off"></label>
-        <label class="field">Ability level
-          <select id="pfLevel">
-            <option value="">Not set</option><option value="beginner">Beginner</option><option value="casual">Casual</option>
-            <option value="club">Club player</option><option value="advanced">Advanced</option>
-          </select>
-        </label>
-        <label class="field">chess.com username <input id="pfChesscom" maxlength="40" autocomplete="off" spellcheck="false"></label>
-        <label class="field">Lichess username <input id="pfLichess" maxlength="40" autocomplete="off" spellcheck="false"></label>
+  <div class="modal profile-modal">
+    <div class="modal-head">
+      <span class="avatar lg" id="pfAvatar" aria-hidden="true">?</span>
+      <div>
+        <h2 id="profileTitle">Create your profile</h2>
+        <p class="small" id="pfIntro" style="margin:2px 0 0">The coach remembers your games, spots your recurring patterns and pitches explanations at your level. Stored only on this computer.</p>
       </div>
-      <div class="form-grid" style="grid-template-columns:repeat(3,1fr);margin-top:12px">
-        <label class="field">Bullet rating <input type="number" id="pfBullet" min="100" max="3500"></label>
-        <label class="field">Blitz rating <input type="number" id="pfBlitz" min="100" max="3500"></label>
-        <label class="field">Rapid rating <input type="number" id="pfRapid" min="100" max="3500"></label>
-      </div>
+      <div class="spacer"></div>
+      <button class="ghost icon" data-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body stack" style="gap:20px">
+      <section>
+        <h3 class="pf-h">You</h3>
+        <label class="field">Display name <input id="pfName" maxlength="40" autocomplete="off" placeholder="e.g. Sam"></label>
+        <div class="field" style="margin-top:12px">Your level
+          <div class="level-grid" id="pfLevel" role="radiogroup" aria-label="Your level">
+            <button type="button" data-level="beginner" role="radio"><b>Beginner</b><small>Learning the basics and simple tactics</small></button>
+            <button type="button" data-level="casual" role="radio"><b>Casual</b><small>Play for fun, know the main ideas</small></button>
+            <button type="button" data-level="club" role="radio"><b>Club player</b><small>Play regularly, roughly 1200–1800</small></button>
+            <button type="button" data-level="advanced" role="radio"><b>Advanced</b><small>Tournament player, 1800+</small></button>
+          </div>
+        </div>
+      </section>
+      <section>
+        <h3 class="pf-h">Your accounts <span class="small">(optional)</span></h3>
+        <p class="small" style="margin:0 0 10px">Your recent games appear on the Analyze page, and <b>Look up</b> fills in your ratings.</p>
+        <div class="account-row">
+          <span class="site chesscom" aria-hidden="true">♟</span>
+          <label class="field grow">chess.com username <input id="pfChesscom" maxlength="40" autocomplete="off" spellcheck="false"></label>
+          <button class="secondary" type="button" data-lookup="chesscom">Look up</button>
+        </div>
+        <div class="small lookup" id="pfChesscomStatus"></div>
+        <div class="account-row">
+          <span class="site lichess" aria-hidden="true">♞</span>
+          <label class="field grow">Lichess username <input id="pfLichess" maxlength="40" autocomplete="off" spellcheck="false"></label>
+          <button class="secondary" type="button" data-lookup="lichess">Look up</button>
+        </div>
+        <div class="small lookup" id="pfLichessStatus"></div>
+      </section>
+      <section>
+        <h3 class="pf-h">Ratings</h3>
+        <div class="form-grid" style="grid-template-columns:repeat(3,1fr)">
+          <label class="field">Bullet <input type="number" id="pfBullet" min="100" max="3500" placeholder="—"></label>
+          <label class="field">Blitz <input type="number" id="pfBlitz" min="100" max="3500" placeholder="—"></label>
+          <label class="field">Rapid <input type="number" id="pfRapid" min="100" max="3500" placeholder="—"></label>
+        </div>
+        <p class="small" style="margin:6px 0 0">Used to pitch explanations at the right level for each time control.</p>
+      </section>
+      <section class="danger-zone" id="pfDanger">
+        <div class="row"><div class="grow"><b>Delete this profile</b><div class="small">Removes the profile and all of its analysed games from this computer.</div></div>
+          <button class="danger" id="pfDelete">Delete profile</button></div>
+      </section>
     </div>
     <div class="modal-foot">
-      <button class="danger" id="pfDelete" style="margin-right:auto">Delete profile</button>
-      <span class="small" id="pfError" style="color:var(--c-blunder)"></span>
+      <span class="small" id="pfError" style="color:var(--c-blunder);margin-right:auto"></span>
       <button class="secondary" data-close>Cancel</button>
       <button id="pfSave">Save profile</button>
     </div>

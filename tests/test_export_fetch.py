@@ -66,3 +66,15 @@ def test_fetch_rejects_bad_usernames_and_does_not_retry_404():
         with pytest.raises(fetch.FetchError, match="not found"):
             fetch._get("https://example.invalid")
     assert get.call_count == 1
+
+
+def test_drawings_are_exported_as_pgn_arrows_and_circles():
+    from lucidfish.export import annotated_pgn
+    pgn = '[White "A"]\n[Black "B"]\n\n1. e4 e5 *\n'
+    after_e4 = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR"
+    moves = [{"ply": 0, "uci": "e2e4", "cls": "best", "eval": "+0.3",
+              "fen_after": after_e4 + " b KQkq - 0 1"}]
+    out = annotated_pgn(pgn, moves, annotations={after_e4: {
+        "arrows": [{"from": "g1", "to": "f3", "color": "green"}, {"from": "d7", "to": "d5", "color": "red"}],
+        "circles": [{"sq": "e4", "color": "yellow"}]}})
+    assert "[%cal Gg1f3,Rd7d5]" in out and "[%csl Ye4]" in out

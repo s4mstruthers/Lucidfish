@@ -40,30 +40,42 @@ The feedback is pitched at your level and linked to the mistakes you keep making
 
 - **Commentary on the flow of the game.** Every move by both players gets a commentator's
   line about its purpose: the plan it belongs to, the wing it works on, the break it prepares,
-  and how it answers the opponent. Read the whole game as a story in the *Story* tab.
+  and how it answers the opponent. Read the whole game as a story in the *Story* tab, split
+  into chapters ("Black's queenside pawn storm", "The decisive attack") with a short summary
+  of each.
 - **Explained, not just evaluated.** Every mistake gets a written explanation of *why* it
   was a mistake, what the better move achieves, and the line that punishes it.
 - **Grounded in verified facts.** The AI never analyses the position itself. It receives
   engine lines plus facts checked directly on the board (hanging pieces, forks, pins,
   skewers, mate threats, king safety, pawn structure), and its notes are fact-checked
-  against the position afterwards.
+  against the position afterwards. Specialist checks add the lessons coaches care about
+  most: **missed threats** (the opponent was already threatening the move that punished
+  you), **endgame technique** (active kings, passed pawns, whether a king can catch a pawn,
+  the opposition) and **the move where you left opening theory**, with what masters play
+  there instead.
 - **Accuracy you can compare.** Moves are judged by lost *winning chances*, and game
   accuracy uses Lichess's published formula, so the numbers line up with what you see there.
 - **Personal coaching.** Profiles remember your games, ratings and level. After a couple of
   analyses, the coach writes a progress review of your recurring weaknesses and refers
-  back to them in later games. The dashboard shows your accuracy in the opening,
-  middlegame and endgame, and the kinds of mistakes you make most (hanging material,
-  missed tactics, errors in time trouble, …).
+  back to them in later games. The home page shows your accuracy in the opening,
+  middlegame and endgame, the kinds of mistakes you make most (hanging material,
+  missed threats, errors in time trouble, …) and **patterns across your games**: whether
+  you convert winning positions, how you score when you castle late, with White and with
+  Black, in each time control, and how your games go after they leave opening theory.
 - **Practise your mistakes.** Jump back to any position where you went wrong, play a better
   move on the board, and the engine tells you straight away whether it works and, if not,
-  shows the line that refutes it.
+  shows the line that refutes it. The answer to your own mistakes stays hidden until you
+  have tried (or choose to see it), so you actually get to think.
+- **Draw on the board.** Right-click to circle a square, right-drag to draw an arrow (Shift
+  for red, Alt for blue), or use the ✎ pen on a tablet. Drawings are saved with the game
+  and exported in the annotated PGN.
 - **Local or cloud AI.** Run a model privately on your computer with
   [Ollama](https://ollama.com) or LM Studio, or plug in OpenAI, Anthropic (Claude),
   Google Gemini, OpenRouter or Groq with an API key. Or switch the AI off for fast,
   engine-only analysis.
 - **Your games, one click away.** Pick recent games from chess.com or Lichess by username,
   paste or drop a PGN, or set up any position in the board editor.
-- **All your analysed games in one place.** The *My games* page lists every game you've
+- **All your analysed games in one place.** The *Games* page lists every game you've
   analysed, with result, accuracy and mistakes at a glance. Search by opponent or opening,
   filter by result, colour and time control, sort by date or accuracy, and re-analyse a game
   with new settings.
@@ -73,8 +85,10 @@ The feedback is pitched at your level and linked to the mistakes you keep making
   restart. Time estimates learn how fast your computer is.
 - **A modern web app.** Moves appear while the game is analysed, with an interactive board,
   arrows and an evaluation bar, a clickable evaluation graph, buttons that jump between
-  the key moments, variation previews, coach chat, and light and dark themes. It also works
-  on phones and tablets.
+  the key moments, variation previews, coach chat, and light and dark themes. Engine hints
+  (best-move arrow, evaluation bar and graph, move highlights) can each be switched off.
+  Several people can share one computer, each with their own profile. It also works on
+  phones and tablets.
 - **Export.** Annotated PGN (verdict symbols, evaluations, notes and best lines, ready for a
   Lichess study or ChessBase) or a Markdown report.
 - **Efficient without cutting corners.** Commentary is written for 8 moves per AI request,
@@ -121,6 +135,17 @@ verified context for every stretch of moves:
 - **Every claim is fact-checked.** A move mentioned in a note must be playable by the side
   the sentence attributes it to, a piece must stand where the note says, and a capture must
   have happened the way it is described. Sentences that fail are corrected or removed.
+- **Chapters.** Once the moves are done, the game is split where the phase changes and at
+  its turning points (big swings in winning chances). The coach summarises each chapter
+  from its commentary, and the post-game review is written from the chapter summaries:
+  a short, structured input instead of the whole game at once.
+
+The layers build on each other, like a team of specialists reporting to a head coach:
+code checks the board (engine, tactics, threats, endgame, opening theory, plans), the
+commentary combines those facts eight moves at a time, the chapters combine the commentary,
+the review combines the chapters, and your coach profile combines your reviews and the
+patterns found across your games. Only the combining is done by the AI; everything it
+combines has been verified.
 
 ### Why it's fast
 
@@ -345,14 +370,20 @@ keychain app.
 Start it with `./scripts/start.sh`, `scripts\start.bat`, or `lucidfish web`. It opens
 `http://127.0.0.1:8420`; if that port is busy, it uses the next free one and prints the address.
 
-1. **Create a profile** (first launch): your name, level, chess.com and Lichess usernames and
-   ratings. The coach uses these to pitch explanations at your level.
-2. **Analyze games:** choose chess.com or Lichess to list your recent games. Click games to
-   select them (<kbd>Shift</kbd>-click selects a range, or use *Select all*), then click
-   *Analyze selected*, or use *Analyze batch* for your last 5–20 games, to add them to the
-   queue. The *Analyze* button on a row analyses just that game straight away, and *Open*
-   shows a game you have already analysed. You can choose a lighter or heavier coaching level for a batch.
-   You can also paste or drop a PGN file.
+The app has three sections: **Home** (your progress), **Games** (your analysed games and new
+ones to analyse) and **Board editor**. Your profile is in the top-right corner; ⚙ **Settings**
+is next to it.
+
+1. **Create a profile** (first launch): your name, level, and chess.com / Lichess usernames.
+   *Look up* fills in your ratings from the site. The coach uses these to pitch explanations
+   at your level. To add another person or switch between profiles, click your name in the
+   top-right corner.
+2. **Analyse games** (Games → *Analyse new games*): choose chess.com or Lichess to list your
+   recent games. Click games to select them (<kbd>Shift</kbd>-click selects a range, or use
+   *Select all*), then *Analyze selected*, or *Analyze batch* for your last 5–20 games. The
+   *Analyze* button on a row analyses just that game, and *Open* shows one you've already
+   analysed. You can choose a lighter or heavier coaching level for a batch, or paste or drop
+   a PGN file instead.
 3. **Watch the queue:** the pill at the top shows the current game and the time left. Click it
    to open the queue: an overall progress bar with the estimated finish time, a bar for the
    game in progress, and each waiting game with when it will start. Move games up or down,
@@ -360,33 +391,37 @@ Start it with `./scripts/start.sh`, `scripts\start.bat`, or `lucidfish web`. It 
    If you close Lucidfish with games still waiting, they come back paused next time.
 4. **Review the game:** moves appear while the analysis runs. Click any move, or use
    <kbd>←</kbd>/<kbd>→</kbd> (<kbd>Home</kbd>/<kbd>End</kbd> to jump, <kbd>F</kbd> to flip).
-   <kbd>N</kbd> and <kbd>P</kbd> (or the ⚑ buttons) jump to the next or previous key moment:
-   mistakes, blunders and critical moments. Each move shows the commentary, its verdict,
-   tactical tags, the coach's note, better alternatives, and the line that punishes a mistake.
-   Click a line to play it out on the board, and press <kbd>Esc</kbd> to return. Click the
-   evaluation graph to jump to a moment. Switch the move list to **Story** to read the
-   commentary for the whole game, split into opening, middlegame and endgame.
-5. **Practise your mistakes:** on any of your mistakes, click *Find a better move yourself*
-   (or *Practise my mistakes* in the game header) and drag a piece on the board. The engine
-   judges your move with the same standards as the analysis. *Next mistake* takes you to the
-   next one.
-6. **My games:** every analysed game is saved to your profile. Open *My games* to search and
-   filter them (e.g. all your losses as Black in blitz, or every Sicilian), see your record and
-   average accuracy for that selection, and click a game to review it. The browser's Back
-   button returns to the list, and each game has its own address, so a reload keeps you on it.
-   *↻ Re-analyse* runs a game again with your current settings (for example after switching
-   on the AI coach) and replaces the old analysis.
-7. **Ask the coach** about the position you're looking at, or about your overall review on the
-   dashboard.
-8. **Export** an annotated PGN or a Markdown report (both include the commentary) from the
-   game header.
-9. **Board editor:** set up any position (or paste a FEN) and ask for an assessment from either
-   side's point of view.
+   <kbd>N</kbd> and <kbd>P</kbd> (or the ⚑ buttons) jump to the next or previous key moment.
+   Each move shows the commentary, its verdict, tactical tags, verified facts (a missed
+   threat, the move that left opening theory), the coach's note, better alternatives, and
+   the line that punishes a mistake. Click a line to play it out on the board, and press
+   <kbd>Esc</kbd> to return. Switch the move list to **Story** to read the whole game as a
+   commentary, chapter by chapter. *← Games* (or the browser's Back button) takes you back.
+5. **Practise your mistakes:** on your own mistakes the answer is hidden at first. Click
+   *Find a better move* and drag a piece on the board: the engine judges your move with the
+   same standards as the analysis. *Show the answer* reveals the note and the better move.
+   *Practise my mistakes* in the game header steps through all of them. (To always see the
+   answers straight away, switch this off in Settings → Analysis.)
+6. **Draw and choose what the board shows:** right-click a square to circle it, right-drag
+   for an arrow (<kbd>Shift</kbd> red, <kbd>Alt</kbd> blue, both yellow), or press
+   *✎ Draw* (<kbd>D</kbd>) to draw with a normal click or a finger. A plain click on the
+   board clears the drawing. *👁 Board* switches the best-move arrow (<kbd>A</kbd>), the
+   last-move highlight, the evaluation bar and the graph on or off.
+7. **Games:** every analysed game is saved to your profile. Search and filter them (e.g. all
+   your losses as Black in blitz, or every Sicilian), see your record and average accuracy
+   for that selection, and click a game to review it. Each game has its own address, so a
+   reload keeps you on it. *↻ Re-analyse* runs a game again with your current settings.
+8. **Ask the coach** about the position you're looking at, or about your overall progress on
+   the Home page.
+9. **Export** an annotated PGN (with the commentary, chapters and your drawings) or a
+   Markdown report from the game header.
+10. **Board editor:** set up any position (or paste a FEN) and ask for an assessment from
+    either side's point of view.
 
-The **dashboard** shows your record, average accuracy, blunders per game, your accuracy in
-each phase of the game (with your weakest phase highlighted), your most common mistake
-types, your openings and how you score in them, and the coach's written review of your
-progress.
+The **Home** page shows your record, average accuracy, patterns across your games, your
+accuracy in each phase of the game (with your weakest phase highlighted), your most common
+mistake types, your openings and how you score in them, and the coach's written review of
+your progress.
 
 ## Command line
 
@@ -532,6 +567,7 @@ folder and the network is disabled. CI runs the suite on Linux, macOS and Window
 | `lucidfish/scoring.py` | Winning chances, accuracy, evaluation wording |
 | `lucidfish/tactics.py` | Static exchange evaluation, pins, skewers, forks, mate threats |
 | `lucidfish/features.py` | Positional facts and "what changed" diffs |
+| `lucidfish/endgame.py` | Endgame specialist: king activity, passed pawns, rule of the square, opposition |
 | `lucidfish/opening.py` | Lichess opening explorer client and offline opening book |
 | `lucidfish/prompts.py` | Prompt construction, output parsing, fact-checking |
 | `lucidfish/llm.py` | AI providers (Ollama, OpenAI-compatible, Anthropic) |
@@ -539,7 +575,7 @@ folder and the network is disabled. CI runs the suite on Linux, macOS and Window
 | `lucidfish/plans.py` | Plan tracker: wing activity, pawn advances, breaks, open files |
 | `lucidfish/pipeline.py` | Orchestrates engine and coach; commentary windows; game review; position mode; practice moves |
 | `lucidfish/jobs.py` | Analysis queue: ordering, live progress, learned time estimates, engine prefetch |
-| `lucidfish/insights.py` | Accuracy by game phase and recurring mistake types |
+| `lucidfish/insights.py` | Accuracy by game phase, recurring mistake types, patterns across games |
 | `lucidfish/store.py` | SQLite: profiles, games, settings, caches |
 | `lucidfish/export.py` | Annotated PGN and Markdown reports |
 | `lucidfish/fetch.py` | chess.com / Lichess game download (CLI) |

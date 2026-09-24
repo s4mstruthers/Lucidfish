@@ -95,3 +95,23 @@ def test_update_detection_and_static_caching(client, monkeypatch):
     # An unknown API route answers with FastAPI's "Not Found", which the page explains as "restart needed".
     r = client.post("/api/does-not-exist", json={}, headers=H)
     assert r.status_code == 404 and r.json() == {"detail": "Not Found"}
+
+
+@needs_engine
+def test_annotations_are_saved_with_the_game(client):
+    client.post("/api/profiles", json={"name": "Drawer"}, headers=H)
+    job = client.post("/api/analyze", json={"pgn": SAMPLE_PGN, "side": "white"}, headers=H).json()["job_id"]
+    deadline = time.time() + 120
+    while time.time() < deadline and client.get(f"/api/job/{job}").json()["status"] != "done":
+        time.sleep(0.2)
+    gid = client.get(f"/api/job/{job}").json()["game_id"]
+    fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR"
+    body = {"annotations": {fen: {"arrows": [{"from": "g1", "to": "f3", "color": "red"},
+                                             {"from": "zz", "to": "f3"}],          # invalid: dropped
+                                  "circles": [{"sq": "e4", "color": "purple"}]},   # unknown colour: green
+                            "8/8/8/8/8/8/8/8": {"arrows": [], "circles": []}}}      # empty: dropped
+    assert client.post(f"/api/profile/game/{gid}/annotations", json=body, headers=H).json()["positions"] == 1
+    saved = client.get(f"/api/profile/game/{gid}").json()["annotations"]
+    assert saved == {fen: {"arrows": [{"from": "g1", "to": "f3", "color": "red"}],
+                           "circles": [{"sq": "e4", "color": "green"}]}}
+    assert client.post("/api/profile/game/99999/annotations", json=body, headers=H).status_code == 404

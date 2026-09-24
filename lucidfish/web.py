@@ -568,7 +568,7 @@ def profile_game(game_id: int):
         "id": g["id"], "pgn": g["pgn"],
         "headers": {"White": g["white"], "Black": g["black"], "Result": g["result"], "Date": g["date"]},
         "moves": g["moves"], "review": g["review"], "side": g["user_side"], "opening": g["opening"],
-        "chapters": g["chapters"],
+        "chapters": g["chapters"], "annotations": g["annotations"],
         "accuracy": {g["user_side"]: g["accuracy"]} if g.get("user_side") and g.get("accuracy") else {},
     }
 
@@ -577,6 +577,39 @@ def profile_game(game_id: int):
 def delete_game(game_id: int):
     store.delete_game(game_id)
     return {"ok": True}
+
+
+_SQUARE = r"^[a-h][1-8]$"
+
+
+class Drawing(BaseModel):
+    arrows: list[dict] = Field(default_factory=list, max_length=64)
+    circles: list[dict] = Field(default_factory=list, max_length=64)
+
+
+class AnnotationsReq(BaseModel):
+    annotations: dict[str, Drawing] = Field(default_factory=dict, max_length=600)
+
+
+def _clean_drawing(d: Drawing) -> dict:
+    ok = re.compile(_SQUARE)
+    colors = {"green", "red", "blue", "yellow"}
+    arrows = [{"from": a["from"], "to": a["to"], "color": a.get("color") if a.get("color") in colors else "green"}
+              for a in d.arrows if ok.match(str(a.get("from", ""))) and ok.match(str(a.get("to", "")))
+              and a["from"] != a["to"]]
+    circles = [{"sq": c["sq"], "color": c.get("color") if c.get("color") in colors else "green"}
+               for c in d.circles if ok.match(str(c.get("sq", "")))]
+    return {"arrows": arrows, "circles": circles}
+
+
+@app.post("/api/profile/game/{game_id}/annotations")
+def save_annotations(game_id: int, req: AnnotationsReq):
+    """Save the arrows and circles you drew on the board while reviewing this game."""
+    cleaned = {fen[:90]: d for fen, drawing in req.annotations.items()
+               if (d := _clean_drawing(drawing))["arrows"] or d["circles"]}
+    if not store.set_annotations(game_id, cleaned):
+        return _error("unknown game", 404)
+    return {"ok": True, "positions": len(cleaned)}
 
 
 class ReanalyseReq(BaseModel):
@@ -611,6 +644,7 @@ class ExportReq(BaseModel):
     accuracy: dict = Field(default_factory=dict)
     side: Literal["white", "black"] | None = None
     chapters: list[dict] = Field(default_factory=list, max_length=20)
+    annotations: dict = Field(default_factory=dict)
 
 
 def _filename(headers: dict, ext: str) -> str:
@@ -622,7 +656,7 @@ def _filename(headers: dict, ext: str) -> str:
 def export(req: ExportReq):
     try:
         if req.format == "pgn":
-            body = annotated_pgn(req.pgn, req.moves, req.review, req.accuracy, req.chapters)
+            body = annotated_pgn(req.pgn, req.moves, req.review, req.accuracy, req.chapters, req.annotations)
             media, ext = "application/x-chess-pgn", ".pgn"
         else:
             body = markdown_report(req.headers, req.moves, req.review, req.opening, req.accuracy, req.side,
