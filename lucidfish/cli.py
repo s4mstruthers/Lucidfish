@@ -133,7 +133,7 @@ def main(argv: list[str] | None = None) -> int:
                 if stage in tasks:
                     bar.update(tasks[stage], completed=done, total=total, label=label)
                 elif stage == "review":
-                    bar.update(tasks["coach"], label="writing the post-game review…")
+                    bar.update(tasks["coach"], label=label[:1].lower() + label[1:])
 
             report = analyze_game(pgn_text, cfg, side_filter=args.side, progress=progress,
                                   engine_cache=store.EngineCache() if cfg.engine.use_cache else None)
@@ -148,10 +148,12 @@ def main(argv: list[str] | None = None) -> int:
     moves = [m.to_dict() for m in report.moves]
     from .export import annotated_pgn, markdown_report
     for path, render in ((args.out, lambda: markdown_report(report.headers, moves, report.review, report.opening,
-                                                            report.accuracy, args.side)),
-                         (args.pgn_out, lambda: annotated_pgn(pgn_text, moves, report.review, report.accuracy)),
+                                                            report.accuracy, args.side, report.chapters)),
+                         (args.pgn_out, lambda: annotated_pgn(pgn_text, moves, report.review, report.accuracy,
+                                                              report.chapters)),
                          (args.json, lambda: json.dumps({"headers": report.headers, "opening": report.opening,
                                                          "accuracy": report.accuracy, "review": report.review,
+                                                         "chapters": report.chapters,
                                                          "warnings": report.warnings, "moves": moves}, indent=2))):
         if path:
             Path(path).write_text(render(), encoding="utf-8")
@@ -217,6 +219,9 @@ def _print_report(report, console: Console) -> None:
         tags = f"  [magenta]{', '.join(m.tags)}[/magenta]" if m.tags else ""
         crit = "  [cyan]critical[/cyan]" if m.critical else ""
         console.print(f"[bold]{prefix} {m.san}[/bold]  {badge}  eval {m.eval_str}{extra}{crit}{tags}")
+        chapter = next((c for c in report.chapters if c["start"] == m.ply), None)
+        if chapter:
+            console.print(Panel(chapter["summary"], title=chapter["title"], border_style="magenta"))
         if m.commentary:
             console.print(f"   [italic]{m.commentary}[/italic]")
         if m.explanation:

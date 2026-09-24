@@ -568,6 +568,7 @@ def profile_game(game_id: int):
         "id": g["id"], "pgn": g["pgn"],
         "headers": {"White": g["white"], "Black": g["black"], "Result": g["result"], "Date": g["date"]},
         "moves": g["moves"], "review": g["review"], "side": g["user_side"], "opening": g["opening"],
+        "chapters": g["chapters"],
         "accuracy": {g["user_side"]: g["accuracy"]} if g.get("user_side") and g.get("accuracy") else {},
     }
 
@@ -609,6 +610,7 @@ class ExportReq(BaseModel):
     opening: str = Field(default="", max_length=200)
     accuracy: dict = Field(default_factory=dict)
     side: Literal["white", "black"] | None = None
+    chapters: list[dict] = Field(default_factory=list, max_length=20)
 
 
 def _filename(headers: dict, ext: str) -> str:
@@ -620,10 +622,11 @@ def _filename(headers: dict, ext: str) -> str:
 def export(req: ExportReq):
     try:
         if req.format == "pgn":
-            body = annotated_pgn(req.pgn, req.moves, req.review, req.accuracy)
+            body = annotated_pgn(req.pgn, req.moves, req.review, req.accuracy, req.chapters)
             media, ext = "application/x-chess-pgn", ".pgn"
         else:
-            body = markdown_report(req.headers, req.moves, req.review, req.opening, req.accuracy, req.side)
+            body = markdown_report(req.headers, req.moves, req.review, req.opening, req.accuracy, req.side,
+                                   req.chapters)
             media, ext = "text/markdown", ".md"
     except (ValueError, KeyError) as e:
         return _error(f"Could not export this game: {e}")

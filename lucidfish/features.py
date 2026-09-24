@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 import chess
 
-from . import tactics
+from . import endgame, tactics
 
 PIECE_VALUES = {
     chess.PAWN: 1, chess.KNIGHT: 3, chess.BISHOP: 3,
@@ -56,6 +56,7 @@ class PositionFeatures:
     black: SideFeatures
     phase: str                         # opening / middlegame / endgame
     tactical: list[tuple[str, str]] = field(default_factory=list)  # (key, text) from tactics
+    endgame: list[tuple[str, str]] = field(default_factory=list)   # (key, text) from endgame.py
 
     def keyed_lines(self) -> list[tuple[str, str]]:
         """Every fact as (stable key, sentence). Keys allow diffing two positions."""
@@ -92,6 +93,7 @@ class PositionFeatures:
             if s.passed_pawns:
                 out.append((f"passed:{name}", f"{name} has passed pawns on {', '.join(s.passed_pawns)}."))
         out.extend(self.tactical)
+        out.extend(self.endgame)
         out.append(("center", f"Center control (pawns + attacks on d4/e4/d5/e5): "
                               f"White {w.center_pawns_and_attacks}, Black {b.center_pawns_and_attacks}."))
         out.append(("mobility", f"Mobility (legal moves): White {w.mobility}, Black {b.mobility}."))
@@ -240,8 +242,10 @@ def extract(board: chess.Board) -> PositionFeatures:
             center_pawns_and_attacks=_center(board, color),
             mobility=_mobility(board, color),
         )
+    phase = game_phase(board)
     return PositionFeatures(white=sides[chess.WHITE], black=sides[chess.BLACK],
-                            phase=game_phase(board), tactical=tactics.position_lines(board))
+                            phase=phase, tactical=tactics.position_lines(board),
+                            endgame=endgame.endgame_lines(board) if phase == "endgame" else [])
 
 
 def piece_placement(board: chess.Board) -> str:

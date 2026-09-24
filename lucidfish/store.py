@@ -25,6 +25,7 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .config import data_dir
+from .insights import VERSION as INSIGHTS_VERSION
 from .insights import aggregate as aggregate_insights
 from .insights import game_insights
 
@@ -77,6 +78,7 @@ _MIGRATIONS = [
     ("games", "accuracy", "REAL"),
     ("profiles", "lichess_user", "TEXT DEFAULT ''"),
     ("games", "insights", "TEXT"),
+    ("games", "chapters_json", "TEXT"),
 ]
 
 PROFILE_FIELDS = ("name", "chesscom_user", "lichess_user", "level", "elo_bullet", "elo_blitz", "elo_rapid")
@@ -204,7 +206,8 @@ def has_game(profile_id: int, pgn: str) -> bool:
 
 def save_game(profile_id: int, pgn: str, headers: dict, user_side: str | None,
               user_elo: int | None, opening: str, review: str, moves: list[dict],
-              time_class: str = "", accuracy: dict | None = None, replace: bool = False) -> int | None:
+              time_class: str = "", accuracy: dict | None = None, replace: bool = False,
+              chapters: list[dict] | None = None) -> int | None:
     """Store an analysed game. Aggregates are computed for the user's side only."""
     mine = [m for m in moves if not user_side or m["side"].lower() == user_side.lower()]
     losses = [min(m["cp_loss"], 1000) for m in mine]   # cap mate scores out of ACPL
@@ -226,15 +229,17 @@ def save_game(profile_id: int, pgn: str, headers: dict, user_side: str | None,
                 f"""{verb} INTO games (profile_id, fingerprint, pgn, white, black, result,
                                       date, time_class, user_side, user_elo, opening, review,
                                       moves_json, acpl, accuracy, blunders, mistakes,
-                                      inaccuracies, best_moves, insights)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                      inaccuracies, best_moves, insights, chapters_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (profile_id, fingerprint(pgn), pgn,
                  headers.get("White", "?"), headers.get("Black", "?"),
                  headers.get("Result", ""), headers.get("Date", ""),
                  time_class, user_side, user_elo, opening, review,
                  json.dumps(moves, separators=(",", ":")), acpl, acc,
                  n("blunder"), n("mistake"), n("inaccuracy"), n("best"),
-                 json.dumps(game_insights(moves, user_side), separators=(",", ":"))))
+                 json.dumps(game_insights(moves, user_side, headers.get("Result", ""), time_class),
+                            separators=(",", ":")),
+                 json.dumps(chapters or [], separators=(",", ":"))))
             return cur.lastrowid
         except sqlite3.IntegrityError:
             return None
@@ -256,6 +261,7 @@ def get_game(game_id: int) -> dict | None:
         return None
     d = dict(r)
     d["moves"] = json.loads(d.pop("moves_json") or "[]")
+    d["chapters"] = json.loads(d.pop("chapters_json", None) or "[]")
     return d
 
 
@@ -306,16 +312,18 @@ def aggregate_stats(profile_id: int, games: list[dict] | None = None) -> dict:
 
 
 def _insights(profile_id: int) -> list[dict]:
-    """Every game's insights; computed and saved for games stored by older versions."""
+    """Every game's insights; (re)computed and saved for games stored by older versions."""
     with _db() as c:
-        rows = c.execute("SELECT id, insights, user_side FROM games WHERE profile_id=?", (profile_id,)).fetchall()
+        rows = c.execute("SELECT id, insights, user_side, result, time_class FROM games WHERE profile_id=?",
+                         (profile_id,)).fetchall()
     out, backfill = [], []
     for r in rows:
-        if r["insights"]:
-            out.append(json.loads(r["insights"]))
+        stored = json.loads(r["insights"]) if r["insights"] else None
+        if stored and stored.get("v", 1) >= INSIGHTS_VERSION:
+            out.append(stored)
             continue
         game = get_game(r["id"]) or {}
-        data = game_insights(game.get("moves", []), r["user_side"])
+        data = game_insights(game.get("moves", []), r["user_side"], r["result"] or "", r["time_class"] or "")
         out.append(data)
         backfill.append((json.dumps(data, separators=(",", ":")), r["id"]))
     if backfill:

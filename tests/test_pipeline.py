@@ -71,6 +71,9 @@ class FakeLLM:
             raise self.fail
         if "Write the post-game review" in first:
             return "## Summary\nGood game.\n## Key takeaways\n- Develop."
+        if first.startswith("CHAPTER"):
+            number = re.match(r"CHAPTER (\d+)", first).group(1)
+            return f"TITLE: Chapter {number} plans\nSUMMARY: White develops quickly while Black falls behind."
         if first.startswith("COMMENTARY WINDOW"):
             with self.lock:
                 self.windows += not fixing
@@ -231,3 +234,21 @@ def test_a_garbled_correction_never_replaces_the_original():
     text = "11. axb4: fine.\n11... Qc7: Black then plays Kxa1."
     check = lambda t: ["bad"] * (2 if "Kxa1" in t else 0) + ([] if "11. axb4" in t else ["missing"] * 2)  # noqa: E731
     assert pipeline._verified_text(Garbled(), "sys", [{"role": "user", "content": "x"}], text, check, 100) == text
+
+
+@needs_engine
+def test_chapters_are_written_and_feed_the_review(monkeypatch):
+    llm = FakeLLM()
+    _patch_llm(monkeypatch, llm)
+    cfg = fast_config(enabled=True)
+    cfg.analysis.detail = "standard"
+    report = pipeline.analyze_game(SAMPLE_PGN, cfg, side_filter="white")
+    spans = pipeline.split_chapters(report.moves)
+    assert len(spans) >= 2 and len(report.chapters) == len(spans)
+    assert [c["start"] for c in report.chapters] == [s for s, _ in spans]
+    assert report.chapters[0]["title"] == "Chapter 1 plans" and report.chapters[0]["summary"]
+    review_prompt = next(p for p in llm.prompts if "Write the post-game review" in p)
+    assert "The game in chapters" in review_prompt and "Chapter 1 plans" in review_prompt
+    # The fast "key moments" level skips chapters.
+    cfg.analysis.detail = "key"
+    assert pipeline.analyze_game(SAMPLE_PGN, cfg, side_filter="white").chapters == []

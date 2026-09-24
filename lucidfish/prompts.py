@@ -172,6 +172,8 @@ def build_move_prompt(
     recent: str = "",                   # labelled previous moves with gists
     hindsight: str = "",                # labelled moves actually played next
     plans: list[str] | None = None,     # verified plan facts (plans.plan_lines)
+    threat: str = "",                   # the error ignored this existing threat (tactics.existing_threat)
+    left_book: str = "",                # the move left opening theory (+ what masters play)
     time_note: str = "",
     previous: dict | None = None,       # {"san","cls","side"} of the previous (opponent) move
     want_ideas: bool = False,
@@ -211,6 +213,14 @@ def build_move_prompt(
     else:
         p.append(f"{a.played_san} was the engine's top choice for {side}.")
 
+    if threat:
+        p.append(f"MISSED THREAT (verified): before this move, {opp} was ALREADY threatening {threat}. "
+                 f"{side}'s move did not deal with it, and {opp}'s punishing reply is exactly that threat. "
+                 f"Make this the centre of the explanation: {side} needed to ask 'what does my opponent "
+                 "threaten?' before moving.")
+    if left_book:
+        p.append(f"Opening theory (verified): this move {left_book}. Say what the deviation changes "
+                 "compared with the usual moves.")
     gives_up = any(m.startswith(("puts the", "leaves the", "loses material")) for m in motifs_played or [])
     if gives_up and a.classification in ("best", "good"):
         p.append("The engine rates this move highly even though it gives up material: treat it as a "
@@ -323,6 +333,8 @@ class CommentaryMove:
     engine_next: str = ""          # labelled expected continuation
     best: str = ""                 # engine's preferred move when the played one was an error
     book: bool = False             # known opening theory
+    threat: str = ""               # the error ignored this existing threat
+    left_book: str = ""            # the move left opening theory
 
 
 @dataclass
@@ -353,6 +365,10 @@ def build_commentary_prompt(moves: list[CommentaryMove], ctx: CommentaryContext)
         bits = [f"{m.side}'s {m.what}", f"verdict: {m.verdict}" + (f" (engine preferred {m.best})" if m.best else "")]
         if m.book:
             bits.append("known opening theory")
+        if m.left_book:
+            bits.append(m.left_book)
+        if m.threat:
+            bits.append(f"ignored the threat {m.threat} that was already on the board")
         if m.motifs:
             bits.append("tactics: " + "; ".join(m.motifs))
         if m.changes:
@@ -403,6 +419,65 @@ def parse_commentary(text: str, moves: list[CommentaryMove]) -> dict[str, str]:
         else:
             unmatched.append(comment.strip())
     return out
+
+
+# --------------------------------------------------------------- chapters
+
+@dataclass
+class ChapterContext:
+    number: int
+    count: int
+    start_label: str                 # "12. Nf3"
+    end_label: str                   # "18... Qxb2"
+    phases: str                      # "middlegame" / "opening and middlegame"
+    eval_start: str                  # "White is slightly better"
+    eval_end: str
+    moves: str                       # labelled moves with gists (plans.with_gists)
+    commentary: list[str] = field(default_factory=list)   # "12. White Nf3: ..." lines
+    moments: list[str] = field(default_factory=list)      # errors, critical moments, missed threats
+    plans: list[str] = field(default_factory=list)        # plan facts at the start
+    opening: str = ""
+
+
+def build_chapter_prompt(ctx: ChapterContext) -> str:
+    """One chapter of the game (a phase or the stretch up to a turning point) → title + summary."""
+    p = [f"CHAPTER {ctx.number} of {ctx.count}: moves {ctx.start_label} to {ctx.end_label} ({ctx.phases})."]
+    if ctx.opening:
+        p.append(f"Opening: {ctx.opening} (use exactly this name).")
+    p.append(f"At the start of the chapter {ctx.eval_start}; at the end {ctx.eval_end}.")
+    if ctx.plans:
+        p.append("Plans at the start of the chapter (verified from the moves played):")
+        p.extend("  " + ln for ln in ctx.plans)
+    p.append(f"The moves, with what each did (verified): {ctx.moves}.")
+    if ctx.moments:
+        p.append("Key moments in this chapter (verified):")
+        p.extend("  - " + m for m in ctx.moments)
+    if ctx.commentary:
+        p.append("Commentary already written for these moves (verified):")
+        p.extend("  " + c for c in ctx.commentary)
+    p.append(
+        "\nSummarise this chapter for the player, in exactly this format:\n"
+        "TITLE: <3-7 words naming what this chapter was about, e.g. Black's queenside pawn storm>\n"
+        "SUMMARY: <2-3 sentences: what each side was trying to do, how the balance changed, and the "
+        "moment that decided the chapter>\n"
+        "Name the side (White/Black) for every move you mention, mention only moves listed above, and "
+        "write nothing else.")
+    return "\n".join(p)
+
+
+_TITLE = re.compile(r"^\s*[*_#\s]*TITLE\s*:?[*_]*\s*(.+)$", re.I | re.M)
+_SUMMARY = re.compile(r"^\s*[*_#\s]*SUMMARY\s*:?[*_]*\s*(.+)", re.I | re.M | re.S)
+
+
+def parse_chapter(text: str) -> tuple[str, str]:
+    """(title, summary); tolerant of markdown and missing headers."""
+    title = _TITLE.search(text or "")
+    summary = _SUMMARY.search(text or "")
+    t = title.group(1).strip().strip("*_\"'") if title else ""
+    s = summary.group(1).strip() if summary else ""
+    if not s and text and not title:
+        s = text.strip()
+    return t[:80], " ".join(s.split())
 
 
 # --------------------------------------------------------------- position
@@ -465,6 +540,8 @@ def build_game_review_prompt(
     player_context: str = "",
     accuracy: dict | None = None,
     commentary: list[str] | None = None,
+    chapters: list[dict] | None = None,
+    facts: list[str] | None = None,
 ) -> str:
     parts: list[str] = []
     w, b = headers.get("White", "White"), headers.get("Black", "Black")
@@ -496,7 +573,13 @@ def build_game_review_prompt(
     if turning_points:
         parts.append("\nBiggest swings in winning chances (the turning points):")
         parts.extend("  " + t for t in turning_points)
-    if commentary:
+    if facts:
+        parts.append("\nOther verified facts:")
+        parts.extend("  " + f for f in facts)
+    if chapters:
+        parts.append("\nThe game in chapters (verified summaries; base 'How the game unfolded' on these):")
+        parts.extend(f"  Moves {c['range']} — {c['title']}: {c['summary']}" for c in chapters)
+    elif commentary:
         parts.append("\nCommentary written during the analysis (verified against the board):")
         parts.extend("  " + c for c in commentary)
     parts.append("\nWrite the post-game review.")
@@ -556,6 +639,8 @@ def build_player_summary_prompt(stats: dict, reviews: list, profile: dict | None
             parts.append(f"  Accuracy in the {phase}: {acc}%")
     for pattern in stats.get("patterns", []):
         parts.append(f"  Recurring mistake type: {pattern['label']} — {pattern['count']} times")
+    for finding in stats.get("findings", []):
+        parts.append(f"  Pattern across games ({finding['kind']}): {finding['text']}")
     for o in stats.get("openings", []):
         parts.append(f"  Opening: {o['name']} — {o['games']} games, "
                      f"{o['w']}W/{o['l']}L/{o['d']}D, avg cp loss {o['acpl']}")

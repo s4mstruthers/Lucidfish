@@ -318,6 +318,30 @@ def move_motifs(board: chess.Board, move: chess.Move) -> list[str]:
     return out
 
 
+_WINNING = ("delivers checkmate", "wins material", "creates a fork", "creates a pin", "threatens checkmate")
+
+
+def existing_threat(board: chess.Board, reply: chess.Move) -> str:
+    """Was `reply` already a threat before the side to move played?
+
+    `board` is the position before a move; `reply` is the opponent's punishing
+    answer to it. If the opponent could already have played `reply` with the
+    same effect had it been their turn (checked with a "null move"), the move
+    ignored an existing threat. Returns e.g. "Nxe4 (wins material: nets about
+    1 point after all recaptures)", or "" when the move itself created the problem.
+    """
+    if board.is_check():
+        return ""   # a null move is impossible in check
+    b = board.copy(stack=False)
+    b.push(chess.Move.null())
+    if reply not in b.legal_moves:
+        return ""
+    for motif in move_motifs(b, reply):
+        if motif.startswith(_WINNING):
+            return f"{b.san(reply)} ({motif})"
+    return ""
+
+
 def motif_tags(board: chess.Board, move: chess.Move) -> list[str]:
     """Short labels for UI chips (e.g. 'fork', 'hangs material', 'wins material')."""
     return tags_from_motifs(move_motifs(board, move))

@@ -47,9 +47,11 @@ from .llm import LLMError, LLMProvider, make_provider
 from .opening import OpeningExplorer, local_book_depth, local_opening_name
 from .prompts import (
     GAME_REVIEW_SYSTEM,
+    ChapterContext,
     CommentaryContext,
     CommentaryMove,
     EvidenceIndex,
+    build_chapter_prompt,
     build_commentary_prompt,
     build_game_review_prompt,
     build_ideas_prompt,
@@ -59,6 +61,7 @@ from .prompts import (
     eval_after_words,
     move_label,
     norm_san,
+    parse_chapter,
     parse_commentary,
     side_line,
     split_sections,
@@ -73,7 +76,7 @@ WINDOW = 8               # plies per commentary window (4 moves by each side)
 RECENT = 6               # plies of history shown with each note
 HINDSIGHT = 6            # plies of "what actually happened next"
 # Output caps for local models (a safety net against rambling, not a target).
-_MAX_TOKENS = {"full": 900, "brief": 300, "opponent": 250, "ideas": 300, "window": 1000}
+_MAX_TOKENS = {"full": 900, "brief": 300, "opponent": 250, "ideas": 300, "window": 1000, "chapter": 300}
 
 Progress = Callable[[str, int, int, str], None]   # (stage, done, total, label)
 
@@ -101,6 +104,8 @@ class AnnotatedMove:
     book: bool = False              # known opening theory
     phase: str = ""                 # opening / middlegame / endgame
     tags: list[str] = field(default_factory=list)     # tactical motif labels
+    threat: str = ""                # error that ignored a threat already on the board, e.g. "Nxe4 (wins ...)"
+    left_book: str = ""             # this move left known opening theory (+ what masters play)
     mate_event: str = ""
     think_s: float | None = None    # seconds spent on this move (from [%clk] annotations)
     clock_s: float | None = None    # clock remaining after the move
@@ -127,7 +132,8 @@ class AnnotatedMove:
             "refutation": a.refutation_text if a else "",
             "refutation_steps": _line_steps(after, a.refutation_san) if a and a.refutation_san else [],
             "opening": self.opening, "critical": self.critical, "book": self.book, "phase": self.phase,
-            "tags": self.tags, "mate_event": self.mate_event, "think_s": self.think_s, "clock_s": self.clock_s,
+            "tags": self.tags, "threat": self.threat, "left_book": self.left_book,
+            "mate_event": self.mate_event, "think_s": self.think_s, "clock_s": self.clock_s,
             "candidates": [
                 {"san": ln.move_san, "uci": ln.move_uci, "score": white_pov_score(ln, mover_white),
                  "line": ln.pv_text, "idea": self.line_ideas.get(ln.move_san, ""),
@@ -149,6 +155,7 @@ class GameReport:
     warnings: list[str] = field(default_factory=list)
     coach: str = ""                 # "Ollama (local) · llama3.1:8b", or "" for engine-only
     engine: str = ""
+    chapters: list[dict] = field(default_factory=list)   # {start, end, range, title, summary}
 
 
 # ------------------------------------------------------------------ helpers
@@ -340,6 +347,8 @@ class _Evidence:
     recent: str = ""
     hindsight: str = ""
     plan_facts: list[str] = field(default_factory=list)
+    threat: str = ""
+    left_book: str = ""
 
 
 @dataclass
@@ -426,6 +435,7 @@ def analyze_game(
                 candidates = engine.top_lines(board)
                 f_before = feat.extract(board)
                 previous: dict | None = None
+                in_book = True
                 for ply, node in enumerate(game.mainline()):
                     if stopped():
                         return
@@ -461,10 +471,17 @@ def analyze_game(
                         if lines_after and analysis.refutation_san:
                             motifs_reply = tactics.move_motifs(after, chess.Move.from_uci(lines_after[0].move_uci))
 
+                    # Specialist: did this error ignore a threat that was already on the board?
+                    threat = ""
+                    if analysis.classification in ERRORS and analysis.refutation_san and lines_after:
+                        threat = tactics.existing_threat(board, chess.Move.from_uci(lines_after[0].move_uci))
+
                     opening_lines: list[str] = []
                     in_theory = ply < book_depth
+                    masters: list[dict] = []
                     if ply < cfg.analysis.opening_book_plies:
                         info = opener.lookup(board.fen())
+                        masters = info.top_moves
                         opening_lines = opener.summary_lines(info)
                         if any(m["san"] == analysis.played_san and m["games"] >= 20 for m in info.top_moves):
                             in_theory = True
@@ -475,6 +492,16 @@ def analyze_game(
                             if local:
                                 opening_state.update(name=local, from_book=True)
 
+                    # Specialist: the move that leaves known theory, and what masters play instead
+                    # (only claimed when the masters database was reachable for this position).
+                    left_book = ""
+                    if in_book and not in_theory:
+                        in_book = False
+                        others = [m for m in masters if m["san"] != analysis.played_san][:3]
+                        if others:
+                            left_book = ("left known opening theory; in this position masters usually play "
+                                         + ", ".join(f"{m['san']} ({m['games']} games)" for m in others))
+
                     item = _Evidence(
                         ply=ply, board=board, move=move, analysis=analysis,
                         f_before=f_before, f_after=f_after, motifs=motifs, critical=critical, book=in_theory,
@@ -482,6 +509,7 @@ def analyze_game(
                         motifs_reply=motifs_reply, reply_line=lines_after[0] if lines_after else None,
                         opening_lines=opening_lines, opening_name=opening_state["name"],
                         previous=previous, think_s=think_s, clock_s=clock, time_class=time_class,
+                        threat=threat, left_book=left_book,
                     )
                     if note:
                         item.recent = plans.with_gists(played[max(0, ply - RECENT):ply])
@@ -554,7 +582,10 @@ def analyze_game(
             critical=ev.critical,
             book=ev.book,
             phase=ev.f_before.phase,
-            tags=_tags(ev.motifs, a.classification),
+            tags=_tags(ev.motifs, a.classification) + (["missed threat"] if ev.threat else [])
+                 + (["left book"] if ev.left_book else []),
+            threat=ev.threat,
+            left_book=ev.left_book,
             mate_event=a.mate_event,
             think_s=ev.think_s,
             clock_s=ev.clock_s,
@@ -644,9 +675,16 @@ def analyze_game(
     if should_stop and should_stop():
         return report   # partial results, no review — the user asked to stop
 
-    if coach.available and report.moves:
+    user_stopped = lambda: bool(should_stop and should_stop())  # noqa: E731  (stop_event is set by now)
+    if coach.available and report.moves and detail != "key":
+        spans = split_chapters(report.moves)
+        if len(spans) >= 2:
+            if progress:
+                progress("review", total, total, "Summarising the game in chapters…")
+            report.chapters = _write_chapters(coach, system, spans, report, played, coached_color, user_stopped)
+    if coach.available and report.moves and not user_stopped():
         if progress:
-            progress("review", total, total, "writing the post-game review")
+            progress("review", total, total, "Writing the post-game review…")
         prompt = _review_prompt(report, side_filter, cfg, player_context)
         try:
             report.review = coach.hard(lambda llm: llm.generate(GAME_REVIEW_SYSTEM, prompt))
@@ -745,7 +783,8 @@ def _write_note(llm: LLMProvider, system: str, ev: _Evidence, side_filter: str |
         f_before=ev.f_before, f_after=ev.f_after, coached_side=side_filter, critical=ev.critical,
         motifs_played=ev.motifs, motifs_best=ev.motifs_best, motifs_reply=ev.motifs_reply,
         reply_line=ev.reply_line, opening_name=ev.opening_name, opening_lines=ev.opening_lines,
-        recent=ev.recent, hindsight=ev.hindsight, plans=ev.plan_facts,
+        recent=ev.recent, hindsight=ev.hindsight, plans=ev.plan_facts, threat=ev.threat,
+        left_book=ev.left_book,
         time_note=time_note("White" if ev.board.turn == chess.WHITE else "Black",
                             ev.think_s, ev.clock_s, ev.time_class),
         previous=ev.previous, want_ideas=ev.want_ideas,
@@ -801,6 +840,8 @@ def _write_window(llm: LLMProvider, system: str, evs: list[_Evidence], played: l
             engine_next=side_line(after, ev.reply_line.pv_san, 4) if ev.reply_line else "",
             best=a.best_san if a.classification in ERRORS else "",
             book=ev.book,
+            threat=ev.threat,
+            left_book=ev.left_book,
         ))
     fa = first.analysis
     before_white = (fa.eval_before_cp, fa.eval_before_mate) if first.board.turn == chess.WHITE else (
@@ -893,10 +934,127 @@ def _review_prompt(report: GameReport, side_filter: str | None, cfg: Config, pla
                                        f"from {a.win_before:.0f}% to {a.win_after:.0f}%; {m.best_san} was "
                                        f"better.{event}{spent}"))
     swings.sort(key=lambda s: -s[0])
+    facts = []
+    coached = side_filter.capitalize() if side_filter else None
+    for i, m in enumerate(report.moves):
+        prefix = f"{m.move_number}. White" if m.side == "White" else f"{m.move_number}... Black"
+        if m.left_book:
+            later = report.moves[min(len(report.moves) - 1, i + 10)]
+            before = report.moves[i - 1].win_white if i else 50.0
+            facts.append(f"{prefix} {m.san} {m.left_book}. White's winning chances were {before:.0f}% before "
+                         f"it and {later.win_white:.0f}% five moves later.")
+        if m.threat and (coached is None or m.side == coached):
+            facts.append(f"{prefix} {m.san} ignored a threat that was already on the board: {m.threat}.")
     return build_game_review_prompt(
         report.headers, records, report.opening, [t for _, t in swings[:5]], side_filter,
         elo=cfg.user_elo, time_class=report.time_class, player_context=player_context,
-        accuracy=report.accuracy, commentary=flow)
+        accuracy=report.accuracy, commentary=flow, chapters=report.chapters, facts=facts)
+
+
+# ------------------------------------------------------------------ chapters
+
+MIN_CHAPTER = 6       # plies
+MAX_CHAPTERS = 6
+SWING = 15.0          # percentage points of winning chances that make a turning point
+
+
+def split_chapters(moves: list[AnnotatedMove]) -> list[tuple[int, int]]:
+    """Split a game into chapters: (first index, last index) pairs.
+
+    Chapters start where the phase changes (opening → middlegame → endgame) and
+    after turning points (big swings in winning chances, critical moments), the
+    strongest first, with every chapter at least MIN_CHAPTER plies long.
+    """
+    n = len(moves)
+    if n < 2 * MIN_CHAPTER:
+        return [(0, n - 1)] if n else []
+    cuts: dict[int, float] = {}          # index where a new chapter starts -> strength
+    for i in range(1, n):
+        if moves[i].phase and moves[i].phase != moves[i - 1].phase:
+            cuts[i] = max(cuts.get(i, 0.0), 50.0)
+        swing = abs(moves[i].win_white - moves[i - 1].win_white)
+        if swing >= SWING or moves[i].critical:
+            cuts[i + 1] = max(cuts.get(i + 1, 0.0), swing)      # the turning point ends its chapter
+    chosen: list[int] = []
+    for idx, _ in sorted(cuts.items(), key=lambda kv: -kv[1]):
+        if MIN_CHAPTER <= idx <= n - MIN_CHAPTER and all(abs(idx - c) >= MIN_CHAPTER for c in chosen):
+            chosen.append(idx)
+        if len(chosen) >= MAX_CHAPTERS - 1:
+            break
+    bounds = [0, *sorted(chosen), n]
+    return [(bounds[k], bounds[k + 1] - 1) for k in range(len(bounds) - 1)]
+
+
+def _write_chapters(coach: _Coach, system: str, spans: list[tuple[int, int]], report: GameReport,
+                    played: list[plans.PlayedMove], coached: chess.Color | None,
+                    stopped: Callable[[], bool]) -> list[dict]:
+    """Title + summary for each chapter, written by the best available model.
+
+    Chapters are independent, so a cloud model writes them in parallel.
+    """
+    def one(k: int) -> dict:
+        start, end = spans[k]
+        moves = report.moves[start:end + 1]
+        first, last = moves[0], moves[-1]
+        label = lambda m: f"{m.move_number}. {m.san}" if m.side == "White" else f"{m.move_number}... {m.san}"  # noqa: E731
+        side_label = lambda m: (f"{m.move_number}. White {m.san}" if m.side == "White"  # noqa: E731
+                                else f"{m.move_number}... Black {m.san}")
+        moments = []
+        for m in moves:
+            if m.classification in ("mistake", "blunder"):
+                moments.append(f"{side_label(m)} was a {m.classification} (better was {m.best_san})"
+                               + (f"; it ignored the existing threat {m.threat}" if m.threat else ""))
+            elif m.critical:
+                moments.append(f"{side_label(m)} was a critical moment: the only good move, and it was found")
+            if m.left_book:
+                moments.append(f"{side_label(m)} {m.left_book}")
+        phases = list(dict.fromkeys(m.phase for m in moves if m.phase))
+        before = report.moves[start - 1] if start else None
+        eval_start = describe_eval(*_white_after(before.analysis, before.side == "White")) if before else \
+            "the position was equal"
+        ctx = ChapterContext(
+            number=k + 1, count=len(spans), start_label=label(first), end_label=label(last),
+            phases=" and ".join(phases) or "game", eval_start=eval_start,
+            eval_end=("the game was over" if last.analysis.game_result else
+                      describe_eval(*_white_after(last.analysis, last.side == "White"))),
+            moves=plans.with_gists(played[start:end + 1]),
+            commentary=[f"{side_label(m)}: {m.commentary}" for m in moves if m.commentary],
+            moments=moments, plans=plans.plan_lines(played[:start], played[start].board) if start else [],
+            opening=report.opening if k == 0 else "",
+        )
+        messages = [{"role": "user", "content": build_chapter_prompt(ctx)}]
+        lines = [(played[start].board, [m.san for m in played[start:end + 1]])]
+        index = EvidenceIndex([(pm.board, pm.move) for pm in played[start:end + 1]], lines, coached)
+
+        def check(t: str) -> list[str]:
+            title, summary = parse_chapter(t)
+            missing = [] if summary else ["the SUMMARY line is missing"]
+            return missing + index.problems(title + ". " + summary)
+
+        def write(llm: LLMProvider) -> str:
+            text = llm.chat(system, messages, max_tokens=_MAX_TOKENS["chapter"])
+            return _verified_text(llm, system, messages, text, check, _MAX_TOKENS["chapter"])
+
+        title, summary = parse_chapter(coach.hard(write))
+        title = title if title and not index.problems(title) else ""
+        rng = f"{first.move_number}–{last.move_number}"
+        return {"start": start, "end": end, "range": rng, "title": title or f"Moves {rng}",
+                "summary": index.clean(summary)[0]}
+
+    expert = coach.smart()
+    parallel = expert is not None and not expert.spec.local
+    out: list[dict | None] = [None] * len(spans)
+    with ThreadPoolExecutor(max_workers=expert.concurrency if parallel else 1,
+                            thread_name_prefix="lucidfish-chapters") as pool:
+        futures = {pool.submit(one, k): k for k in range(len(spans))}
+        for fut, k in futures.items():
+            if stopped():
+                break
+            try:
+                out[k] = fut.result()
+            except LLMError as e:
+                coach.failed(e)
+    return [c for c in out if c is not None and c["summary"]]
 
 
 # ------------------------------------------------------------------ prefetch

@@ -34,7 +34,7 @@ def _eval_tag(ev: str) -> str:
 
 
 def annotated_pgn(pgn_text: str, moves: list[dict], review: str = "",
-                  accuracy: dict | None = None) -> str:
+                  accuracy: dict | None = None, chapters: list[dict] | None = None) -> str:
     """The original game with Lucidfish's verdicts, evals, notes and best lines."""
     game = chess.pgn.read_game(io.StringIO(pgn_text))
     if game is None:
@@ -48,6 +48,7 @@ def annotated_pgn(pgn_text: str, moves: list[dict], review: str = "",
         game.comment = (game.comment + "\n" if game.comment else "") + review.strip()
 
     by_ply = {m.get("ply", i): m for i, m in enumerate(moves)}
+    chapter_at = {c["start"]: (k, c) for k, c in enumerate(chapters or []) if "start" in c}
     node = game
     ply = 0
     while node.variations:
@@ -55,6 +56,9 @@ def annotated_pgn(pgn_text: str, moves: list[dict], review: str = "",
         m = by_ply.get(ply)
         if m and m.get("uci", child.move.uci()) == child.move.uci():
             parts = []
+            if ply in chapter_at:
+                k, c = chapter_at[ply]
+                parts.append(f"Chapter {k + 1}: {c.get('title', '')}. {c.get('summary', '')}".strip())
             tag = _eval_tag(m.get("eval", ""))
             if tag:
                 parts.append(f"[%eval {tag}]")
@@ -95,7 +99,8 @@ def _add_line(parent: chess.pgn.GameNode, sans: list[str], comment: str) -> None
 
 
 def markdown_report(headers: dict, moves: list[dict], review: str = "", opening: str = "",
-                    accuracy: dict | None = None, coached_side: str | None = None) -> str:
+                    accuracy: dict | None = None, coached_side: str | None = None,
+                    chapters: list[dict] | None = None) -> str:
     """A readable report: summary table, key moments, every coach note, review."""
     w, b = headers.get("White", "White"), headers.get("Black", "Black")
     out = [f"# {w} vs {b} — {headers.get('Result', '*')}", ""]
@@ -114,6 +119,10 @@ def markdown_report(headers: dict, moves: list[dict], review: str = "", opening:
         for m in errors:
             out.append(f"- **{label(m)}** — {m['cls']} (best: {m.get('best', '?')}, eval after: {m.get('eval', '')})")
         out.append("")
+    if chapters:
+        out += ["## The game in chapters", ""]
+        for k, c in enumerate(chapters, 1):
+            out += [f"**{k}. {c.get('title', '')}** (moves {c.get('range', '')})  ", c.get("summary", ""), ""]
     out += ["## Moves", ""]
     for m in moves:
         line = f"**{label(m)}** · {m['cls']} · {m.get('eval', '')}"

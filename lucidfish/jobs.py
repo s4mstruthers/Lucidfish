@@ -118,6 +118,7 @@ class Job:
         self.prefetched = 0                    # positions searched ahead of time
         self.moves: list[dict] = []
         self.review = ""
+        self.chapters: list[dict] = []
         self.error = ""
         self.warnings = list(warnings)
         self.accuracy: dict = {}
@@ -143,9 +144,9 @@ class Job:
         with self.lock:
             if stage == "engine":
                 self.engine_done = done
-            elif stage == "review":
-                self.review_started = time.time()
-                self.label = "Writing the post-game review…"
+            elif stage == "review":            # chapters, then the review: the "writing up" stage
+                self.review_started = self.review_started or time.time()
+                self.label = label or "Writing the post-game review…"
                 return
             self.label = label
 
@@ -200,6 +201,7 @@ class Job:
                 "id": self.id, "status": self.status, "total": self.total, "headers": self.headers,
                 "side": self.side, "engine_done": self.engine_done, "done": len(self.moves),
                 "label": self.label, "moves": self.moves[since:], "since": since, "review": self.review,
+                "chapters": self.chapters,
                 "error": self.error, "warnings": self.warnings, "accuracy": self.accuracy,
                 "opening": self.opening, "coach": self.coach, "game_id": self.game_id,
             }
@@ -465,6 +467,7 @@ class AnalysisQueue:
         with job.lock:
             job.review, job.accuracy, job.opening, job.coach = (report.review, report.accuracy,
                                                                  report.opening, report.coach)
+            job.chapters = report.chapters
             job.warnings = report.warnings
             moves = list(job.moves)
             completed = not job.stop
@@ -477,7 +480,7 @@ class AnalysisQueue:
             if profile:
                 game_id = store.save_game(profile["id"], job.pgn, report.headers, job.side, job.elo,
                                           report.opening, report.review, moves, report.time_class,
-                                          report.accuracy, replace=job.replace)
+                                          report.accuracy, replace=job.replace, chapters=report.chapters)
                 if game_id and cfg.llm.enabled:
                     with self._cond:
                         self._touched.add(profile["id"])
