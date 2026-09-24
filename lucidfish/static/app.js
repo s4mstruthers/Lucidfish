@@ -367,12 +367,31 @@ function ratingsText(p) {
     .filter(([, v]) => v).map(([k, v]) => `${cap(k)} ${v}`).join(" · ");
 }
 
+let activeProfileId;   // undefined until the first load
 async function loadProfiles() {
   const d = await api("/api/profiles");
   state.profiles = d.profiles;
   state.profile = d.profiles.find((p) => p.id === d.active) || null;
+  const id = state.profile?.id ?? null;
+  if (activeProfileId !== undefined && id !== activeProfileId) leaveProfile();
+  activeProfileId = id;
   renderAccount();
   return d;
+}
+
+/** The active profile changed (switched, created or deleted): what's on screen belonged to the previous one. */
+function leaveProfile() {
+  exitExplore(false);
+  clearTimeout(pollTimer);
+  state.game = null;
+  resetGameView();
+  state.recent = []; state.selected.clear();
+  state.reviewChat.length = 0; $("reviewChatLog").innerHTML = "";
+  train.items = null; train.session = null; train.summary = null;
+  renderTrainBar();
+  renderResume();
+  if (state.page === "game") showPage("games");
+  else if (state.page === "train") showTrainPage();
 }
 
 function renderAccount() {
@@ -427,9 +446,7 @@ $("accountMenu").addEventListener("click", async (e) => {
 async function switchProfile(id) {
   try { await api(`/api/profiles/${id}/activate`, { method: "POST" }); }
   catch (err) { toast(err.message, true); return; }
-  await loadProfiles();
-  state.reviewChat.length = 0; $("reviewChatLog").innerHTML = "";
-  state.recent = []; state.selected.clear();
+  await loadProfiles();   // clears the previous profile's game, puzzles and chat
   loadDashboard().then(() => { if (state.page === "games") renderGames(); });
   if (state.page === "analyze") loadRecentGames();
   toast(`Switched to ${state.profile?.name}.`);
