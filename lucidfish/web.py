@@ -42,10 +42,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import __version__, credentials, jobs, ratings, settings, share, store, training
-from .engine import EngineAnalyzer
+from .engine import EngineAnalyser
 from .export import annotated_pgn, markdown_report
 from .llm import PROVIDERS, LLMError, make_provider
-from .pipeline import analyze_position, build_coach, check_move
+from .pipeline import analyse_position, build_coach, check_move
 from .prompts import COACH_CHAT_SYSTEM
 from .review_check import presentable_review
 
@@ -161,15 +161,15 @@ def _active_profile() -> dict | None:
     return store.get_profile(store.active_id())
 
 
-class AnalyzeReq(BaseModel):
+class AnalyseReq(BaseModel):
     pgn: str = Field(max_length=2_000_000)
     side: Literal["white", "black"] | None = None
     elo: int | None = Field(default=None, ge=100, le=3500)
     detail: Detail | None = None
 
 
-@app.post("/api/analyze")
-def analyze(req: AnalyzeReq):
+@app.post("/api/analyse")
+def analyse(req: AnalyseReq):
     """Analyse one game now: it goes to the front of the queue (after the game in progress)."""
     existing = QUEUE.find_pending(req.pgn)
     if existing:                      # already queued (e.g. by a batch): just bring it forward
@@ -306,7 +306,7 @@ def position(req: PositionReq):
     cfg = settings.load_config()
     cfg.user_elo, cfg.user_elo_label = ratings.newest(profile.get("ratings") or {}) or (None, "")
     try:
-        result = analyze_position(board.fen(), cfg, req.perspective,
+        result = analyse_position(board.fen(), cfg, req.perspective,
                                   req.level or profile.get("level"), engine_cache=store.EngineCache())
     except RuntimeError as e:
         return _error(str(e), 500)
@@ -451,7 +451,7 @@ def _cached(key: str, ttl: float, fn) -> dict:
 def _engine_health() -> dict:
     cfg = settings.load_config().engine
     try:
-        with EngineAnalyzer(cfg) as engine:
+        with EngineAnalyser(cfg) as engine:
             return {"ok": True, "name": engine.name, "path": cfg.path, "depth": cfg.depth,
                     "threads": cfg.threads}
     except RuntimeError as e:
@@ -629,11 +629,11 @@ class AnnotationsReq(BaseModel):
 
 def _clean_drawing(d: Drawing) -> dict:
     ok = re.compile(_SQUARE)
-    colors = {"green", "red", "blue", "yellow"}
-    arrows = [{"from": a["from"], "to": a["to"], "color": a.get("color") if a.get("color") in colors else "green"}
+    colours = {"green", "red", "blue", "yellow"}
+    arrows = [{"from": a["from"], "to": a["to"], "colour": a.get("colour") if a.get("colour") in colours else "green"}
               for a in d.arrows if ok.match(str(a.get("from", ""))) and ok.match(str(a.get("to", "")))
               and a["from"] != a["to"]]
-    circles = [{"sq": c["sq"], "color": c.get("color") if c.get("color") in colors else "green"}
+    circles = [{"sq": c["sq"], "colour": c.get("colour") if c.get("colour") in colours else "green"}
                for c in d.circles if ok.match(str(c.get("sq", "")))]
     return {"arrows": arrows, "circles": circles}
 

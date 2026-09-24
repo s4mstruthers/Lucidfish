@@ -56,8 +56,8 @@ def endgame_kind(board: chess.Board) -> str:
 
 def _pieces_left(board: chess.Board) -> str:
     names = []
-    for color, side in ((chess.WHITE, "White"), (chess.BLACK, "Black")):
-        counts = [(len(board.pieces(pt, color)), chess.piece_name(pt))
+    for colour, side in ((chess.WHITE, "White"), (chess.BLACK, "Black")):
+        counts = [(len(board.pieces(pt, colour)), chess.piece_name(pt))
                   for pt in (chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT, chess.PAWN)]
         parts = [f"{n} {name}{'s' if n > 1 else ''}" for n, name in counts if n]
         names.append(f"{side}: king" + (", " + ", ".join(parts) if parts else " only"))
@@ -103,8 +103,8 @@ def game_facts(moves: list, headers: dict, coached: str | None, opening: str = "
         return f
     for m in moves:
         f.played.setdefault(_norm(m.san), []).append((m.side, m.move_number, m.classification))
-    f.opening_words = {w.lower() for w in re.findall(r"[A-Za-z]{5,}", opening)} - {"defense", "defence",
-                                                                                "opening", "variation", "attack"}
+    f.opening_words = {w.lower() for w in re.findall(r"[A-Za-z]{5,}", opening)} - {"defence", "opening",
+                                                                                "variation", "attack"}
     label = lambda m: f"{m.move_number}{'.' if m.side == 'White' else '...'} {m.san}"  # noqa: E731
     sides = [coached] if coached else ["White", "Black"]
 

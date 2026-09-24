@@ -34,17 +34,17 @@ _ORTHOGONALS = ((1, 0), (-1, 0), (0, 1), (0, -1))
 _MATERIAL_EPS = 50  # ignore exchanges worth less than half a pawn
 
 
-def color_name(color: chess.Color) -> str:
-    return "White" if color == chess.WHITE else "Black"
+def colour_name(colour: chess.Color) -> str:
+    return "White" if colour == chess.WHITE else "Black"
 
 
-def piece_label(board: chess.Board, square: chess.Square, with_color: bool = True) -> str:
+def piece_label(board: chess.Board, square: chess.Square, with_colour: bool = True) -> str:
     """'White's knight on f3' — the phrasing used throughout the prompts."""
     piece = board.piece_at(square)
     if piece is None:
         return chess.square_name(square)
     name = f"{chess.piece_name(piece.piece_type)} on {chess.square_name(square)}"
-    return f"{color_name(piece.color)}'s {name}" if with_color else name
+    return f"{colour_name(piece.color)}'s {name}" if with_colour else name
 
 
 def _points(centipawns: int) -> str:
@@ -54,18 +54,18 @@ def _points(centipawns: int) -> str:
 
 # ------------------------------------------------------ static exchange eval
 
-def _capturers(board: chess.Board, square: chess.Square, color: chess.Color) -> list[tuple[int, chess.Square]]:
-    """Pieces of `color` that can legally capture on `square` (absolute pins respected)."""
+def _capturers(board: chess.Board, square: chess.Square, colour: chess.Color) -> list[tuple[int, chess.Square]]:
+    """Pieces of `colour` that can legally capture on `square` (absolute pins respected)."""
     out = []
-    for sq in board.attackers(color, square):
-        if board.is_pinned(color, sq) and square not in board.pin(color, sq):
+    for sq in board.attackers(colour, square):
+        if board.is_pinned(colour, sq) and square not in board.pin(colour, sq):
             continue
         out.append((VALUE[board.piece_type_at(sq)], sq))
     return out
 
 
-def _swap(board: chess.Board, square: chess.Square, color: chess.Color, depth: int = 0) -> int:
-    """Best material `color` can win by starting a capture sequence on `square`.
+def _swap(board: chess.Board, square: chess.Square, colour: chess.Color, depth: int = 0) -> int:
+    """Best material `colour` can win by starting a capture sequence on `square`.
 
     Classic swap algorithm: capture with the least valuable piece, let the
     opponent do the same, and allow either side to stop when continuing loses.
@@ -74,7 +74,7 @@ def _swap(board: chess.Board, square: chess.Square, color: chess.Color, depth: i
     target = board.piece_type_at(square)
     if target is None or depth > 12:
         return 0
-    capturers = _capturers(board, square, color)
+    capturers = _capturers(board, square, colour)
     if not capturers:
         return 0
     _, frm = min(capturers)
@@ -82,9 +82,9 @@ def _swap(board: chess.Board, square: chess.Square, color: chess.Color, depth: i
     nxt = board.copy(stack=False)
     nxt.remove_piece_at(frm)
     nxt.set_piece_at(square, piece)
-    if piece.piece_type == chess.KING and nxt.is_attacked_by(not color, square):
+    if piece.piece_type == chess.KING and nxt.is_attacked_by(not colour, square):
         return 0  # the king may not capture into a defended square
-    return max(0, VALUE[target] - _swap(nxt, square, not color, depth + 1))
+    return max(0, VALUE[target] - _swap(nxt, square, not colour, depth + 1))
 
 
 def exchange_value(board: chess.Board, move: chess.Move) -> int:
@@ -110,22 +110,22 @@ class Threat:
 @dataclass
 class PositionTactics:
     en_prise: dict[bool, list[Threat]] = field(default_factory=lambda: {True: [], False: []})
-    lines: list[tuple[str, bool, str]] = field(default_factory=list)   # (key, attacker color, text)
+    lines: list[tuple[str, bool, str]] = field(default_factory=list)   # (key, attacker colour, text)
     forks: list[tuple[str, bool, str]] = field(default_factory=list)
-    mate_threat: dict[bool, str] = field(default_factory=dict)          # color -> mating SAN
+    mate_threat: dict[bool, str] = field(default_factory=dict)          # colour -> mating SAN
 
-    def en_prise_squares(self, color: chess.Color) -> set[chess.Square]:
-        return {t.square for t in self.en_prise[color]}
+    def en_prise_squares(self, colour: chess.Color) -> set[chess.Square]:
+        return {t.square for t in self.en_prise[colour]}
 
 
-def _en_prise(board: chess.Board, color: chess.Color) -> list[Threat]:
-    """Pieces of `color` the opponent can win material from by capturing."""
+def _en_prise(board: chess.Board, colour: chess.Color) -> list[Threat]:
+    """Pieces of `colour` the opponent can win material from by capturing."""
     out = []
-    for sq in chess.SquareSet(board.occupied_co[color]):
+    for sq in chess.SquareSet(board.occupied_co[colour]):
         piece = board.piece_at(sq)
-        if piece.piece_type == chess.KING or not board.is_attacked_by(not color, sq):
+        if piece.piece_type == chess.KING or not board.is_attacked_by(not colour, sq):
             continue
-        gain = _swap(board, sq, not color)
+        gain = _swap(board, sq, not colour)
         if gain > _MATERIAL_EPS:
             out.append(Threat(sq, gain, f"{piece_label(board, sq)} can be won by capture "
                                         f"(the capturer gains about {_points(gain)})"))
@@ -137,16 +137,16 @@ def _is_defended(board: chess.Board, square: chess.Square) -> bool:
     return piece is not None and board.is_attacked_by(piece.color, square)
 
 
-def _line_tactics(board: chess.Board, color: chess.Color) -> list[tuple[str, bool, str]]:
-    """Pins and skewers created by `color`'s bishops, rooks and queens."""
+def _line_tactics(board: chess.Board, colour: chess.Color) -> list[tuple[str, bool, str]]:
+    """Pins and skewers created by `colour`'s bishops, rooks and queens."""
     out = []
-    for sq in chess.SquareSet(board.occupied_co[color]):
+    for sq in chess.SquareSet(board.occupied_co[colour]):
         slider = board.piece_type_at(sq)
         if slider not in (chess.BISHOP, chess.ROOK, chess.QUEEN):
             continue
         dirs = (_DIAGONALS if slider == chess.BISHOP else _ORTHOGONALS if slider == chess.ROOK
                 else _DIAGONALS + _ORTHOGONALS)
-        slider_safe = _swap(board, sq, not color) == 0
+        slider_safe = _swap(board, sq, not colour) == 0
         for df, dr in dirs:
             hits: list[chess.Square] = []
             f, r = chess.square_file(sq) + df, chess.square_rank(sq) + dr
@@ -159,51 +159,51 @@ def _line_tactics(board: chess.Board, color: chess.Color) -> list[tuple[str, boo
                 continue
             front, back = hits
             p1, p2 = board.piece_at(front), board.piece_at(back)
-            if p1.color == color or p2.color == color:
+            if p1.color == colour or p2.color == colour:
                 continue
             v1, v2, vs = VALUE[p1.piece_type], VALUE[p2.piece_type], VALUE[slider]
             back_wins = v2 > vs or not _is_defended(board, back)
             key = f"{chess.square_name(sq)}-{chess.square_name(front)}-{chess.square_name(back)}"
             attacker = piece_label(board, sq)
             if p2.piece_type == chess.KING:
-                out.append((key, color, f"{piece_label(board, front)} is pinned to its king by "
+                out.append((key, colour, f"{piece_label(board, front)} is pinned to its king by "
                                         f"{attacker} and cannot legally move off that line"))
             elif not slider_safe:
                 continue
             elif v2 > v1 and back_wins and p1.piece_type != chess.KING:
-                out.append((key, color, f"{piece_label(board, front)} is pinned by {attacker}: "
+                out.append((key, colour, f"{piece_label(board, front)} is pinned by {attacker}: "
                                         f"moving it would expose the {piece_label(board, back, False)}"))
             elif (p1.piece_type == chess.KING or v1 > v2) and back_wins:
-                out.append((key, color, f"{attacker} skewers the {piece_label(board, front, False)}: "
+                out.append((key, colour, f"{attacker} skewers the {piece_label(board, front, False)}: "
                                         f"once it moves, the {piece_label(board, back, False)} behind it falls"))
     return out
 
 
-def _forks(board: chess.Board, color: chess.Color) -> list[tuple[str, bool, str]]:
-    """Safe pieces of `color` attacking two or more worthwhile targets at once."""
+def _forks(board: chess.Board, colour: chess.Color) -> list[tuple[str, bool, str]]:
+    """Safe pieces of `colour` attacking two or more worthwhile targets at once."""
     out = []
-    for sq in chess.SquareSet(board.occupied_co[color]):
+    for sq in chess.SquareSet(board.occupied_co[colour]):
         forker = board.piece_type_at(sq)
         targets = []
         for t in board.attacks(sq):
             victim = board.piece_at(t)
-            if victim is None or victim.color == color:
+            if victim is None or victim.color == colour:
                 continue
             if (victim.piece_type == chess.KING or VALUE[victim.piece_type] > VALUE[forker]
                     or not _is_defended(board, t)):
                 targets.append(t)
-        if len(targets) < 2 or _swap(board, sq, not color) > 0:
+        if len(targets) < 2 or _swap(board, sq, not colour) > 0:
             continue
         names = " and the ".join(piece_label(board, t, False) for t in targets)
         key = f"{chess.square_name(sq)}>" + ",".join(chess.square_name(t) for t in targets)
-        out.append((key, color, f"{piece_label(board, sq)} forks the {names}"))
+        out.append((key, colour, f"{piece_label(board, sq)} forks the {names}"))
     return out
 
 
-def _mate_in_one(board: chess.Board, color: chess.Color) -> str:
-    """SAN of a mate-in-1 `color` would have if it were their move ('' if none)."""
+def _mate_in_one(board: chess.Board, colour: chess.Color) -> str:
+    """SAN of a mate-in-1 `colour` would have if it were their move ('' if none)."""
     b = board.copy(stack=False)
-    if b.turn != color:
+    if b.turn != colour:
         if b.is_check():
             return ""  # a null move would leave the king in check
         b.push(chess.Move.null())
@@ -218,13 +218,13 @@ def _mate_in_one(board: chess.Board, color: chess.Color) -> str:
 def _analyse_fen(fen: str) -> PositionTactics:
     board = chess.Board(fen)
     pt = PositionTactics()
-    for color in (chess.WHITE, chess.BLACK):
-        pt.en_prise[color] = _en_prise(board, color)
-        pt.lines += _line_tactics(board, color)
-        pt.forks += _forks(board, color)
-        mate = _mate_in_one(board, color)
+    for colour in (chess.WHITE, chess.BLACK):
+        pt.en_prise[colour] = _en_prise(board, colour)
+        pt.lines += _line_tactics(board, colour)
+        pt.forks += _forks(board, colour)
+        mate = _mate_in_one(board, colour)
         if mate:
-            pt.mate_threat[color] = mate
+            pt.mate_threat[colour] = mate
     return pt
 
 
@@ -237,16 +237,16 @@ def position_lines(board: chess.Board) -> list[tuple[str, str]]:
     """(key, text) facts for the position summary; keys let callers diff positions."""
     pt = analyse(board)
     out: list[tuple[str, str]] = []
-    for color in (chess.WHITE, chess.BLACK):
-        for t in pt.en_prise[color]:
+    for colour in (chess.WHITE, chess.BLACK):
+        for t in pt.en_prise[colour]:
             out.append((f"enprise:{chess.square_name(t.square)}", t.text + "."))
     for key, _, text in pt.lines:
         out.append((f"line:{key}", text[0].upper() + text[1:] + "."))
     for key, _, text in pt.forks:
         out.append((f"fork:{key}", text + "."))
-    for color, san in pt.mate_threat.items():
-        who = color_name(color)
-        verb = "can deliver checkmate now with" if board.turn == color else "threatens checkmate with"
+    for colour, san in pt.mate_threat.items():
+        who = colour_name(colour)
+        verb = "can deliver checkmate now with" if board.turn == colour else "threatens checkmate with"
         out.append((f"mate:{who}", f"{who} {verb} {san}."))
     return out
 
@@ -295,26 +295,26 @@ def move_motifs(board: chess.Board, move: chess.Move) -> list[str]:
     for t in after_t.en_prise[opp]:
         if t.square not in before_opp:
             out.append(f"attacks {piece_label(after, t.square)}, which can now be won "
-                       f"unless {color_name(opp)} responds")
+                       f"unless {colour_name(opp)} responds")
 
     before_forks = {k for k, _, _ in before_t.forks}
-    for key, color, text in after_t.forks:
-        if color == mover and key not in before_forks:
+    for key, colour, text in after_t.forks:
+        if colour == mover and key not in before_forks:
             out.append("creates a fork: " + text)
     before_lines = {k for k, _, _ in before_t.lines}
-    for key, color, text in after_t.lines:
-        if color == mover and key not in before_lines:
+    for key, colour, text in after_t.lines:
+        if colour == mover and key not in before_lines:
             out.append("creates a pin/skewer: " + text)
-    for key, color, text in before_t.lines:
-        if color == opp and key not in {k for k, _, _ in after_t.lines}:
+    for key, colour, text in before_t.lines:
+        if colour == opp and key not in {k for k, _, _ in after_t.lines}:
             out.append("breaks the opponent's pin/skewer (" + text + ")")
 
     if mover in after_t.mate_threat and not after.is_check():
         out.append(f"threatens checkmate with {after_t.mate_threat[mover]}")
     if opp in before_t.mate_threat and opp not in after_t.mate_threat:
-        out.append(f"stops {color_name(opp)}'s threat of checkmate ({before_t.mate_threat[opp]})")
+        out.append(f"stops {colour_name(opp)}'s threat of checkmate ({before_t.mate_threat[opp]})")
     elif opp in after_t.mate_threat and opp not in before_t.mate_threat:
-        out.append(f"allows {color_name(opp)} to threaten checkmate with {after_t.mate_threat[opp]}")
+        out.append(f"allows {colour_name(opp)} to threaten checkmate with {after_t.mate_threat[opp]}")
     return out
 
 

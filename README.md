@@ -407,8 +407,8 @@ is next to it.
 2. **Analyse games** (Games → *Analyse new games*): choose chess.com or Lichess to list your
    recent games, and a time control to list only those (for chess.com, Lucidfish looks back up
    to a year to find them). Click games to select them (<kbd>Shift</kbd>-click selects a range,
-   or use *Select all*), then *Analyze selected*, or *Analyze batch* for your last 5–20 games. The
-   *Analyze* button on a row analyses just that game, and *Open* shows one you've already
+   or use *Select all*), then *Analyse selected*, or *Analyse batch* for your last 5–20 games. The
+   *Analyse* button on a row analyses just that game, and *Open* shows one you've already
    analysed. You can choose a lighter or heavier coaching level for a batch, or paste or drop
    a PGN file instead.
 3. **Watch the queue:** the pill at the top shows the current game and the time left. Click it
@@ -679,6 +679,7 @@ folder and the network is disabled. CI runs the suite on Linux, macOS and Window
 | `lucidfish/opening.py` | Lichess opening explorer client and offline opening book |
 | `lucidfish/prompts.py` | Prompt construction, output parsing, fact-checking |
 | `lucidfish/llm.py` | AI providers (Ollama, OpenAI-compatible, Anthropic) |
+| `lucidfish/spelling.py` | British spelling for the coach's text and opening names (Lucidfish is written in British English) |
 | `lucidfish/credentials.py` | API key storage (environment, OS keychain, session) |
 | `lucidfish/plans.py` | Plan tracker: wing activity, pawn advances, breaks, open files |
 | `lucidfish/pipeline.py` | Orchestrates engine and coach; commentary windows; game review; position mode; practice moves |

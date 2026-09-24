@@ -75,6 +75,6 @@ def test_drawings_are_exported_as_pgn_arrows_and_circles():
     moves = [{"ply": 0, "uci": "e2e4", "cls": "best", "eval": "+0.3",
               "fen_after": after_e4 + " b KQkq - 0 1"}]
     out = annotated_pgn(pgn, moves, annotations={after_e4: {
-        "arrows": [{"from": "g1", "to": "f3", "color": "green"}, {"from": "d7", "to": "d5", "color": "red"}],
-        "circles": [{"sq": "e4", "color": "yellow"}]}})
+        "arrows": [{"from": "g1", "to": "f3", "colour": "green"}, {"from": "d7", "to": "d5", "colour": "red"}],
+        "circles": [{"sq": "e4", "colour": "yellow"}]}})
     assert "[%cal Gg1f3,Rd7d5]" in out and "[%csl Ye4]" in out

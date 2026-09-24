@@ -109,11 +109,11 @@ def test_batch_queue_runs_in_order_skips_duplicates_and_saves(client):
 def test_single_analysis_jumps_the_queue(client):
     client.post("/api/queue/pause", headers=H)
     client.post("/api/queue", json={"games": [{"pgn": SHORT_PGN}, {"pgn": MINIATURE}]}, headers=H)
-    job = client.post("/api/analyze", json={"pgn": SAMPLE_PGN, "side": "white"}, headers=H).json()["job_id"]
+    job = client.post("/api/analyse", json={"pgn": SAMPLE_PGN, "side": "white"}, headers=H).json()["job_id"]
     view = client.get(f"/api/job/{job}").json()
     assert view["status"] == "queued" and view["position"] == 1 and view["paused"]
     # Opening a game that is already queued brings that job forward instead of adding a copy.
-    dup = client.post("/api/analyze", json={"pgn": MINIATURE}, headers=H).json()["job_id"]
+    dup = client.post("/api/analyse", json={"pgn": MINIATURE}, headers=H).json()["job_id"]
     assert client.get(f"/api/job/{dup}").json()["position"] == 1
     assert len(client.get("/api/queue").json()["queued"]) == 3
     client.post("/api/queue/resume", headers=H)
@@ -123,7 +123,7 @@ def test_single_analysis_jumps_the_queue(client):
 
 @needs_engine
 def test_reanalyse_a_stored_game_replaces_it(client):
-    job = client.post("/api/analyze", json={"pgn": SHORT_PGN, "side": "white"}, headers=H).json()["job_id"]
+    job = client.post("/api/analyse", json={"pgn": SHORT_PGN, "side": "white"}, headers=H).json()["job_id"]
     assert _wait(lambda: client.get(f"/api/job/{job}").json()["status"] == "done")
     old_id = client.get("/api/profile").json()["games"][0]["id"]
     again = client.post(f"/api/profile/game/{old_id}/reanalyse", json={"detail": "key"}, headers=H).json()["job_id"]
@@ -142,7 +142,7 @@ def test_done_is_reported_only_after_the_game_is_saved(client, monkeypatch):
         return real_save(*args, **kwargs)
 
     monkeypatch.setattr(store, "save_game", slow_save)
-    job = client.post("/api/analyze", json={"pgn": SHORT_PGN, "side": "white"}, headers=H).json()["job_id"]
+    job = client.post("/api/analyse", json={"pgn": SHORT_PGN, "side": "white"}, headers=H).json()["job_id"]
     deadline = time.time() + 120
     while time.time() < deadline:
         view = client.get(f"/api/job/{job}").json()

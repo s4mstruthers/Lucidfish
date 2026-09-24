@@ -26,7 +26,7 @@ from .config import Config
 from .llm import PROVIDERS, LLMError
 from .pipeline import (
     DETAIL_LEVELS,
-    analyze_game,
+    analyse_game,
     build_coach,
     parse_game,
     prefetch_engine,
@@ -497,7 +497,7 @@ class AnalysisQueue:
             if stage == "engine" and done >= total:
                 self._start_prefetch(cfg, cache)   # engine idle from here: give the next game a head start
 
-        report = analyze_game(job.pgn, cfg, side_filter=job.side, progress=progress, on_move=job.add_move,
+        report = analyse_game(job.pgn, cfg, side_filter=job.side, progress=progress, on_move=job.add_move,
                               should_stop=lambda: job.stop,
                               player_context=coach_context(profile, job.pgn),
                               level=(profile or {}).get("level") or None, engine_cache=cache)

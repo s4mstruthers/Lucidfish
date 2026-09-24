@@ -92,7 +92,7 @@ def _patch_llm(monkeypatch, llm):
 
 @needs_engine
 def test_engine_only_analysis():
-    report = pipeline.analyze_game(SAMPLE_PGN, fast_config(), side_filter="white")
+    report = pipeline.analyse_game(SAMPLE_PGN, fast_config(), side_filter="white")
     assert len(report.moves) == 33
     assert report.moves[-1].eval_str == "1-0"
     assert report.moves[-1].tags == ["checkmate"]
@@ -109,7 +109,7 @@ def test_notes_follow_detail_level(monkeypatch):
     _patch_llm(monkeypatch, llm)
     cfg = fast_config(enabled=True)
     cfg.analysis.detail = "key"
-    report = pipeline.analyze_game(SAMPLE_PGN, cfg, side_filter="white")
+    report = pipeline.analyse_game(SAMPLE_PGN, cfg, side_filter="white")
     noted = [m for m in report.moves if m.explanation]
     assert noted and len(noted) < 17                     # only key moments
     assert all(m.side == "White" for m in noted)
@@ -123,7 +123,7 @@ def test_standard_detail_comments_on_every_move_in_windows(monkeypatch):
     _patch_llm(monkeypatch, llm)
     cfg = fast_config(enabled=True)
     cfg.analysis.detail = "standard"
-    report = pipeline.analyze_game(SAMPLE_PGN, cfg, side_filter="white")
+    report = pipeline.analyse_game(SAMPLE_PGN, cfg, side_filter="white")
     assert all(m.commentary.startswith(m.side) for m in report.moves)   # both players, every move
     assert llm.windows == -(-len(report.moves) // pipeline.WINDOW)     # 8 plies per request
     assert llm.calls < len(report.moves)                                # cheaper than one call per move
@@ -139,13 +139,13 @@ def test_llm_failure_falls_back_to_engine_only_and_releases_engine(monkeypatch):
     _patch_llm(monkeypatch, llm)
     closed = []
 
-    class TrackedEngine(pipeline.EngineAnalyzer):
+    class TrackedEngine(pipeline.EngineAnalyser):
         def close(self):
             closed.append(True)
             super().close()
 
-    monkeypatch.setattr(pipeline, "EngineAnalyzer", TrackedEngine)
-    report = pipeline.analyze_game(SAMPLE_PGN, fast_config(enabled=True), side_filter="white")
+    monkeypatch.setattr(pipeline, "EngineAnalyser", TrackedEngine)
+    report = pipeline.analyse_game(SAMPLE_PGN, fast_config(enabled=True), side_filter="white")
     assert len(report.moves) == 33
     assert any("stopped responding" in w for w in report.warnings)
     assert llm.calls <= 3                                 # gave up quickly instead of retrying every move
@@ -155,14 +155,14 @@ def test_llm_failure_falls_back_to_engine_only_and_releases_engine(monkeypatch):
 @needs_engine
 def test_stop_returns_partial_results():
     seen = []
-    report = pipeline.analyze_game(SAMPLE_PGN, fast_config(), on_move=seen.append,
+    report = pipeline.analyse_game(SAMPLE_PGN, fast_config(), on_move=seen.append,
                                    should_stop=lambda: len(seen) >= 5)
     assert 5 <= len(report.moves) < 33 and report.review == ""
 
 
 @needs_engine
-def test_analyze_position():
-    result = pipeline.analyze_position("6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1", fast_config())
+def test_analyse_position():
+    result = pipeline.analyse_position("6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1", fast_config())
     assert result["lines"][0]["san"] == "Rd8#" and result["lines"][0]["score"] == "#1"
     assert result["turn"] == "White" and result["features"]
 
@@ -193,7 +193,7 @@ def _two_models(monkeypatch, main, expert, escalate=True):
 @needs_engine
 def test_expert_model_writes_the_hard_parts(monkeypatch):
     main, expert = FakeLLM(name="Local"), FakeLLM(name="Cloud", local=False)
-    report = pipeline.analyze_game(SAMPLE_PGN, _two_models(monkeypatch, main, expert), side_filter="white")
+    report = pipeline.analyse_game(SAMPLE_PGN, _two_models(monkeypatch, main, expert), side_filter="white")
     assert all(p.startswith("COMMENTARY WINDOW") for p in main.prompts)      # main: running commentary only
     assert main.windows == -(-len(report.moves) // pipeline.WINDOW)
     assert any("Write the post-game review" in p for p in expert.prompts)
@@ -207,12 +207,12 @@ def test_expert_model_writes_the_hard_parts(monkeypatch):
 @needs_engine
 def test_commentary_that_fails_the_fact_check_is_rewritten_by_the_expert(monkeypatch):
     main, expert = FakeLLM(name="Local", slip=True), FakeLLM(name="Cloud", local=False)
-    report = pipeline.analyze_game(SAMPLE_PGN, _two_models(monkeypatch, main, expert), side_filter="white")
+    report = pipeline.analyse_game(SAMPLE_PGN, _two_models(monkeypatch, main, expert), side_filter="white")
     assert expert.corrections == main.windows and main.corrections == 0
     assert all(m.commentary and "Kxa1" not in m.commentary for m in report.moves)
     # Without escalation the main model corrects itself.
     main, expert = FakeLLM(name="Local", slip=True), FakeLLM(name="Cloud", local=False)
-    pipeline.analyze_game(SAMPLE_PGN, _two_models(monkeypatch, main, expert, escalate=False), side_filter="white")
+    pipeline.analyse_game(SAMPLE_PGN, _two_models(monkeypatch, main, expert, escalate=False), side_filter="white")
     assert main.corrections == main.windows and expert.corrections == 0
 
 
@@ -220,7 +220,7 @@ def test_commentary_that_fails_the_fact_check_is_rewritten_by_the_expert(monkeyp
 def test_main_model_takes_over_when_the_expert_fails(monkeypatch):
     main = FakeLLM(name="Local")
     expert = FakeLLM(LLMError("Anthropic rejected the API key", fatal=True), name="Cloud", local=False)
-    report = pipeline.analyze_game(SAMPLE_PGN, _two_models(monkeypatch, main, expert), side_filter="white")
+    report = pipeline.analyse_game(SAMPLE_PGN, _two_models(monkeypatch, main, expert), side_filter="white")
     assert expert.calls == 1                                   # gave up on it after the fatal error
     assert report.review.startswith("## Summary")              # written by the main model instead
     assert any("second model stopped working" in w for w in report.warnings)
@@ -242,7 +242,7 @@ def test_chapters_are_written_and_feed_the_review(monkeypatch):
     _patch_llm(monkeypatch, llm)
     cfg = fast_config(enabled=True)
     cfg.analysis.detail = "standard"
-    report = pipeline.analyze_game(SAMPLE_PGN, cfg, side_filter="white")
+    report = pipeline.analyse_game(SAMPLE_PGN, cfg, side_filter="white")
     spans = pipeline.split_chapters(report.moves)
     assert len(spans) >= 2 and len(report.chapters) == len(spans)
     assert [c["start"] for c in report.chapters] == [s for s, _ in spans]
@@ -251,4 +251,4 @@ def test_chapters_are_written_and_feed_the_review(monkeypatch):
     assert "The game in chapters" in review_prompt and "Chapter 1 plans" in review_prompt
     # The fast "key moments" level skips chapters.
     cfg.analysis.detail = "key"
-    assert pipeline.analyze_game(SAMPLE_PGN, cfg, side_filter="white").chapters == []
+    assert pipeline.analyse_game(SAMPLE_PGN, cfg, side_filter="white").chapters == []

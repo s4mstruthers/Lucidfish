@@ -106,7 +106,7 @@ def numbered_line(board: chess.Board, sans: list[str]) -> str:
     return " ".join(parts)
 
 
-class EngineAnalyzer:
+class EngineAnalyser:
     """Thin, resource-safe wrapper around a UCI Stockfish process."""
 
     def __init__(self, cfg: EngineConfig, cache: EvalCache | None = None):

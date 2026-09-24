@@ -42,7 +42,7 @@ import chess.pgn
 from . import features as feat
 from . import plans, ratings, review_check, tactics
 from .config import Config
-from .engine import EngineAnalyzer, Line, MoveAnalysis, build_move_analysis, describe_move
+from .engine import EngineAnalyser, Line, MoveAnalysis, build_move_analysis, describe_move
 from .llm import LLMError, LLMProvider, make_provider
 from .opening import OpeningExplorer, local_book_depth, local_opening_name
 from .prompts import (
@@ -367,7 +367,7 @@ class _Unit:
 
 # ------------------------------------------------------------------ public
 
-def analyze_game(
+def analyse_game(
     pgn_text: str,
     cfg: Config,
     side_filter: str | None = None,   # "white", "black", or None for both
@@ -383,7 +383,7 @@ def analyze_game(
     report = GameReport(headers=dict(game.headers), warnings=warnings)
     detail = cfg.analysis.detail if cfg.analysis.detail in DETAIL_LEVELS else "standard"
     side_filter = side_filter.lower() if side_filter else None
-    coached_color = None if side_filter is None else side_filter == "white"
+    coached_colour = None if side_filter is None else side_filter == "white"
     base_s, inc_s, _ = parse_time_control(game.headers.get("TimeControl", ""))
     report.time_class = time_class = ratings.time_class(dict(game.headers))   # the site's own classes
 
@@ -430,7 +430,7 @@ def analyze_game(
         prev_clock = {chess.WHITE: float(base_s) if base_s else None,
                       chess.BLACK: float(base_s) if base_s else None}
         try:
-            with EngineAnalyzer(cfg.engine, cache=engine_cache) as engine:
+            with EngineAnalyser(cfg.engine, cache=engine_cache) as engine:
                 engine_name.append(engine.name)
                 board = game.board()
                 candidates = engine.top_lines(board)
@@ -532,10 +532,10 @@ def analyze_game(
             return "", {}
         try:
             if _is_hard(ev):
-                result = coach.hard(lambda llm: _write_note(llm, system, ev, side_filter, coached_color, played,
+                result = coach.hard(lambda llm: _write_note(llm, system, ev, side_filter, coached_colour, played,
                                                             cfg, coach))
             else:
-                result = _write_note(coach.llm, system, ev, side_filter, coached_color, played, cfg, coach)
+                result = _write_note(coach.llm, system, ev, side_filter, coached_colour, played, cfg, coach)
             coach.ok()
             return result
         except LLMError as e:
@@ -548,7 +548,7 @@ def analyze_game(
         if not coach.available:
             return {}
         try:
-            result = _write_window(coach.llm, system, evs, played, coached_color, opening_state["name"], cfg, coach)
+            result = _write_window(coach.llm, system, evs, played, coached_colour, opening_state["name"], cfg, coach)
             coach.ok()
             return result
         except LLMError as e:
@@ -682,7 +682,7 @@ def analyze_game(
         if len(spans) >= 2:
             if progress:
                 progress("review", total, total, "Summarising the game in chapters…")
-            report.chapters = _write_chapters(coach, system, spans, report, played, coached_color, user_stopped)
+            report.chapters = _write_chapters(coach, system, spans, report, played, coached_colour, user_stopped)
     if coach.available and report.moves and not user_stopped():
         if progress:
             progress("review", total, total, "Writing the post-game review…")
@@ -707,7 +707,7 @@ def analyze_game(
 
 # ------------------------------------------------------------------ verification
 
-def _verified_analysis(engine: EngineAnalyzer, board: chess.Board, move: chess.Move, after: chess.Board,
+def _verified_analysis(engine: EngineAnalyser, board: chess.Board, move: chess.Move, after: chess.Board,
                        candidates: list[Line], lines_after: list[Line], cfg: Config
                        ) -> tuple[MoveAnalysis, list[Line], list[Line]]:
     """Build the move's analysis, double-checking the verdicts that matter most.
@@ -1086,7 +1086,7 @@ def prefetch_engine(pgn_text: str, cfg: Config, engine_cache, should_stop: Calla
     moves = list(game.mainline_moves())
     total = len(moves) + 1
     done = 0
-    with EngineAnalyzer(cfg.engine, cache=engine_cache) as engine:
+    with EngineAnalyser(cfg.engine, cache=engine_cache) as engine:
         board = game.board()
         for i in range(total):
             if should_stop():
@@ -1113,7 +1113,7 @@ def check_move(fen: str, uci: str, cfg: Config, engine_cache=None) -> dict:
         raise ValueError("That move is not legal in this position.")
     after = board.copy(stack=False)
     after.push(move)
-    with EngineAnalyzer(cfg.engine, cache=engine_cache) as engine:
+    with EngineAnalyser(cfg.engine, cache=engine_cache) as engine:
         candidates = engine.top_lines(board)
         lines_after = [] if after.is_game_over() else engine.top_lines(after)
     a = build_move_analysis(board, move, candidates, lines_after, cfg.analysis)
@@ -1132,12 +1132,12 @@ def check_move(fen: str, uci: str, cfg: Config, engine_cache=None) -> dict:
 
 # ------------------------------------------------------------------ positions
 
-def analyze_position(fen: str, cfg: Config, perspective: str | None = None, level: str | None = None,
+def analyse_position(fen: str, cfg: Config, perspective: str | None = None, level: str | None = None,
                      engine_cache=None) -> dict:
     """One-shot analysis of a set-up position (board editor mode)."""
     from .prompts import build_position_prompt
     board = chess.Board(fen)
-    with EngineAnalyzer(cfg.engine, cache=engine_cache) as engine:
+    with EngineAnalyser(cfg.engine, cache=engine_cache) as engine:
         lines = engine.top_lines(board)
     f = feat.extract(board)
     facts = f.summary_lines() + plans.plan_lines([], board)

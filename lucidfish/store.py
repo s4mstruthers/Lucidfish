@@ -30,6 +30,7 @@ from .config import data_dir
 from .insights import VERSION as INSIGHTS_VERSION
 from .insights import aggregate as aggregate_insights
 from .insights import game_insights
+from .spelling import british
 
 _lock = threading.Lock()
 _initialised: set[Path] = set()
@@ -57,7 +58,7 @@ CREATE TABLE IF NOT EXISTS games (
     acpl         REAL,
     accuracy     REAL,
     blunders     INTEGER, mistakes INTEGER, inaccuracies INTEGER, best_moves INTEGER,
-    analyzed_at  TEXT DEFAULT CURRENT_TIMESTAMP,
+    analysed_at  TEXT DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(profile_id, fingerprint)
 );
 CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT);
@@ -130,6 +131,8 @@ def init() -> None:
         with _lock, conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.executescript(_SCHEMA)
+            if "analyzed_at" in {r[1] for r in conn.execute("PRAGMA table_info(games)")}:
+                conn.execute("ALTER TABLE games RENAME COLUMN analyzed_at TO analysed_at")   # British spelling
             for table, column, decl in _MIGRATIONS:
                 cols = {r[1] for r in conn.execute(f"PRAGMA table_info({table})")}
                 if column not in cols:
@@ -139,6 +142,7 @@ def init() -> None:
             _reclassify_time_controls(conn)
             _backfill_ratings(conn)
             _backfill_move_counts(conn)
+            _british_spelling(conn)
     finally:
         conn.close()
     _initialised.add(path)
@@ -177,6 +181,25 @@ def _reclassify_time_controls(conn: sqlite3.Connection) -> None:
         conn.execute("UPDATE profiles SET ratings_json=? WHERE id=?",
                      (json.dumps({s: e for s, e in kept.items() if e}), pid))
     conn.execute("INSERT OR REPLACE INTO kv (key, value) VALUES ('time_classes_by_site', '1')")
+
+
+# Stored text written before Lucidfish used British spelling throughout: the coach's reviews and notes, opening
+# names ("Sicilian Defense"), and drawings (saved with a "color" key, now "colour"). Never the PGN itself.
+_BRITISH_COLUMNS = {"games": ("opening", "review", "moves_json", "chapters_json", "annotations_json", "insights"),
+                    "profiles": ("summary", "summaries_json")}
+
+
+def _british_spelling(conn: sqlite3.Connection) -> None:
+    """Once: make stored text British (see _BRITISH_COLUMNS)."""
+    if conn.execute("SELECT 1 FROM kv WHERE key='british_spelling'").fetchone():
+        return
+    for table, columns in _BRITISH_COLUMNS.items():
+        rows = conn.execute(f"SELECT id, {', '.join(columns)} FROM {table}").fetchall()
+        for row_id, *old in map(tuple, rows):
+            new = [british(v) if isinstance(v, str) else v for v in old]
+            if new != old:
+                conn.execute(f"UPDATE {table} SET {', '.join(f'{c}=?' for c in columns)} WHERE id=?", (*new, row_id))
+    conn.execute("INSERT OR REPLACE INTO kv (key, value) VALUES ('british_spelling', '1')")
 
 
 def _move_counts(moves: list[dict], user_side: str | None) -> dict[str, int]:
@@ -361,7 +384,7 @@ def list_games(profile_id: int) -> list[dict]:
         rows = c.execute(
             """SELECT id, fingerprint, white, black, result, date, time_class, user_side,
                       user_elo, opening, acpl, accuracy, blunders, mistakes, inaccuracies,
-                      best_moves, good_moves, great_moves, analyzed_at
+                      best_moves, good_moves, great_moves, analysed_at
                FROM games WHERE profile_id=? ORDER BY id DESC""", (profile_id,)).fetchall()
     return [dict(r) for r in rows]
 
