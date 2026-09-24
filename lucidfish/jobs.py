@@ -21,10 +21,17 @@ import time
 import uuid
 from collections import deque
 
-from . import settings, share, store
+from . import ratings, settings, share, store
 from .config import Config
 from .llm import PROVIDERS, LLMError
-from .pipeline import DETAIL_LEVELS, analyze_game, build_coach, parse_game, prefetch_engine
+from .pipeline import (
+    DETAIL_LEVELS,
+    analyze_game,
+    build_coach,
+    parse_game,
+    parse_time_control,
+    prefetch_engine,
+)
 from .prompts import PLAYER_SUMMARY_SYSTEM, build_player_summary_prompt
 
 _QUEUE_KEY = "queue"
@@ -91,6 +98,22 @@ class Timings:
 
 
 # ------------------------------------------------------------------ jobs
+
+def rating_for_game(pgn: str, side: str | None, given: int | None, profile: dict | None) -> tuple[int | None, str]:
+    """The rating to pitch a game's coaching at, and which one it is ("chess.com blitz").
+
+    The game's own rating (its PGN's WhiteElo/BlackElo for the coached side) comes first, then one the game
+    list supplied, then the profile's closest rating for that site and time control.
+    """
+    headers = ratings.pgn_headers(pgn)
+    site = ratings.game_site(headers)
+    time_class = parse_time_control(headers.get("TimeControl", ""))[2]
+    own = ratings.game_rating(headers, side) or given
+    if own:
+        return own, ratings.label(site, time_class)
+    stand_in = ratings.for_game((profile or {}).get("ratings") or {}, site, time_class)
+    return stand_in if stand_in else (None, "")
+
 
 class Job:
     """One game waiting for, or going through, analysis. Safe to read while written."""
@@ -452,6 +475,8 @@ class AnalysisQueue:
         cfg = self._config_for(job)
         self._apply_estimate(job, cfg, exact=True)
         profile = store.get_profile(job.profile_id) if job.profile_id else None
+        job.elo, cfg.user_elo_label = rating_for_game(job.pgn, job.side, job.elo, profile)
+        cfg.user_elo = job.elo
         cache = store.EngineCache()
 
         def progress(stage: str, done: int, total: int, label: str) -> None:

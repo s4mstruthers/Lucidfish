@@ -401,7 +401,8 @@ def analyze_game(
     report.coach = coach.describe()
     system = build_system_prompt(side_filter, cfg.user_elo, level, player_context,
                                  players={"White": game.headers.get("White", "White"),
-                                          "Black": game.headers.get("Black", "Black")})
+                                          "Black": game.headers.get("Black", "Black")},
+                                 rating_label=cfg.user_elo_label)
     commentary_mode = detail == "standard" and coach.available
 
     stop_event = threading.Event()
@@ -951,7 +952,8 @@ def _review_prompt(report: GameReport, side_filter: str | None, cfg: Config, pla
             facts.append(f"{prefix} {m.san} ignored a threat that was already on the board: {m.threat}.")
     return build_game_review_prompt(
         report.headers, records, report.opening, [t for _, t in swings[:5]], side_filter,
-        elo=cfg.user_elo, time_class=report.time_class, player_context=player_context,
+        elo=cfg.user_elo, rating_label=cfg.user_elo_label, time_class=report.time_class,
+        player_context=player_context,
         accuracy=report.accuracy, commentary=flow, chapters=report.chapters, facts=facts)
 
 
@@ -1144,7 +1146,7 @@ def analyze_position(fen: str, cfg: Config, perspective: str | None = None, leve
     coach, warnings = build_coach(cfg)
     result["warnings"] += warnings
     if coach.available and lines:
-        system = build_system_prompt(persp.lower(), cfg.user_elo, level)
+        system = build_system_prompt(persp.lower(), cfg.user_elo, level, rating_label=cfg.user_elo_label)
         prompt = build_position_prompt(board, lines, facts, persp)
         try:
             text = coach.hard(lambda llm: llm.generate(system, prompt, max_tokens=_MAX_TOKENS["full"]))

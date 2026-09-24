@@ -672,3 +672,12 @@ body.no-select, body.no-select * { user-select: none !important; -webkit-user-se
 .train-bar .row { gap: 12px; flex-wrap: wrap; }
 .train-bar .bar.grow { flex: 1 1 120px; min-width: 80px; }
 .train-bar .bar > div { background: var(--c-best); }
+
+/* ------------------------------------------------------------ profile ratings */
+.ratings-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.ratings-table th, .ratings-table td { padding: 6px 8px; text-align: center; border-bottom: 1px solid var(--border); }
+.ratings-table thead th { font-size: .75rem; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; }
+.ratings-table tbody th { text-align: left; font-weight: 600; }
+.ratings-table td { font-weight: 700; font-variant-numeric: tabular-nums; }
+.ratings-table td.none { color: var(--faint); font-weight: 400; }
+.ratings-table td.fresh { color: var(--c-best); }

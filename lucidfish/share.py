@@ -75,8 +75,8 @@ def export_data(profile_id: int) -> dict:
         g = store.get_game(row["id"])
         if g is not None:
             details[str(row["id"])] = _game_detail(g)
-    public = {k: profile.get(k) for k in ("id", "name", "level", "chesscom_user", "lichess_user",
-                                           "elo_bullet", "elo_blitz", "elo_rapid", "summary")}
+    public = {k: profile.get(k) for k in ("id", "name", "level", "chesscom_user", "lichess_user", "ratings",
+                                           "summary")}
     public["games"] = len(games)
     return {
         "version": __version__,

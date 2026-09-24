@@ -610,7 +610,7 @@
       </section>
       <section>
         <h3 class="pf-h">Your accounts <span class="small">(optional)</span></h3>
-        <p class="small" style="margin:0 0 10px">Your recent games appear on the Analyze page, and <b>Look up</b> fills in your ratings.</p>
+        <p class="small" style="margin:0 0 10px">Your recent games appear on the Analyze page, and <b>Look up</b> fetches your current ratings.</p>
         <div class="account-row">
           <span class="site chesscom" aria-hidden="true">♟</span>
           <label class="field grow">chess.com username <input id="pfChesscom" maxlength="40" autocomplete="off" spellcheck="false"></label>
@@ -626,12 +626,11 @@
       </section>
       <section>
         <h3 class="pf-h">Ratings</h3>
-        <div class="form-grid" style="grid-template-columns:repeat(3,1fr)">
-          <label class="field">Bullet <input type="number" id="pfBullet" min="100" max="3500" placeholder="—"></label>
-          <label class="field">Blitz <input type="number" id="pfBlitz" min="100" max="3500" placeholder="—"></label>
-          <label class="field">Rapid <input type="number" id="pfRapid" min="100" max="3500" placeholder="—"></label>
-        </div>
-        <p class="small" style="margin:6px 0 0">Used to pitch explanations at the right level for each time control.</p>
+        <div id="pfRatings"></div>
+        <p class="small" style="margin:8px 0 0">Kept up to date by themselves: each analysed game updates the rating for its
+          site and time control. The coach uses the rating <i>in each game</i> to pitch its explanations; these are only
+          used for games without one (e.g. over the board) and the board editor. chess.com and Lichess ratings are kept
+          apart because their scales differ.</p>
       </section>
       <section class="danger-zone" id="pfDanger">
         <div class="row"><div class="grow"><b>Delete this profile</b><div class="small">Removes the profile and all of its analysed games from this computer.</div></div>
