@@ -71,7 +71,7 @@ def test_page_carries_the_engine_unless_left_out():
     wasm = (share.STATIC / share.ENGINE_WASM).read_bytes()
     assert _engine_wasm(full) == wasm                                         # the WebAssembly survives intact
     loader = re.search(r'<script type="text/plain" id="lfEngineJs">(.*?)</script>', full, re.S).group(1)
-    assert loader == (share.STATIC / share.ENGINE_JS).read_text()
+    assert loader == (share.STATIC / share.ENGINE_JS).read_text(encoding="utf-8")
     assert full.index('id="lfEngineWasm"') < full.index("window.LUCIDFISH_EXPORT")   # there before the app starts
     assert 'id="lfEngine' not in small and len(full) - len(small) > 9_000_000
     assert _page_data(small)["train"] == _page_data(full)["train"]
@@ -100,7 +100,7 @@ def test_folder_sync_is_atomic_and_follows_the_setting(tmp_path):
     assert cfg["folder"] == str(target_dir) and target_dir.is_dir()
     share.sync_profile(pid)
     page = target_dir / "Lucidfish - Ann.html"
-    assert page.exists() and "LUCIDFISH_EXPORT" in page.read_text()
+    assert page.exists() and "LUCIDFISH_EXPORT" in page.read_text(encoding="utf-8")
     assert [p.name for p in target_dir.iterdir()] == [page.name]             # no temporary files left behind
     status = share.get_config(pid)
     assert status["file"] == str(page) and status["last_synced"] and not status["last_error"]
@@ -161,7 +161,7 @@ def test_share_api(client, tmp_path):
     # The folder copy follows the engine setting too.
     small = client.post("/api/share", json={"folder": str(tmp_path), "engine": False}, headers=H).json()
     assert small["engine"] is False
-    assert 'id="lfEngineWasm"' not in (tmp_path / "Lucidfish - Ann.html").read_text()
+    assert 'id="lfEngineWasm"' not in (tmp_path / "Lucidfish - Ann.html").read_text(encoding="utf-8")
     assert client.get("/api/share").json()["engine"] is False
 
 
@@ -181,13 +181,13 @@ def test_a_finished_analysis_updates_the_shared_copy(client, tmp_path):
     client.post("/api/profiles", json={"name": "Ann"}, headers=H)
     client.post("/api/share", json={"folder": str(tmp_path), "auto": True}, headers=H)
     page = tmp_path / "Lucidfish - Ann.html"
-    assert _page_data(page.read_text())["games"] == []
+    assert _page_data(page.read_text(encoding="utf-8"))["games"] == []
     job = client.post("/api/analyze", json={"pgn": SHORT_PGN, "side": "white"}, headers=H).json()["job_id"]
     deadline = time.time() + 120
     while time.time() < deadline and client.get(f"/api/job/{job}").json()["status"] != "done":
         time.sleep(0.2)
-    data = _page_data(page.read_text())
+    data = _page_data(page.read_text(encoding="utf-8"))
     assert len(data["games"]) == 1 and data["stats"]["games"] == 1
     # Deleting the game updates the copy too.
     client.delete(f"/api/profile/game/{data['games'][0]['id']}", headers=H)
-    assert _page_data(page.read_text())["games"] == []
+    assert _page_data(page.read_text(encoding="utf-8"))["games"] == []
