@@ -76,13 +76,15 @@ def export_data(profile_id: int) -> dict:
         if g is not None:
             details[str(row["id"])] = _game_detail(g)
     public = {k: profile.get(k) for k in ("id", "name", "level", "chesscom_user", "lichess_user", "ratings",
-                                           "summary")}
+                                           "summary", "summaries")}
     public["games"] = len(games)
     return {
         "version": __version__,
         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "profile": public,
         "stats": store.aggregate_stats(profile_id, games),
+        "stats_by_class": {tc: store.aggregate_stats(profile_id, games, tc) for tc in store.time_class_counts(games)},
+        "time_classes": store.time_class_counts(games),
         "games": games,
         "details": details,
         "train": training.train_items(profile_id),

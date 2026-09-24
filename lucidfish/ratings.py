@@ -42,6 +42,30 @@ def game_site(headers: dict) -> str:
     return "other"
 
 
+# Estimated duration (base + 40 × increment, in seconds) below which a game is in each class, per site.
+_CLASS_LIMITS = {
+    "chesscom": ((180, "bullet"), (600, "blitz"), (10**9, "rapid")),          # chess.com has no classical
+    "lichess": ((180, "bullet"), (480, "blitz"), (1500, "rapid"), (10**9, "classical")),
+    "other": ((180, "bullet"), (600, "blitz"), (1800, "rapid"), (10**9, "classical")),
+}
+
+
+def time_class(headers: dict) -> str:
+    """The game's time control class by the rules of the site it was played on, so "rapid" means what
+    chess.com or Lichess call rapid (a 30-minute game is rapid on chess.com, classical on Lichess)."""
+    tc = headers.get("TimeControl", "").strip()
+    site = game_site(headers)
+    if "/" in tc:                                   # chess.com daily: "1/259200"
+        return "daily"
+    if tc == "-" and site == "lichess":             # Lichess correspondence
+        return "daily"
+    m = re.fullmatch(r"(\d+)(?:\+(\d+))?", tc)
+    if not m:
+        return ""
+    estimated = int(m[1]) + 40 * int(m[2] or 0)
+    return next(cls for limit, cls in _CLASS_LIMITS[site] if estimated < limit)
+
+
 def game_rating(headers: dict, side: str | None) -> int | None:
     """The coached side's rating in this game, from WhiteElo / BlackElo."""
     if not side or side.lower() not in ("white", "black"):

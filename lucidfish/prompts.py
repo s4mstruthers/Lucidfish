@@ -638,8 +638,22 @@ reviews given — do not invent patterns. This text is also fed to future coachi
 sessions as context, so make every sentence carry information."""
 
 
-def build_player_summary_prompt(stats: dict, reviews: list, profile: dict | None = None) -> str:
+_TC_FOCUS = {
+    "bullet": "In bullet, speed and pre-planned, safe moves matter most; deep calculation rarely fits.",
+    "blitz": "In blitz, practical choices and time use matter as much as accuracy.",
+    "rapid": "In rapid there is time to calculate: blunder checks, plans and technique count most.",
+    "classical": "In classical there is time for full calculation, planning and endgame technique.",
+    "daily": "In daily games there is time to analyse every move: accuracy and planning count most.",
+}
+
+
+def build_player_summary_prompt(stats: dict, reviews: list, profile: dict | None = None,
+                                time_class: str | None = None) -> str:
     parts = []
+    if time_class:
+        parts.append(f"This review covers ONLY the player's {time_class} games ({stats.get('games', 0)} of them). "
+                     f"{_TC_FOCUS.get(time_class, '')} Base every point on the {time_class} statistics and "
+                     "reviews below, and say what to train for this time control.")
     if profile:
         elos = ratings.summary(profile.get("ratings") or {})
         parts.append(
@@ -649,7 +663,7 @@ def build_player_summary_prompt(stats: dict, reviews: list, profile: dict | None
             + "Use ONLY these ratings when referring to their strength — never estimate, invent, or "
               "upgrade a rating class. Opening names may come ONLY from the statistics below, never "
               "from memory of the reviews.")
-    parts.append("Verified statistics across analysed games:")
+    parts.append(f"Verified statistics across their analysed {time_class + ' ' if time_class else ''}games:")
     parts.append(f"  Games: {stats.get('games', 0)}, W-L-D: {stats.get('wins', 0)}-"
                  f"{stats.get('losses', 0)}-{stats.get('draws', 0)}")
     if stats.get("avg_accuracy") is not None:
@@ -669,6 +683,14 @@ def build_player_summary_prompt(stats: dict, reviews: list, profile: dict | None
     for o in stats.get("openings", []):
         parts.append(f"  Opening: {o['name']} — {o['games']} games, "
                      f"{o['w']}W/{o['l']}L/{o['d']}D, avg cp loss {o['acpl']}")
+    by_class = stats.get("by_time_class") or {}
+    if len(by_class) >= 2:
+        parts.append("By time control (verified). If they clearly differ, say how, in one or two sentences: "
+                     "each time control also gets its own review.")
+        for tc, r in by_class.items():
+            parts.append(f"  {tc}: {r['games']} games, {r['wins']}W/{r['losses']}L/{r['draws']}D, "
+                         + (f"accuracy {r['avg_accuracy']}%, " if r.get("avg_accuracy") is not None else "")
+                         + f"{r['blunders_per_game']} blunders and {r['mistakes_per_game']} mistakes per game")
     parts.append(
         "\nRecent post-game reviews (verified, newest first). When you cite evidence, refer to the "
         "GAME it came from — e.g. \"your game against zztobias\" or \"as Black vs Infant001\" — "
