@@ -3,853 +3,612 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Lucidfish</title>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css">
-<style>
-:root{
-  --bg:#0f1117; --panel:#181b25; --panel2:#1f2330; --border:#2a2f3f;
-  --text:#e6e9f0; --muted:#8b93a7; --accent:#4f9cf9; --accent2:#37d0a2;
-  --best:#37d0a2; --good:#9ac26b; --inacc:#e8c341; --mistake:#e8892b; --blunder:#e5484d;
-  --radius:12px; font-size:15px;
-}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--text);
-  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif}
-header{display:flex;align-items:center;gap:14px;padding:14px 28px;border-bottom:1px solid var(--border)}
-header h1{margin:0;font-size:22px;letter-spacing:.3px}
-header h1 span{color:var(--accent)}
-header p{margin:0;color:var(--muted);font-size:13px}
-.wrap{max-width:1340px;margin:0 auto;padding:20px 28px}
-.tabs{display:flex;gap:8px;margin-bottom:18px}
-.tab{padding:8px 18px;border-radius:999px;border:1px solid var(--border);background:var(--panel);
-  color:var(--muted);cursor:pointer;font-size:14px}
-.tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
-.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;margin-bottom:16px}
-.card h3{margin:0 0 12px;font-size:13px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted)}
-textarea,input,select{background:var(--panel2);border:1px solid var(--border);border-radius:8px;
-  color:var(--text);padding:9px 12px;font-size:14px;font-family:inherit}
-textarea{width:100%;min-height:100px;resize:vertical}
-button{background:var(--accent);border:none;border-radius:8px;color:#fff;padding:9px 18px;
-  font-size:14px;font-weight:600;cursor:pointer}
-button:hover{filter:brightness(1.1)}
-button.ghost{background:var(--panel2);border:1px solid var(--border);color:var(--text);font-weight:400}
-button:disabled{opacity:.45;cursor:default}
-.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.grid{display:grid;grid-template-columns:minmax(380px,520px) 1fr;gap:20px;align-items:start}
-.cols2{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
-@media(max-width:980px){.grid,.cols2{grid-template-columns:1fr}}
-.boardwrap{display:flex;gap:12px}
-#evalbar{width:14px;border-radius:7px;background:#3a3f52;overflow:hidden;display:flex;flex-direction:column;flex:1}
-#evalwhite{background:#e6e9f0;width:100%;transition:height .3s ease;margin-top:auto}
-#board{width:100%}
-.controls{display:flex;gap:8px;justify-content:center;margin-top:12px}
-.controls button{padding:8px 14px;font-size:16px}
-#movelist{display:grid;grid-template-columns:44px 1fr 1fr;gap:4px 6px;max-height:340px;overflow-y:auto;align-items:stretch}
-.mvnum{color:var(--muted);font-size:13px;display:flex;align-items:center;justify-content:flex-end;padding-right:4px}
-.mv{padding:6px 10px;border-radius:8px;background:var(--panel2);border:1px solid transparent;
-  cursor:pointer;font-size:13.5px;display:flex;justify-content:space-between;gap:6px}
-.mv:hover{border-color:var(--accent)}
-.mv.sel{border-color:var(--accent);background:#243048}
-.mv.empty{background:none;cursor:default}
-.mvhead{position:sticky;top:0;background:var(--panel);z-index:1;font-size:12px;
-  text-transform:uppercase;letter-spacing:.6px;color:var(--muted);font-weight:700;
-  padding:2px 10px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.badge{font-size:11px;padding:1px 7px;border-radius:999px;font-weight:700;color:#0f1117;align-self:center}
-.b-best{background:var(--best)} .b-good{background:var(--good)} .b-inaccuracy{background:var(--inacc)}
-.b-mistake{background:var(--mistake)} .b-blunder{background:var(--blunder);color:#fff}
-#explain{line-height:1.55;font-size:14.5px}
-ul.mdl{margin:6px 0;padding-left:20px}
-ul.mdl li{margin:4px 0}
-.opplabel{display:block;color:var(--accent2);font-weight:700;font-size:13px;
-  text-transform:uppercase;letter-spacing:.7px;margin-bottom:7px}
-.sect{font-size:11.5px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);
-  font-weight:700;margin:14px 0 6px}
-.lineitem{background:var(--panel2);border-radius:8px;padding:8px 11px;margin:6px 0;font-size:13.5px}
-.lineitem .ev{display:inline-block;background:#2c3245;border-radius:999px;padding:0 8px;
-  font-size:12px;margin-left:6px;color:var(--text)}
-.lineitem .pv{color:var(--muted);margin-top:2px;display:block}
-.lineitem .idea{color:var(--accent2);margin-top:5px;display:block;line-height:1.45}
-#review,#profSummary{line-height:1.6;font-size:14.5px}
-#review h3,#explain h3,#profSummary h3{color:var(--text);text-transform:none;letter-spacing:0;font-size:15px;margin:14px 0 6px}
-.progress{color:var(--accent2);font-size:13.5px}
-.err{color:var(--blunder);font-size:13.5px;white-space:pre-wrap}
-.gamerow{display:flex;justify-content:space-between;align-items:center;padding:9px 12px;border-radius:8px;
-  background:var(--panel2);margin-bottom:6px;cursor:pointer;font-size:14px;border:1px solid transparent}
-.gamerow:hover{border-color:var(--accent)}
-.gamerow .meta{color:var(--muted);font-size:12.5px;text-align:right}
-.chatlog{max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;margin-bottom:10px}
-.msg{padding:9px 12px;border-radius:10px;max-width:88%;line-height:1.5;font-size:14px}
-.msg.user{background:var(--accent);color:#fff;align-self:flex-end;white-space:pre-wrap}
-.msg.coach{background:var(--panel2);align-self:flex-start}
-.msg.think{color:var(--muted);font-style:italic;background:none;padding:4px}
-.hl-from{box-shadow:inset 0 0 0 3px rgba(79,156,249,.75)!important}
-.hl-to{box-shadow:inset 0 0 0 3px rgba(55,208,162,.85)!important}
-.hidden{display:none!important}
-.small{font-size:12.5px;color:var(--muted)}
-.res{font-size:11px;font-weight:800;border-radius:999px;padding:1px 8px;margin-left:8px}
-.res-w{background:var(--best);color:#0f1117}
-.res-l{background:var(--blunder);color:#fff}
-.res-d{background:#3a3f52;color:var(--text)}
-.res-a{background:#2c3245;color:var(--accent2);border:1px solid var(--accent2)}
-.acc{color:var(--accent2);font-weight:600}
-.stat{min-width:110px}
-.stat b{font-size:22px;font-weight:800;display:block}
-</style>
+<title>Lucidfish — explainable chess coaching</title>
+<meta name="description" content="Stockfish tells you the best move; Lucidfish tells you why.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%232f6fed'/%3E%3Ctext x='16' y='23' font-size='20' text-anchor='middle' fill='white'%3E%E2%99%9E%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="/static/vendor/chessboard-1.0.0.min.css">
+<link rel="stylesheet" href="/static/app.css">
+<script src="/static/theme.js"></script>
 </head>
 <body>
-<header>
-  <h1>Lucid<span>fish</span></h1>
-  <p>Stockfish tells you the best move — Lucidfish tells you why.</p>
-  <div class="row" style="margin-left:auto">
-    <select id="profileSel" title="Switch profile"></select>
-    <button class="ghost" id="editProfBtn" title="Edit profile">✎</button>
-    <button id="newProfBtn">+ New profile</button>
+<header class="topbar">
+  <a class="brand" href="/" aria-label="Lucidfish home">
+    <div class="brand-mark" aria-hidden="true">♞</div>
+    <div class="brand-name">Lucid<span>fish</span></div>
+  </a>
+  <nav class="nav" id="nav" aria-label="Main">
+    <button data-page="dashboard" class="active">Home</button>
+    <button data-page="games" data-also="analyze game">Games</button>
+    <button data-page="editor">Board editor</button>
+  </nav>
+  <div class="spacer"></div>
+  <button class="queue-pill hidden" id="queuePill" title="Analysis queue — click to see progress and manage it">
+    <span class="dot busy" id="queueDot"></span><span id="queueText">Queue</span>
+    <span class="mini-bar" aria-hidden="true"><span id="queueMiniBar"></span></span>
+  </button>
+  <button class="status-pill" id="statusPill" title="Engine and AI coach status — click for settings">
+    <span class="dot busy" id="statusDot"></span><span id="statusText">Checking setup…</span>
+  </button>
+  <button class="ghost icon theme-btn" id="themeBtn" title="Switch light / dark theme" aria-label="Switch theme">◐</button>
+  <button class="settings-btn" id="settingsBtn" title="Settings" aria-label="Settings">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.4 13a7.5 7.5 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.5 7.5 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6zM12 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z"/></svg>
+    <span>Settings</span>
+  </button>
+  <div class="account" id="account">
+    <button class="account-btn" id="accountBtn" aria-haspopup="menu" aria-expanded="false" title="Your profile">
+      <span class="avatar" id="accountAvatar">?</span>
+      <span class="account-name" id="accountName">Profile</span>
+      <span class="caret" aria-hidden="true">▾</span>
+    </button>
+    <div class="account-menu hidden" id="accountMenu" role="menu"></div>
   </div>
 </header>
 
-<div class="wrap">
-  <div class="card hidden" id="profileForm">
-    <h3 id="profFormTitle">Create your profile</h3>
-    <div class="row">
-      <input id="pfName" placeholder="Display name" style="width:150px">
-      <input id="pfUser" placeholder="chess.com username" style="width:180px">
-      <select id="pfLevel">
-        <option value="">Ability level…</option>
-        <option value="beginner">Beginner</option>
-        <option value="casual">Casual</option>
-        <option value="club">Club player</option>
-        <option value="advanced">Advanced</option>
-      </select>
-    </div>
-    <div class="row" style="margin-top:8px">
-      <input type="number" id="pfBullet" placeholder="Bullet ELO" style="width:110px">
-      <input type="number" id="pfBlitz" placeholder="Blitz ELO" style="width:110px">
-      <input type="number" id="pfRapid" placeholder="Rapid ELO" style="width:110px">
-      <button id="pfSave">Save profile</button>
-      <button class="ghost" id="pfCancel">Cancel</button>
-      <span class="err" id="pfError"></span>
-    </div>
-  </div>
+<main class="wrap">
+  <div id="banners"></div>
 
-  <div class="tabs">
-    <div class="tab active" data-mode="review">Coach review</div>
-    <div class="tab" data-mode="analyze">Analyze games</div>
-    <div class="tab" data-mode="editor">Board editor</div>
-  </div>
-
-  <!-- ================= COACH REVIEW PAGE ================= -->
-  <div id="p-review">
+  <!-- ============================================================ DASHBOARD -->
+  <section id="page-dashboard" data-page-section>
+    <div class="page-head">
+      <div>
+        <h1 id="dashTitle">Your coach review</h1>
+        <p>Your progress across every analysed game, written by your coach.</p>
+      </div>
+      <div class="spacer"></div>
+      <button id="goAnalyze">Analyze a game</button>
+    </div>
     <div class="card">
-      <h3 id="dashTitle">Coach review</h3>
-      <div class="row" id="profStats" style="gap:26px;margin-bottom:12px"></div>
-      <div id="profSummary"><span class="small">Analyze at least 2 games and the coach writes your review here.</span></div>
-      <div class="row" style="margin-top:12px">
-        <button class="ghost" id="refreshReview">⟳ Update review from analyzed games</button>
-        <span class="small" id="refreshStatus"></span>
+      <div class="stats" id="stats"></div>
+      <div class="card-head"><h2>Coach review</h2><div class="spacer"></div>
+        <span class="small" id="summaryStatus"></span>
+        <button class="secondary sm" id="refreshSummary">⟳ Update review</button>
       </div>
+      <div class="md" id="summary"></div>
     </div>
-    <div class="cols2">
-      <div class="card"><h3>Your openings</h3><div id="profOpenings"><span class="small">appears after analyses</span></div></div>
+    <div class="card hidden" id="findingsCard">
+      <div class="card-head"><h2>Patterns across your games</h2></div>
+      <div class="findings" id="findings"></div>
+    </div>
+    <div class="grid-2 hidden" id="insightsRow">
       <div class="card">
-        <h3>Discuss your review with the coach</h3>
-        <div class="chatlog" id="chatlogR"></div>
-        <div class="row">
-          <input id="chatInputR" style="flex:1" placeholder="e.g. how do I fix my time trouble?">
-          <button id="chatSendR">Send</button>
-        </div>
+        <div class="card-head"><h2>Accuracy by game phase</h2></div>
+        <div id="phaseBars"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Recurring mistakes</h2></div>
+        <div class="list" id="patterns"></div>
       </div>
     </div>
-  </div>
+    <div class="grid-2">
+      <div class="card">
+        <div class="card-head"><h2>Recently analysed</h2><div class="spacer"></div>
+          <button class="ghost sm" id="seeAllGames">See all games →</button></div>
+        <div class="list" id="savedGames"></div>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Your openings</h2></div>
+        <div class="list" id="openings"></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head"><h2>Talk to your coach</h2></div>
+      <div class="chat-log" id="reviewChatLog"></div>
+      <div class="chat-input">
+        <input id="reviewChatInput" placeholder="e.g. How do I stop losing on time?" aria-label="Message to your coach">
+        <button id="reviewChatSend">Send</button>
+      </div>
+    </div>
+  </section>
 
-  <!-- ================= ANALYZE GAMES PAGE ================= -->
-  <div id="p-analyze" class="hidden">
-    <div class="cols2">
-      <div class="card">
-        <h3>Your chess.com games</h3>
-        <div id="gamelist" style="max-height:320px;overflow-y:auto"><span class="small">loading…</span></div>
-        <div class="row" style="margin-top:10px">
-          <button class="ghost" id="loadGames">↻ Refresh</button>
-          <button id="impSelBtn" disabled>Analyze selected (0)</button>
-          <span style="flex:1"></span>
-          <select id="impCount"><option value="5">batch: last 5</option><option value="10">batch: last 10</option><option value="20">batch: last 20</option></select>
-          <label class="small" style="display:flex;align-items:center;gap:5px"><input type="checkbox" id="impForce">redo</label>
-          <button class="ghost" id="impBtn">Analyze batch</button>
-        </div>
-        <div id="impStatus" class="small" style="margin-top:6px"></div>
+  <!-- ============================================================ MY GAMES -->
+  <section id="page-games" class="hidden" data-page-section>
+    <div class="page-head">
+      <div>
+        <h1>Games</h1>
+        <p>Every game you've analysed, saved on this computer. Click a game to review it.</p>
       </div>
+      <div class="spacer"></div>
+      <div data-resume></div>
+    </div>
+    <div class="page-tabs" role="tablist">
+      <button data-page="games" role="tab">Analysed games</button>
+      <button data-page="analyze" role="tab">＋ Analyse new games</button>
+    </div>
+    <div class="card">
+      <div class="games-toolbar">
+        <input type="search" id="gSearch" placeholder="Search opponent, opening or date…" aria-label="Search games" autocomplete="off">
+        <select id="gResult" aria-label="Result">
+          <option value="">All results</option><option value="W">Wins</option><option value="L">Losses</option><option value="D">Draws</option>
+        </select>
+        <select id="gColor" aria-label="Your colour">
+          <option value="">Both colours</option><option value="white">As White</option><option value="black">As Black</option>
+        </select>
+        <select id="gTime" aria-label="Time control"><option value="">All time controls</option></select>
+        <select id="gSort" aria-label="Sort by">
+          <option value="analysed">Recently analysed</option>
+          <option value="played">Date played</option>
+          <option value="acc-desc">Best accuracy first</option>
+          <option value="acc-asc">Worst accuracy first</option>
+          <option value="errors">Most mistakes first</option>
+        </select>
+      </div>
+      <div class="row small" id="gamesQueueStatus"></div>
+      <div class="games-summary" id="gSummary"></div>
+      <div class="games-list" id="gList"></div>
+      <div class="row" style="justify-content:center;margin-top:12px"><button class="secondary hidden" id="gMore">Show more</button></div>
+    </div>
+  </section>
+
+  <!-- ============================================================ ANALYZE -->
+  <section id="page-analyze" class="hidden" data-page-section>
+    <div class="page-head">
+      <div>
+        <h1>Games</h1>
+        <p>Pick recent games from chess.com or Lichess, or paste any PGN.</p>
+      </div>
+      <div class="spacer"></div>
+      <div data-resume></div>
+    </div>
+    <div class="page-tabs" role="tablist">
+      <button data-page="games" role="tab">Analysed games</button>
+      <button data-page="analyze" role="tab">＋ Analyse new games</button>
+    </div>
+    <div class="grid-2">
       <div class="card">
-        <h3>Or analyze any PGN</h3>
-        <textarea id="pgnText" placeholder="[Event ...]&#10;1. e4 e5 2. Nf3 ..."></textarea>
+        <div class="card-head">
+          <h2>Your recent games</h2><div class="spacer"></div>
+          <div class="segmented" id="sourceSeg" role="tablist" aria-label="Game source">
+            <button data-source="chesscom" class="active">chess.com</button>
+            <button data-source="lichess">Lichess</button>
+          </div>
+          <button class="ghost icon" id="reloadGames" title="Refresh" aria-label="Refresh game list">↻</button>
+        </div>
+        <div class="select-bar hidden" id="selectBar">
+          <label class="check"><input type="checkbox" id="selectAll"> Select all</label>
+          <span class="small">Click games to select them · Shift-click selects a range</span>
+        </div>
+        <div class="list scroll" id="gameList" role="listbox" aria-multiselectable="true" aria-label="Recent games"></div>
+        <div class="row" style="margin-top:12px">
+          <button id="analyzeSelected" disabled>Analyze selected</button>
+          <label class="check" title="Re-analyse games you have already analysed"><input type="checkbox" id="redo"> Redo analysed</label>
+          <div class="spacer"></div>
+          <select id="batchCount" aria-label="Batch size">
+            <option value="5">Last 5</option><option value="10">Last 10</option><option value="20">Last 20</option>
+          </select>
+          <button class="secondary" id="analyzeBatch">Analyze batch</button>
+        </div>
         <div class="row" style="margin-top:10px">
-          <input type="file" id="pgnFile" accept=".pgn,.txt">
-          <select id="sideSel">
-            <option value="">Coach side: auto</option>
+          <label class="field inline">Coaching for these games
+            <select id="batchDetail" title="How much the coach writes for the games you add to the queue">
+              <option value="">As in Settings</option>
+              <option value="key">Key moments (fastest)</option>
+              <option value="standard">Commentary</option>
+              <option value="full">Every move (slowest)</option>
+            </select>
+          </label>
+        </div>
+        <div class="row small" id="importStatus" style="margin-top:10px"></div>
+      </div>
+      <div class="card dropzone" id="dropzone">
+        <div class="card-head"><h2>Paste or upload a PGN</h2></div>
+        <textarea id="pgnText" placeholder="[Event &quot;...&quot;]&#10;1. e4 e5 2. Nf3 Nc6 ...&#10;&#10;Tip: you can also drop a .pgn file here." aria-label="PGN text"></textarea>
+        <div class="row" style="margin-top:12px">
+          <label class="btn secondary" for="pgnFile">Upload file…</label>
+          <input type="file" id="pgnFile" accept=".pgn,.txt" class="hidden">
+          <select id="sideSel" aria-label="Which side you played">
+            <option value="">I played: detect</option>
             <option value="white">I played White</option>
             <option value="black">I played Black</option>
+            <option value="both">Coach both sides</option>
           </select>
-          <button id="analyzeBtn">Analyze</button>
+          <div class="spacer"></div>
+          <button id="analyzePgn">Analyze</button>
         </div>
       </div>
     </div>
-  </div>
+  </section>
 
-  <!-- ================= BOARD EDITOR PAGE ================= -->
-  <div id="p-editor" class="card hidden">
-    <h3>Set up a position</h3>
-    <div class="row" style="margin-bottom:10px">
-      <button class="ghost" id="edStart">Start position</button>
-      <button class="ghost" id="edClear">Clear board</button>
-      <select id="edTurn"><option value="w">White to move</option><option value="b">Black to move</option></select>
-      <select id="edPersp">
-        <option value="white">Coach me as White</option>
-        <option value="black">Coach me as Black</option>
-      </select>
-      <button id="edAnalyze">Analyze position</button>
-    </div>
-    <div id="editorBoard" style="max-width:460px"></div>
-    <p class="small">Drag pieces on/off the board. Spare pieces appear above and below.</p>
-  </div>
-
-  <!-- ================= SHARED: STATUS + ANALYSIS VIEW ================= -->
-  <div id="status" class="card hidden">
-    <div class="row" style="justify-content:space-between">
-      <span><span class="progress" id="progressText"></span><span class="err" id="errorText"></span></span>
-      <button class="ghost hidden" id="stopBtn" style="border-color:var(--blunder);color:var(--blunder)">■ Stop</button>
-    </div>
-    <div id="pbarWrap" class="hidden" style="margin-top:10px">
-      <div style="background:var(--panel2);border-radius:999px;height:10px;overflow:hidden">
-        <div id="pfill" style="background:var(--accent);height:100%;width:0%;transition:width .5s"></div>
+  <!-- ============================================================ EDITOR -->
+  <section id="page-editor" class="hidden" data-page-section>
+    <div class="page-head">
+      <div>
+        <h1>Board editor</h1>
+        <p>Set up any position — drag pieces on or off the board — and ask the coach about it.</p>
       </div>
-      <div class="small" id="etaText" style="margin-top:5px"></div>
     </div>
-  </div>
-
-  <div id="analysis" class="grid hidden">
-    <div>
-      <div class="card">
-        <h3 id="gameTitle">Game</h3>
-        <div class="boardwrap">
-          <div style="display:flex;flex-direction:column;align-items:center;gap:6px">
-            <div id="evalbar"><div id="evalwhite" style="height:50%"></div></div>
-            <div id="evalnum" class="small" style="font-weight:700"></div>
+    <div class="card">
+      <div class="analysis-grid">
+        <div><div id="editorBoard"></div></div>
+        <div class="stack">
+          <div class="form-grid">
+            <label class="field">Side to move
+              <select id="edTurn"><option value="w">White to move</option><option value="b">Black to move</option></select>
+            </label>
+            <label class="field">Coach me as
+              <select id="edPersp"><option value="white">White</option><option value="black">Black</option></select>
+            </label>
           </div>
-          <div style="flex:1;position:relative">
-            <div id="board"></div>
-            <svg id="arrows" viewBox="0 0 100 100" preserveAspectRatio="none"
-                 style="position:absolute;inset:0;pointer-events:none;z-index:5"></svg>
+          <label class="field">FEN
+            <input id="edFen" placeholder="Paste a FEN and press Load" spellcheck="false" class="mono">
+          </label>
+          <div class="row">
+            <button class="secondary" id="edLoad">Load FEN</button>
+            <button class="secondary" id="edStart">Start position</button>
+            <button class="secondary" id="edClear">Clear</button>
+            <button class="secondary" id="edFlip">Flip</button>
           </div>
-        </div>
-        <div id="previewBar" class="hidden" style="margin-top:10px;padding:8px 12px;background:var(--panel2);border-radius:8px;display:flex;justify-content:space-between;align-items:center">
-          <span class="small">Previewing: <b id="previewLabel" style="color:var(--accent2)"></b> <span id="previewPos"></span></span>
-          <button class="ghost" id="previewExit" style="padding:4px 12px">✕ back</button>
-        </div>
-        <div class="controls">
-          <button class="ghost" id="btnFirst">⏮</button>
-          <button class="ghost" id="btnPrev">◀</button>
-          <button class="ghost" id="btnNext">▶</button>
-          <button class="ghost" id="btnLast">⏭</button>
-          <button class="ghost" id="btnFlip">⇅</button>
-        </div>
-        <p class="small" style="text-align:center;margin-bottom:0">← → step moves · Esc exits a preview</p>
-      </div>
-      <div class="card"><h3>Coach chat — this game</h3>
-        <div class="chatlog" id="chatlog"></div>
-        <div class="row">
-          <input id="chatInput" style="flex:1" placeholder="Ask about this move, plans, ideas…">
-          <button id="chatSend">Send</button>
+          <p class="small">Castling rights are inferred from where the kings and rooks stand. Paste a FEN to set them exactly.</p>
+          <div><button id="edAnalyze">Analyze position</button></div>
         </div>
       </div>
     </div>
-    <div>
-      <div class="card"><h3>Moves</h3><div id="movelist"></div></div>
-      <div class="card"><h3 id="explTitle">Move</h3><div id="explain">Select a move.</div></div>
-      <div class="card"><h3>Post-game review</h3><div id="review"><span class="small">appears when analysis finishes…</span></div></div>
+  </section>
+
+  <!-- ============================================================ GAME -->
+  <section id="page-game" class="hidden" data-page-section>
+    <div class="crumbs">
+      <button class="ghost sm" id="backBtn">← Games</button>
+      <span class="crumb-title" id="crumbTitle"></span>
+    </div>
+    <div class="card progress-card hidden" id="progressCard">
+      <div class="row">
+        <span class="dot busy" id="progressDot"></span><b id="progressLabel">Starting…</b>
+        <div class="spacer"></div>
+        <span class="small" id="progressEta"></span>
+        <button class="secondary sm hidden" id="jumpBtn">⤒ Analyse this next</button>
+        <button class="danger sm" id="stopBtn">■ Stop</button>
+      </div>
+      <div class="bars" id="progressBars">
+        <div class="bar-row"><span class="small">Engine</span><div class="bar"><div id="barEngine"></div></div><span class="small" id="barEngineTxt"></span></div>
+        <div class="bar-row"><span class="small">Coach</span><div class="bar coach"><div id="barCoach"></div></div><span class="small" id="barCoachTxt"></span></div>
+      </div>
+      <p class="small" id="progressHint" style="margin:10px 0 0"></p>
+    </div>
+
+    <div class="analysis-grid">
+      <div>
+        <div class="card">
+          <div class="board-area">
+            <div class="evalbar" id="evalbar" title="Evaluation (White's winning chances)"><div class="white" id="evalWhite" style="height:50%"></div></div>
+            <div class="board-col">
+              <div class="board-holder" id="boardHolder">
+                <div id="board"></div>
+                <svg class="board-overlay" id="overlay" aria-hidden="true"></svg>
+              </div>
+              <div class="eval-label" id="evalLabel"></div>
+            </div>
+          </div>
+          <div class="preview-bar hidden" id="previewBar">
+            <span>Previewing <b id="previewLabel"></b> <span class="muted" id="previewPos"></span></span>
+            <div class="spacer"></div>
+            <button class="secondary sm" id="previewExit">✕ Back to game</button>
+          </div>
+          <div class="board-toolbar">
+            <button class="secondary icon" id="btnFirst" title="First move (Home)" aria-label="First move">⏮</button>
+            <button class="secondary icon key-nav" id="btnPrevKey" title="Previous key moment (P)" aria-label="Previous key moment">◀ ⚑</button>
+            <button class="secondary icon" id="btnPrev" title="Previous (←)" aria-label="Previous move">◀</button>
+            <button class="secondary icon" id="btnNext" title="Next (→)" aria-label="Next move">▶</button>
+            <button class="secondary icon key-nav" id="btnNextKey" title="Next key moment (N)" aria-label="Next key moment">⚑ ▶</button>
+            <button class="secondary icon" id="btnLast" title="Last move (End)" aria-label="Last move">⏭</button>
+            <button class="secondary icon" id="btnFlip" title="Flip board (F)" aria-label="Flip board">⇅</button>
+          </div>
+          <div class="draw-bar">
+            <button class="secondary sm" id="btnDraw" aria-pressed="false" title="Draw arrows and circles with a normal click or a finger (D)">✎ Draw</button>
+            <div class="swatches" id="drawSwatches" role="radiogroup" aria-label="Pen colour">
+              <button class="swatch green active" data-color="green" role="radio" aria-checked="true" aria-label="Green"></button>
+              <button class="swatch red" data-color="red" role="radio" aria-checked="false" aria-label="Red"></button>
+              <button class="swatch blue" data-color="blue" role="radio" aria-checked="false" aria-label="Blue"></button>
+              <button class="swatch yellow" data-color="yellow" role="radio" aria-checked="false" aria-label="Yellow"></button>
+            </div>
+            <button class="ghost sm hidden" id="btnClearDrawing" title="Remove your drawings from this position">✕ Clear drawing</button>
+            <div class="view-opts">
+              <button class="secondary sm" id="btnView" aria-haspopup="true" aria-expanded="false" title="Choose what the board shows">👁 Board</button>
+              <div class="view-menu hidden" id="viewMenu">
+                <label class="check"><input type="checkbox" data-view-opt="bestArrow"> Best-move arrow <kbd>A</kbd></label>
+                <label class="check"><input type="checkbox" data-view-opt="highlight"> Highlight the last move</label>
+                <label class="check"><input type="checkbox" data-view-opt="evalBar"> Evaluation bar</label>
+                <label class="check"><input type="checkbox" data-view-opt="graph"> Evaluation graph</label>
+                <p class="small" style="margin:6px 0 0">Turn them off to think for yourself before looking at the engine.</p>
+              </div>
+            </div>
+          </div>
+          <div class="hint">← → step · N / P key moments · Home/End · F flips · right-click a square to circle it, right-drag to draw an arrow (Shift red · Alt blue)</div>
+          <div class="graph" id="graphWrap">
+            <svg id="graph" viewBox="0 0 400 100" preserveAspectRatio="none" role="img" aria-label="Evaluation graph"></svg>
+            <div class="graph-tip" id="graphTip"></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Ask the coach</h2></div>
+          <div class="chat-log" id="gameChatLog"></div>
+          <div class="chat-input">
+            <input id="gameChatInput" placeholder="Ask about this move, plans, ideas…" aria-label="Question about this position">
+            <button id="gameChatSend">Send</button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="card">
+          <div class="game-head">
+            <div>
+              <div class="players" id="players"></div>
+              <div class="small" id="gameMeta"></div>
+            </div>
+            <div class="spacer"></div>
+            <div class="acc-pills" id="accPills"></div>
+          </div>
+          <div class="row" style="margin-top:12px" id="exportRow">
+            <button class="secondary sm" id="exportPgn" title="Annotated PGN for Lichess studies, ChessBase, …">⬇ Annotated PGN</button>
+            <button class="secondary sm" id="exportMd">⬇ Report (.md)</button>
+            <button class="secondary sm" id="copyFen" title="Copy the FEN of the current position">Copy FEN</button>
+            <button class="secondary sm hidden" id="reanalyseBtn" title="Analyse this game again with your current settings">↻ Re-analyse</button>
+            <button class="sm hidden" id="practiceAll" title="Replay the positions where you went wrong and look for a better move">🎯 Practise my mistakes</button>
+          </div>
+          <div id="gameWarnings"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Moves</h2><div class="spacer"></div>
+            <div class="segmented" id="moveViewSeg" role="tablist" aria-label="Move list view">
+              <button data-view="moves" class="active" title="Move grid with verdicts">Moves</button>
+              <button data-view="story" title="The commentary on every move, read like a story">Story</button>
+            </div>
+          </div>
+          <div class="moves" id="moveList"></div>
+          <div class="story hidden" id="storyList"></div>
+        </div>
+        <div class="card">
+          <div class="explain" id="explain"></div>
+        </div>
+        <div class="card" id="reviewCard">
+          <div class="card-head"><h2>Post-game review</h2></div>
+          <div class="md" id="review"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+</main>
+
+<!-- ============================================================ SETTINGS -->
+<div class="modal-back hidden" id="settingsModal" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+  <div class="modal">
+    <div class="modal-head"><h2 id="settingsTitle">Settings</h2><div class="spacer"></div>
+      <button class="ghost icon" data-close aria-label="Close">✕</button></div>
+    <div class="tabs" id="settingsTabs">
+      <button data-tab="coach" class="active">AI coach</button>
+      <button data-tab="analysis">Analysis</button>
+      <button data-tab="about">About &amp; privacy</button>
+    </div>
+    <div class="modal-body">
+      <div data-tab-panel="coach">
+        <fieldset>
+          <label class="check"><input type="checkbox" id="setLlmEnabled"> Use the AI coach to explain moves</label>
+          <p class="small" style="margin:4px 0 0">Turn off for fast, engine-only analysis (verdicts, best moves and lines, no written notes).</p>
+        </fieldset>
+        <fieldset id="coachFields">
+          <legend>Where should the coach run?</legend>
+          <div class="provider-grid" id="providerGrid"></div>
+          <div class="callout" id="providerNote" style="margin-top:10px"></div>
+          <div class="form-grid" style="margin-top:14px">
+            <label class="field">Model
+              <input id="setModel" list="modelList" spellcheck="false" autocomplete="off">
+              <datalist id="modelList"></datalist>
+            </label>
+            <label class="field" id="baseUrlField">Server URL
+              <input id="setBaseUrl" spellcheck="false" autocomplete="off">
+            </label>
+          </div>
+          <div id="keyBlock" style="margin-top:14px">
+            <label class="field">API key
+              <div class="row">
+                <input type="password" id="setKey" autocomplete="off" spellcheck="false" style="flex:1" placeholder="Paste your API key">
+                <button class="secondary" id="saveKey">Save key</button>
+                <button class="danger" id="removeKey">Remove</button>
+              </div>
+            </label>
+            <div class="small" id="keyStatus" style="margin-top:6px"></div>
+          </div>
+          <div class="row" style="margin-top:14px">
+            <button class="secondary" id="testLlm">Test connection</button>
+            <span id="testResult"></span>
+          </div>
+        </fieldset>
+        <fieldset id="expertFields">
+          <legend>Second model for the hard parts <span class="small">(optional)</span></legend>
+          <p class="small" style="margin:0 0 10px">Your main model writes the move-by-move commentary. A second,
+            stronger model can write the detailed notes on your mistakes and critical moments, the post-game review,
+            your coach profile and chat answers — where a smarter model matters most. It only gets a few requests per
+            game, so a cloud model here costs very little.</p>
+          <div class="form-grid">
+            <label class="field">Second model runs on
+              <select id="setExpertProvider"></select>
+            </label>
+            <label class="field" id="expertModelField">Model
+              <input id="setExpertModel" list="expertModelList" spellcheck="false" autocomplete="off">
+              <datalist id="expertModelList"></datalist>
+            </label>
+          </div>
+          <div id="expertKeyBlock" class="hidden" style="margin-top:12px">
+            <label class="field">API key for the second model
+              <div class="row">
+                <input type="password" id="setExpertKey" autocomplete="off" spellcheck="false" style="flex:1" placeholder="Paste your API key">
+                <button class="secondary" id="saveExpertKey">Save key</button>
+              </div>
+            </label>
+            <div class="small" id="expertKeyStatus" style="margin-top:6px"></div>
+          </div>
+          <div id="expertMore" class="stack" style="margin-top:12px">
+            <label class="check"><input type="checkbox" id="setEscalate"> If commentary fails the fact-check, let the second model rewrite it</label>
+            <div class="row">
+              <button class="secondary" id="testExpert">Test second model</button>
+              <span id="testExpertResult"></span>
+            </div>
+            <div class="callout" id="expertNote"></div>
+          </div>
+        </fieldset>
+        <fieldset>
+          <details>
+            <summary class="small">Advanced</summary>
+            <div class="stack" style="margin-top:10px">
+              <label class="check"><input type="checkbox" id="setFactcheck"> Fact-check notes against the board (recommended)</label>
+              <label class="field" style="max-width:260px">Parallel requests (cloud only)
+                <input type="number" id="setConcurrency" min="1" max="16" placeholder="default">
+              </label>
+            </div>
+          </details>
+        </fieldset>
+      </div>
+
+      <div data-tab-panel="analysis" class="hidden">
+        <fieldset>
+          <legend>How much should the coach write?</legend>
+          <div class="segmented" id="detailSeg">
+            <button data-detail="key">Key moments</button>
+            <button data-detail="standard">Commentary</button>
+            <button data-detail="full">Every move</button>
+          </div>
+          <p class="small" id="detailNote"></p>
+          <label class="check" style="margin-top:8px"><input type="checkbox" id="setHideAnswers"> Hide the answer to my mistakes until I've tried to find it myself</label>
+        </fieldset>
+        <fieldset>
+          <legend>Engine strength</legend>
+          <div class="row">
+            <div class="segmented" id="depthSeg"></div>
+            <label class="field" style="flex-direction:row;align-items:center;gap:8px">Depth <input type="number" id="setDepth" min="6" max="30" style="width:80px"></label>
+          </div>
+          <p class="small">Deeper is more accurate but slower. Mistakes are always double-checked a few plies deeper before being reported.</p>
+        </fieldset>
+        <fieldset>
+          <legend>Performance</legend>
+          <div class="form-grid">
+            <label class="field">CPU threads for Stockfish <input type="number" id="setThreads" min="1"></label>
+            <label class="field">Hash memory (MB) <input type="number" id="setHash" min="16" max="4096"></label>
+          </div>
+          <p class="small">If you run the AI coach locally, leave a couple of cores free for it.</p>
+          <label class="check" style="margin-top:6px"><input type="checkbox" id="setPrefetch"> Give the next queued game an engine head start while the coach writes (recommended)</label>
+        </fieldset>
+        <fieldset>
+          <legend>Stockfish</legend>
+          <label class="field">Path to the Stockfish program (leave empty to auto-detect)
+            <input id="setStockfish" spellcheck="false" autocomplete="off">
+          </label>
+          <p class="small" id="stockfishDetected"></p>
+        </fieldset>
+        <fieldset>
+          <legend>Cache</legend>
+          <div class="row"><span class="small" id="cacheInfo"></span><div class="spacer"></div>
+            <button class="secondary sm" id="clearCache">Clear cache</button></div>
+          <p class="small">Engine results and opening lookups are stored so re-analysing a game is nearly instant.</p>
+        </fieldset>
+      </div>
+
+      <div data-tab-panel="about" class="hidden">
+        <div class="stack">
+          <p><b>Lucidfish <span id="aboutVersion"></span></b> — Stockfish finds the best move; the AI coach explains why, using only facts the engine and the board have verified.</p>
+          <div class="callout"><b>Privacy.</b> Everything runs on this computer. With a <b>local</b> model (Ollama, LM Studio…) nothing leaves your machine. With a <b>cloud</b> provider, the evidence for each move (moves, engine lines, position facts) is sent to that provider. API keys are kept in your operating system's secure credential store and are never shown again or saved in Lucidfish's database.</div>
+          <div class="callout"><b>Performance.</b> Local models are processor-intensive: an 8-billion-parameter model needs about 8 GB of free RAM and is much faster with a GPU or Apple Silicon. Choose "Key moments" or a cloud provider on slower machines.</div>
+          <p class="small">Data folder: <span class="mono" id="aboutData"></span></p>
+        </div>
+      </div>
+    </div>
+    <div class="modal-foot">
+      <span class="small" id="settingsError" style="color:var(--c-blunder);margin-right:auto"></span>
+      <button class="secondary" data-close>Cancel</button>
+      <button id="saveSettings">Save settings</button>
     </div>
   </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/jquery/3.7.1/jquery.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
-<script>
-const PIECES = 'https://chessboardjs.com/img/chesspieces/wikipedia/{piece}.png';
-let board=null, editorBoard=null, moves=[], cur=-1, headers={}, review='', mode='game',
-    posData=null, coachSide=null, activeJob=null, jobStart=0;
-let prof=null, profiles=[], editingProfId=null, profGames=[];
-let chatGame=[], chatReview=[];   // cleared in place (chat widgets hold references)
-const $id = s => document.getElementById(s);
+<!-- ============================================================ PROFILE -->
+<div class="modal-back hidden" id="profileModal" role="dialog" aria-modal="true" aria-labelledby="profileTitle">
+  <div class="modal profile-modal">
+    <div class="modal-head">
+      <span class="avatar lg" id="pfAvatar" aria-hidden="true">?</span>
+      <div>
+        <h2 id="profileTitle">Create your profile</h2>
+        <p class="small" id="pfIntro" style="margin:2px 0 0">The coach remembers your games, spots your recurring patterns and pitches explanations at your level. Stored only on this computer.</p>
+      </div>
+      <div class="spacer"></div>
+      <button class="ghost icon" data-close aria-label="Close">✕</button>
+    </div>
+    <div class="modal-body stack" style="gap:20px">
+      <section>
+        <h3 class="pf-h">You</h3>
+        <label class="field">Display name <input id="pfName" maxlength="40" autocomplete="off" placeholder="e.g. Sam"></label>
+        <div class="field" style="margin-top:12px">Your level
+          <div class="level-grid" id="pfLevel" role="radiogroup" aria-label="Your level">
+            <button type="button" data-level="beginner" role="radio"><b>Beginner</b><small>Learning the basics and simple tactics</small></button>
+            <button type="button" data-level="casual" role="radio"><b>Casual</b><small>Play for fun, know the main ideas</small></button>
+            <button type="button" data-level="club" role="radio"><b>Club player</b><small>Play regularly, roughly 1200–1800</small></button>
+            <button type="button" data-level="advanced" role="radio"><b>Advanced</b><small>Tournament player, 1800+</small></button>
+          </div>
+        </div>
+      </section>
+      <section>
+        <h3 class="pf-h">Your accounts <span class="small">(optional)</span></h3>
+        <p class="small" style="margin:0 0 10px">Your recent games appear on the Analyze page, and <b>Look up</b> fills in your ratings.</p>
+        <div class="account-row">
+          <span class="site chesscom" aria-hidden="true">♟</span>
+          <label class="field grow">chess.com username <input id="pfChesscom" maxlength="40" autocomplete="off" spellcheck="false"></label>
+          <button class="secondary" type="button" data-lookup="chesscom">Look up</button>
+        </div>
+        <div class="small lookup" id="pfChesscomStatus"></div>
+        <div class="account-row">
+          <span class="site lichess" aria-hidden="true">♞</span>
+          <label class="field grow">Lichess username <input id="pfLichess" maxlength="40" autocomplete="off" spellcheck="false"></label>
+          <button class="secondary" type="button" data-lookup="lichess">Look up</button>
+        </div>
+        <div class="small lookup" id="pfLichessStatus"></div>
+      </section>
+      <section>
+        <h3 class="pf-h">Ratings</h3>
+        <div class="form-grid" style="grid-template-columns:repeat(3,1fr)">
+          <label class="field">Bullet <input type="number" id="pfBullet" min="100" max="3500" placeholder="—"></label>
+          <label class="field">Blitz <input type="number" id="pfBlitz" min="100" max="3500" placeholder="—"></label>
+          <label class="field">Rapid <input type="number" id="pfRapid" min="100" max="3500" placeholder="—"></label>
+        </div>
+        <p class="small" style="margin:6px 0 0">Used to pitch explanations at the right level for each time control.</p>
+      </section>
+      <section class="danger-zone" id="pfDanger">
+        <div class="row"><div class="grow"><b>Delete this profile</b><div class="small">Removes the profile and all of its analysed games from this computer.</div></div>
+          <button class="danger" id="pfDelete">Delete profile</button></div>
+      </section>
+    </div>
+    <div class="modal-foot">
+      <span class="small" id="pfError" style="color:var(--c-blunder);margin-right:auto"></span>
+      <button class="secondary" data-close>Cancel</button>
+      <button id="pfSave">Save profile</button>
+    </div>
+  </div>
+</div>
 
-/* ---------- helpers ---------- */
-function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
-function md(s){ // markdown-lite: headers, bold, bullets, newlines
-  const lines=esc(s).split('\n'); let out='',inList=false;
-  for(const ln of lines){
-    if(/^\s*[-•*]\s+/.test(ln)){
-      if(!inList){out+='<ul class="mdl">';inList=true}
-      out+='<li>'+ln.replace(/^\s*[-•*]\s+/,'')+'</li>';
-    }else{
-      if(inList){out+='</ul>';inList=false}
-      if(/^#{1,3} /.test(ln)) out+='<h3>'+ln.replace(/^#+ /,'')+'</h3>';
-      else if(ln.trim()!=='') out+=ln+'<br>';
-    }
-  }
-  if(inList) out+='</ul>';
-  return out.replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
-}
-function badge(cls){return `<span class="badge b-${cls}">${{best:'✓',good:'○',inaccuracy:'?!',mistake:'?',blunder:'??'}[cls]||cls}</span>`}
-function evalLabel(ev){ // filled ♚ renders light on dark themes → visually White
-  if(ev.includes('mate')) return ev;
-  const v=parseFloat(ev); if(isNaN(v)) return ev;
-  return (v>=0?'♚ White +':'♔ Black +')+Math.abs(v).toFixed(2);
-}
-function evalPct(ev){
-  if(ev.includes('mate')) return ev.includes('-')?2:98;
-  const v=parseFloat(ev); if(isNaN(v)) return 50;
-  return Math.max(4,Math.min(96,50+v*8));
-}
-async function sha1(s){
-  const b=await crypto.subtle.digest('SHA-1',new TextEncoder().encode(s));
-  return [...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('');
-}
+<!-- ============================================================ QUEUE -->
+<div class="modal-back hidden" id="queueModal" role="dialog" aria-modal="true" aria-labelledby="queueTitle">
+  <div class="modal" style="width:min(780px,100%)">
+    <div class="modal-head"><h2 id="queueTitle">Analysis queue</h2><div class="spacer"></div>
+      <button class="ghost icon" data-close aria-label="Close">✕</button></div>
+    <div class="modal-body" id="queueBody">
+      <div id="queueRestored"></div>
+      <div id="queueOverall"></div>
+      <div class="row" style="margin:14px 0 6px">
+        <button class="secondary sm" id="queuePause">⏸ Pause</button>
+        <button class="danger sm" id="queueStopAll">■ Stop all</button>
+        <div class="spacer"></div>
+        <button class="ghost sm" id="queueClear">Clear finished</button>
+      </div>
+      <div id="queueRunning"></div>
+      <div id="queueUpcoming"></div>
+      <div id="queueDone"></div>
+      <p class="small" style="margin-top:16px">Games are analysed one at a time so Stockfish gets every core. While the coach writes up one game,
+        the engine already works on the next, so no time is wasted. Time estimates learn from your previous analyses.</p>
+    </div>
+  </div>
+</div>
 
-/* ---------- profiles ---------- */
-async function loadProfiles(){
-  const d = await (await fetch('/api/profiles')).json();
-  profiles=d.profiles;
-  $id('profileSel').innerHTML = profiles.map(p=>
-    `<option value="${p.id}" ${p.id===d.active?'selected':''}>${esc(p.name)}</option>`).join('');
-  if(!profiles.length){ showProfileForm(null); prof=null; }
-  else await loadReviewPage();
-}
-$id('profileSel').onchange = async e => {
-  await fetch('/api/profiles/'+e.target.value+'/activate',{method:'POST'});
-  resetAnalysis(); chatReview.length=0; $id('chatlogR').innerHTML='';
-  await loadReviewPage();
-  if(!$id('p-analyze').classList.contains('hidden')) loadRecentGames();
-};
-function showProfileForm(existing){
-  editingProfId = existing ? existing.id : null;
-  $id('profFormTitle').textContent = existing ? 'Edit profile' : 'Create your profile';
-  $id('pfName').value=existing?.name||''; $id('pfUser').value=existing?.chesscom_user||'';
-  $id('pfLevel').value=existing?.level||''; $id('pfBullet').value=existing?.elo_bullet||'';
-  $id('pfBlitz').value=existing?.elo_blitz||''; $id('pfRapid').value=existing?.elo_rapid||'';
-  $id('pfError').textContent='';
-  $id('profileForm').classList.remove('hidden');
-}
-$id('newProfBtn').onclick=()=>showProfileForm(null);
-$id('editProfBtn').onclick=()=>{ if(prof) showProfileForm(prof); };
-$id('pfCancel').onclick=()=>$id('profileForm').classList.add('hidden');
-$id('pfSave').onclick=async()=>{
-  const body={name:$id('pfName').value.trim(), chesscom_user:$id('pfUser').value.trim(),
-    level:$id('pfLevel').value,
-    elo_bullet:parseInt($id('pfBullet').value)||null,
-    elo_blitz:parseInt($id('pfBlitz').value)||null,
-    elo_rapid:parseInt($id('pfRapid').value)||null};
-  if(!body.name){$id('pfError').textContent='name required';return}
-  const url = editingProfId ? '/api/profiles/'+editingProfId : '/api/profiles';
-  const r = await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  const d = await r.json();
-  if(d.error){$id('pfError').textContent=d.error;return}
-  $id('profileForm').classList.add('hidden');
-  await loadProfiles();
-};
-function eloForPgn(pgn){
-  if(!prof) return null;
-  const base=parseInt((pgn.match(/\[TimeControl "(\d+)/)||[])[1])||0;
-  const cls = base ? (base<180?'bullet':base<600?'blitz':'rapid') : 'rapid';
-  return prof['elo_'+cls]||prof.elo_rapid||prof.elo_blitz||prof.elo_bullet||null;
-}
+<div class="toasts" id="toasts" aria-live="polite"></div>
 
-/* ---------- tabs ---------- */
-function resetAnalysis(){
-  activeJob=null; moves=[]; cur=-1; review=''; chatGame.length=0; posData=null;
-  $id('analysis').classList.add('hidden'); hideStatus(); setInputsLocked(false);
-  $id('chatlog').innerHTML='';
-}
-document.querySelectorAll('.tab').forEach(t => t.onclick = () => {
-  document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
-  t.classList.add('active');
-  ['review','analyze','editor'].forEach(m => $id('p-'+m).classList.toggle('hidden', m!==t.dataset.mode));
-  resetAnalysis();
-  if (t.dataset.mode==='editor' && !editorBoard) initEditor();
-  if (t.dataset.mode==='review') loadReviewPage();
-  if (t.dataset.mode==='analyze') loadRecentGames();
-});
-
-/* ---------- COACH REVIEW page ---------- */
-async function loadReviewPage(){
-  const d = await (await fetch('/api/profile')).json();
-  if(!d.profile){ showProfileForm(null); return; }
-  prof = d.profile; profGames = d.games||[];
-  $id('dashTitle').textContent = `${prof.name} — coach review`;
-  const s = d.stats||{};
-  const stat=(label,val)=>`<div class="stat"><b>${val??'—'}</b><span class="small">${label}</span></div>`;
-  $id('profStats').innerHTML = s.games
-    ? stat('games analyzed',s.games)+stat('record',`${s.wins}-${s.losses}-${s.draws}`)
-      +stat('avg centipawn loss',s.avg_acpl)+stat('blunders / game',s.blunders_per_game)
-      +stat('mistakes / game',s.mistakes_per_game)
-    : '<span class="small">no analyzed games yet — head to Analyze games</span>';
-  $id('profSummary').innerHTML = prof.summary ? md(prof.summary)
-    : '<span class="small">Analyze at least 2 games and the coach writes your review here.</span>';
-  $id('profOpenings').innerHTML = (s.openings||[]).length
-    ? s.openings.map(o=>`<div class="gamerow" style="cursor:default"><span>${esc(o.name)}</span>`+
-        `<span class="meta">${o.games} games · ${o.w}W/${o.l}L/${o.d}D${o.acpl!=null?` · ${o.acpl} acpl`:''}</span></div>`).join('')
-    : '<span class="small">appears after analyses</span>';
-}
-$id('refreshReview').onclick=async()=>{
-  $id('refreshStatus').textContent='rewriting review… (30-60s)';
-  $id('refreshReview').disabled=true;
-  const d = await (await fetch('/api/profile/refresh_summary',{method:'POST'})).json();
-  $id('refreshReview').disabled=false;
-  if(d.error){$id('refreshStatus').textContent='⚠ '+d.error;return}
-  $id('refreshStatus').textContent='✓ updated';
-  if(d.summary){prof.summary=d.summary;$id('profSummary').innerHTML=md(d.summary);}
-};
-
-/* ---------- ANALYZE GAMES page ---------- */
-$id('pgnFile').onchange = e => {
-  const f=e.target.files[0]; if(f) f.text().then(t => $id('pgnText').value = t);
-};
-$id('analyzeBtn').onclick = () => startAnalysis($id('pgnText').value, $id('sideSel').value||null);
-$id('loadGames').onclick = () => loadRecentGames();
-
-async function loadRecentGames(){
-  const user=prof?.chesscom_user, box=$id('gamelist');
-  if(!user){box.innerHTML='<span class="small">add your chess.com username to your profile (✎ in the header)</span>';return}
-  box.innerHTML='<span class="small">loading…</span>';
-  try{
-    let games=[];
-    const a = await (await fetch(`https://api.chess.com/pub/player/${user.toLowerCase()}/games/archives`)).json();
-    if(!a.archives||!a.archives.length) throw new Error('no archives found');
-    for(const url of a.archives.slice(-2).reverse()){
-      const m = await (await fetch(url)).json();
-      games.push(...(m.games||[]).reverse());
-      if(games.length>=20) break;
-    }
-    const analyzed = {};   // fingerprint -> stored game id
-    profGames.forEach(g=>{ if(g.fingerprint) analyzed[g.fingerprint]=g.id; });
-    games = games.slice(0,20);
-    box.innerHTML='';
-    selectedGames=[];
-    updateSelBtn();
-    for(const g of games){
-      const isW = g.white.username.toLowerCase()===user.toLowerCase();
-      const mine = isW?g.white:g.black, theirs = isW?g.black:g.white;
-      const res = mine.result==='win'?'W':(theirs.result==='win'?'L':'D');
-      const acc = g.accuracies ? (isW?g.accuracies.white:g.accuracies.black) : null;
-      const storedId = analyzed[await sha1(g.pgn.trim())];
-      const div=document.createElement('div'); div.className='gamerow';
-      const chip = `<span class="res res-${res.toLowerCase()}">${res==='W'?'WIN':res==='L'?'LOSS':'DRAW'}</span>`
-        + (storedId?`<span class="res res-a">ANALYZED</span>`:'');
-      div.innerHTML=`<span><input type="checkbox" class="gsel" style="margin-right:8px">`+
-        `${esc(g.white.username)} vs ${esc(g.black.username)}${chip}</span>`+
-        `<span class="meta">${acc!=null?`<span class="acc">${acc.toFixed(1)}% acc</span> · `:''}`+
-        `${g.time_class||''} · ${mine.rating||''} · ${new Date(g.end_time*1000).toLocaleDateString()}`+
-        (storedId?` <button class="ghost" style="padding:2px 8px;font-size:12px" title="re-analyze">↻</button>`:'')+`</span>`;
-      div.onclick=()=>{
-        if(storedId){ openStoredGame(storedId); }
-        else { startAnalysis(g.pgn, null, mine.rating||null);
-               setTimeout(()=>$id('status').scrollIntoView({behavior:'smooth'}),100); }
-      };
-      const redo=div.querySelector('button');
-      if(redo) redo.onclick=(e)=>{ e.stopPropagation();
-        startAnalysis(g.pgn, null, mine.rating||null);
-        setTimeout(()=>$id('status').scrollIntoView({behavior:'smooth'}),100); };
-      const cb=div.querySelector('.gsel');
-      const entry={pgn:g.pgn, side:isW?'white':'black', elo:mine.rating||null};
-      cb.onclick=(e)=>{
-        e.stopPropagation();
-        if(cb.checked) selectedGames.push(entry);
-        else selectedGames=selectedGames.filter(x=>x!==entry);
-        updateSelBtn();
-      };
-      box.appendChild(div);
-    }
-    if(!games.length) box.innerHTML='<span class="small">no games found</span>';
-  }catch(e){ box.innerHTML=`<span class="err">Couldn't fetch games: ${esc(e.message)}. You can paste a PGN on the right instead.</span>`; }
-}
-
-async function openStoredGame(id){
-  const d = await (await fetch('/api/profile/game/'+id)).json();
-  if(d.error) return;
-  mode='game'; headers=d.headers; coachSide=d.side||null;
-  moves=d.moves; review=d.review; cur=-1; chatGame.length=0; $id('chatlog').innerHTML='';
-  $id('review').innerHTML = review?md(review):'';
-  renderMoves(); showAnalysisView();
-  $id('analysis').scrollIntoView({behavior:'smooth'});
-}
-
-/* ---------- batch import ---------- */
-let selectedGames=[];
-function updateSelBtn(){
-  const b=$id('impSelBtn');
-  b.textContent=`Analyze selected (${selectedGames.length})`;
-  b.disabled=!selectedGames.length;
-}
-$id('impSelBtn').onclick=async()=>{
-  if(!selectedGames.length) return;
-  const r = await fetch('/api/profile/import',{method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({games:selectedGames, force:$id('impForce').checked})});
-  const d = await r.json();
-  if(d.error){$id('impStatus').textContent='⚠ '+d.error;return}
-  $id('impStatus').textContent='starting…';
-  pollImport();
-};
-
-$id('impBtn').onclick=async()=>{
-  const user=prof?.chesscom_user, n=parseInt($id('impCount').value);
-  if(!user){$id('impStatus').textContent='⚠ set your chess.com username in your profile first';return}
-  $id('impStatus').textContent='fetching games from chess.com…';
-  try{
-    const a = await (await fetch(`https://api.chess.com/pub/player/${user.toLowerCase()}/games/archives`)).json();
-    let games=[];
-    for(const url of (a.archives||[]).slice(-3).reverse()){
-      const m = await (await fetch(url)).json();
-      games.push(...(m.games||[]).reverse());
-      if(games.length>=n) break;
-    }
-    const payload = games.slice(0,n).map(g=>{
-      const isW=g.white.username.toLowerCase()===user.toLowerCase();
-      return {pgn:g.pgn, side:isW?'white':'black', elo:(isW?g.white:g.black).rating||null};
-    });
-    const r = await fetch('/api/profile/import',{method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({games:payload, force:$id('impForce').checked})});
-    const d = await r.json();
-    if(d.error){$id('impStatus').textContent='⚠ '+d.error;return}
-    pollImport();
-  }catch(e){$id('impStatus').textContent='⚠ could not fetch: '+e.message}
-};
-async function pollImport(){
-  const j = await (await fetch('/api/profile/import_status')).json();
-  if(j.status==='running'){
-    $id('impStatus').textContent=`${j.current} · ${j.done}/${j.total} done`+
-      `${j.skipped?` · ${j.skipped} skipped (already analyzed)`:''}${j.errors?` · ${j.errors} failed`:''}`;
-    setTimeout(pollImport, 3000);
-  } else if(j.status==='done'){
-    $id('impStatus').textContent=`✓ batch complete: ${j.total-j.errors-j.skipped} analyzed`+
-      `${j.skipped?`, ${j.skipped} skipped (tick redo to force)`:''}${j.errors?`, ${j.errors} failed`:''}`;
-    loadReviewPage(); loadRecentGames();
-  }
-}
-
-/* ---------- run an analysis ---------- */
-async function startAnalysis(pgn, side, eloOverride){
-  if(!pgn.trim()){alert('Paste a PGN first');return}
-  if(!side){
-    const u=(prof?.chesscom_user||'').toLowerCase();
-    const w=(pgn.match(/\[White "(.*?)"\]/)||[])[1]||'', b=(pgn.match(/\[Black "(.*?)"\]/)||[])[1]||'';
-    if(u && w.toLowerCase()===u) side='white'; else if(u && b.toLowerCase()===u) side='black';
-  }
-  showStatus('starting engine…');
-  const elo = eloOverride || eloForPgn(pgn);
-  const r = await fetch('/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({pgn, side, elo})});
-  const d = await r.json();
-  if(d.error){showError(d.error);return}
-  mode='game'; moves=[]; cur=-1; review=''; chatGame.length=0;
-  $id('chatlog').innerHTML=''; $id('review').innerHTML='<span class="small">appears when analysis finishes…</span>';
-  activeJob=d.job_id;
-  setInputsLocked(true);
-  jobStart=Date.now();
-  poll(d.job_id);
-}
-function setInputsLocked(locked){
-  ['sideSel','analyzeBtn','loadGames','profileSel','impBtn'].forEach(id=>{
-    const el=$id(id); if(el) el.disabled=locked;
-  });
-}
-async function poll(id){
-  if(id!==activeJob) return;
-  const r = await fetch('/api/job/'+id); const j = await r.json();
-  if(id!==activeJob) return;
-  headers=j.headers||{}; coachSide=j.side||null;
-  if(j.status==='running'){
-    const done=j.moves.length, total=j.total||1;
-    const elapsed=(Date.now()-jobStart)/1000;
-    const eta = done>0 ? Math.round(elapsed/done*(total-done)) : null;
-    showStatus(`analysing ${j.progress}`);
-    $id('pbarWrap').classList.remove('hidden');
-    $id('pfill').style.width = Math.round(100*done/total)+'%';
-    $id('etaText').textContent = `${done}/${total} moves` +
-      (eta!=null && done>=3 ? ` · about ${eta>=60?Math.ceil(eta/60)+' min':eta+'s'} remaining` : '');
-    const sb=$id('stopBtn'); sb.classList.remove('hidden');
-    sb.onclick=()=>{sb.disabled=true;fetch('/api/job/'+id+'/stop',{method:'POST'})};
-    setTimeout(()=>poll(id), 1200);
-  } else if(j.status==='error'){
-    $id('stopBtn').classList.add('hidden'); $id('pbarWrap').classList.add('hidden');
-    setInputsLocked(false); showError(j.error);
-  } else { // done or stopped — reveal everything at once
-    setInputsLocked(false);
-    moves=j.moves; review=j.review; hideStatus();
-    $id('pbarWrap').classList.add('hidden');
-    $id('stopBtn').classList.add('hidden'); $id('stopBtn').disabled=false;
-    $id('review').innerHTML = j.status==='stopped'
-      ? '<span class="small">analysis stopped early — showing the moves completed so far</span>'
-      : md(review);
-    renderMoves(); showAnalysisView();
-    loadRecentGames();   // newly analyzed game now shows its badge
-  }
-}
-
-/* ---------- analysis view ---------- */
-function showAnalysisView(){
-  $id('analysis').classList.remove('hidden');
-  const side = coachSide || profileSide();
-  if(!board) board = Chessboard('board',{position:'start',pieceTheme:PIECES,showNotation:true});
-  board.orientation(side==='black' ? 'black' : 'white');
-  $id('gameTitle').textContent = `${headers.White||'?'} vs ${headers.Black||'?'}  ${headers.Result||''}`;
-  goTo(moves.length?0:-1);
-}
-function profileSide(){
-  const u=(prof?.chesscom_user||'').toLowerCase();
-  if(u && (headers.Black||'').toLowerCase()===u) return 'black';
-  return 'white';
-}
-function renderMoves(){
-  const box=$id('movelist'); box.innerHTML='';
-  const wName=headers.White&&headers.White!=='?'?headers.White:'White';
-  const bName=headers.Black&&headers.Black!=='?'?headers.Black:'Black';
-  [['',''],[wName,'♚ '],[bName,'♔ ']].forEach(([t,icon])=>{  // filled glyph looks white on dark bg
-    const h=document.createElement('div'); h.className='mvhead';
-    h.textContent=t?icon+t:''; h.title=t; box.appendChild(h);
-  });
-  const cell=(m,i)=>{
-    const d=document.createElement('div');
-    if(!m){d.className='mv empty';return d}
-    d.className='mv'+(i===cur?' sel':'');
-    d.innerHTML=`<span>${m.critical?'⚡':''}<b>${m.san}</b></span>${badge(m.cls)}`;
-    d.onclick=()=>goTo(i);
-    return d;
-  };
-  for(let i=0;i<moves.length;){
-    const num=document.createElement('div'); num.className='mvnum';
-    num.textContent=moves[i].n+'.';
-    box.appendChild(num);
-    if(moves[i].side==='White'){
-      box.appendChild(cell(moves[i],i));
-      if(moves[i+1]&&moves[i+1].side==='Black'){box.appendChild(cell(moves[i+1],i+1));i+=2}
-      else{box.appendChild(cell(null));i+=1}
-    }else{
-      box.appendChild(cell(null));
-      box.appendChild(cell(moves[i],i));
-      i+=1;
-    }
-  }
-  const sel=box.querySelector('.mv.sel'); if(sel) sel.scrollIntoView({block:'nearest'});
-}
-
-/* ---------- board arrows + variation preview ---------- */
-function sqC(sq){
-  const f=sq.charCodeAt(0)-97, r=parseInt(sq[1])-1;
-  const w = board.orientation()==='white';
-  return [((w?f:7-f)+0.5)*12.5, ((w?7-r:r)+0.5)*12.5];
-}
-function drawArrows(list){
-  $id('arrows').innerHTML = list.filter(a=>a.from&&a.to&&a.from!==a.to).map(a=>{
-    const [x1,y1]=sqC(a.from),[x2,y2]=sqC(a.to);
-    const dx=x2-x1,dy=y2-y1,len=Math.hypot(dx,dy)||1,ux=dx/len,uy=dy/len;
-    return `<line x1="${x1}" y1="${y1}" x2="${x2-ux*3}" y2="${y2-uy*3}" stroke="${a.color}" stroke-width="2.4" stroke-linecap="round" opacity="0.8"/>`+
-      `<polygon points="${x2},${y2} ${x2-ux*4.5-uy*2.2},${y2-uy*4.5+ux*2.2} ${x2-ux*4.5+uy*2.2},${y2-uy*4.5-ux*2.2}" fill="${a.color}" opacity="0.8"/>`;
-  }).join('');
-}
-let preview=null, previewMap={};
-function startPreview(key){
-  const p=previewMap[key]; if(!p||!p.steps.length) return;
-  preview={...p, idx:-1};
-  $id('previewBar').classList.remove('hidden');
-  $id('previewLabel').textContent=p.label;
-  stepPreview(1);
-}
-function stepPreview(d){
-  if(!preview) return;
-  preview.idx=Math.max(-1,Math.min(preview.steps.length-1,preview.idx+d));
-  const s=preview.idx>=0?preview.steps[preview.idx]:null;
-  board.position(s?s.fen:preview.base);
-  drawArrows(s?[{from:s.from,to:s.to,color:'#e8c341'}]:[]);
-  $id('previewPos').textContent=` · move ${preview.idx+1}/${preview.steps.length} (◀ ▶ to step)`;
-}
-function exitPreview(){
-  preview=null; $id('previewBar').classList.add('hidden');
-  if(mode==='position'&&posData){ board.position(posData.fen.split(' ')[0]); drawArrows([]); }
-  else goTo(cur);
-}
-$id('previewExit').onclick=exitPreview;
-
-function pickAlternatives(m){
-  const played = m.candidates.find(c=>c.san===m.san);
-  let alts = m.candidates.filter(c=>c.san!==m.san).sort((a,b)=>b.cp-a.cp);
-  if(!alts.length) return [];
-  const bestCp = Math.max(alts[0].cp, played?played.cp:-Infinity);
-  if(played && bestCp - played.cp <= 20) return [];
-  if(alts.length>1 && alts[0].cp - alts[1].cp >= 150) return [alts[0]];
-  const floor = played ? played.cp + 20 : alts[0].cp - 80;
-  return alts.filter(c=>c.cp>=floor && alts[0].cp - c.cp <= 80).slice(0,3);
-}
-
-function goTo(i){
-  if(!moves.length) return;
-  preview=null; $id('previewBar').classList.add('hidden');
-  cur=Math.max(0,Math.min(moves.length-1,i));
-  const m=moves[cur];
-  board.position(m.fen_after);
-  document.querySelectorAll('#board .square-55d63').forEach(s=>s.classList.remove('hl-from','hl-to'));
-  setTimeout(()=>{
-    document.querySelector(`#board .square-${m.from}`)?.classList.add('hl-from');
-    document.querySelector(`#board .square-${m.to}`)?.classList.add('hl-to');
-  },120);
-  const arr=[{from:m.from,to:m.to,color:'#4f9cf9'}];
-  if(m.best_from && m.san!==m.best) arr.push({from:m.best_from,to:m.best_to,color:'#37d0a2'});
-  drawArrows(arr);
-  $id('evalwhite').style.height = evalPct(m.eval)+'%';
-  $id('evalnum').textContent = m.eval.includes('mate')?'#':m.eval;
-  renderMoves();
-  const isOpp = coachSide && m.side.toLowerCase()!==coachSide;
-  const tstr = m.think_s!=null ? ` · ⏱ ${m.think_s<10?m.think_s.toFixed(1):Math.round(m.think_s)}s` : '';
-  $id('explTitle').textContent = `${m.side==='White'?m.n+'.':m.n+'…'} ${m.san} — ${m.cls} (${evalLabel(m.eval)})${tstr}`
-    + (m.critical?' ⚡ critical moment':'') + (isOpp?' · opponent':'');
-  let html;
-  if(m.expl){
-    const expl = m.expl.replace(/^\s*(verdict:?\s*[^.\n]*\.?)/i,'**$1**');
-    html = (isOpp?`<span class="opplabel">What your opponent is up to</span>`:'') + md(expl);
-  } else if(['best','good'].includes(m.cls)){
-    html = `<span class="small">Quiet move — the engine has no complaint (<b>${m.cls}</b>). Ask the coach chat if you're curious about it.</span>`;
-  } else {
-    html = `<span class="small">No coach note for this move (verdict: <b>${m.cls}</b>${m.best&&m.best!==m.san?`, best was <b>${esc(m.best)}</b>`:''}). Ask the coach chat for details.</span>`;
-  }
-  previewMap={};
-  if(!isOpp && m.candidates && m.candidates.length){
-    const alts = pickAlternatives(m);
-    if(alts.length){
-      html += `<div class="sect">Alternatives · click a line to play it out</div>`
-        + alts.map((c,k)=>{
-        previewMap['alt'+k]={steps:c.steps||[],base:m.fen_before,label:c.san+' line'};
-        return `<div class="lineitem" data-prev="alt${k}" style="cursor:pointer"><b>${esc(c.san)}</b><span class="ev">${esc(c.score)}</span>`+
-        `<span class="pv">${esc(c.line)}</span>`+
-        (c.idea?`<span class="idea">↳ ${esc(c.idea)}</span>`:'')+`</div>`;
-      }).join('');
-    }
-  }
-  if(!isOpp && m.refutation){
-    previewMap['ref']={steps:m.refutation_steps||[],base:m.fen_after,label:'refutation of '+m.san};
-    html += `<div class="sect">Refutation · click to watch the punishment</div>`+
-      `<div class="lineitem" data-prev="ref" style="cursor:pointer"><span class="pv">${esc(m.refutation)}</span></div>`;
-  }
-  if(m.opening&&m.opening.length)
-    html += `<div class="sect">Opening book</div><div class="lineitem"><span class="pv">${m.opening.map(esc).join('<br>')}</span></div>`;
-  $id('explain').innerHTML = html;
-  document.querySelectorAll('#explain .lineitem[data-prev]').forEach(el=>
-    el.onclick=()=>startPreview(el.dataset.prev));
-}
-$id('btnFirst').onclick=()=>goTo(0);
-$id('btnPrev').onclick=()=>preview?stepPreview(-1):goTo(cur-1);
-$id('btnNext').onclick=()=>preview?stepPreview(1):goTo(cur+1);
-$id('btnLast').onclick=()=>goTo(moves.length-1);
-$id('btnFlip').onclick=()=>{board.flip();preview?stepPreview(0):goTo(cur)};
-document.addEventListener('keydown',e=>{
-  if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
-  if(e.key==='Escape'&&preview){exitPreview();return}
-  if(e.key==='ArrowLeft')preview?stepPreview(-1):goTo(cur-1);
-  if(e.key==='ArrowRight')preview?stepPreview(1):goTo(cur+1);
-});
-
-/* ---------- status ---------- */
-function showStatus(t){$id('status').classList.remove('hidden');$id('progressText').textContent=t;$id('errorText').textContent='';}
-function showError(t){$id('status').classList.remove('hidden');$id('progressText').textContent='';$id('errorText').textContent=t;}
-function hideStatus(){$id('status').classList.add('hidden');}
-
-/* ---------- board editor ---------- */
-function initEditor(){
-  editorBoard = Chessboard('editorBoard',{position:'start',pieceTheme:PIECES,
-    draggable:true,dropOffBoard:'trash',sparePieces:true});
-}
-$id('edStart').onclick=()=>editorBoard.start();
-$id('edClear').onclick=()=>editorBoard.clear();
-$id('edAnalyze').onclick=async()=>{
-  const fen = `${editorBoard.fen()} ${$id('edTurn').value} - - 0 1`;
-  showStatus('analysing position…');
-  const r = await fetch('/api/position',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({fen, perspective:$id('edPersp').value, level:prof?.level||null})});
-  const d = await r.json();
-  if(d.error){showError(d.error);return}
-  hideStatus(); mode='position'; posData={...d, fen};
-  moves=[]; chatGame.length=0; $id('chatlog').innerHTML='';
-  $id('analysis').classList.remove('hidden');
-  if(!board) board=Chessboard('board',{position:'start',pieceTheme:PIECES,showNotation:true});
-  board.orientation($id('edPersp').value);
-  board.position(fen.split(' ')[0]);
-  drawArrows([]);
-  $id('gameTitle').textContent=`Custom position — ${d.turn} to move · coaching ${d.perspective}`;
-  $id('movelist').innerHTML='<span class="small">position mode — no move list</span>';
-  $id('explTitle').textContent=`Position assessment (${d.perspective}'s perspective)`;
-  previewMap={};
-  let html = md(d.commentary) +
-    `<div class="sect">Engine lines · click a line to play it out</div>` +
-    d.lines.map((c,k)=>{
-      previewMap['pos'+k]={steps:c.steps||[],base:fen,label:c.san+' line'};
-      return `<div class="lineitem" data-prev="pos${k}" style="cursor:pointer"><b>${esc(c.san)}</b><span class="ev">${esc(c.score)}</span>`+
-        `<span class="pv">${esc(c.line)}</span>`+
-        (c.idea?`<span class="idea">↳ ${esc(c.idea)}</span>`:'')+`</div>`;
-    }).join('');
-  $id('explain').innerHTML = html;
-  document.querySelectorAll('#explain .lineitem[data-prev]').forEach(el=>
-    el.onclick=()=>startPreview(el.dataset.prev));
-  $id('review').innerHTML='<span class="small">n/a for custom positions</span>';
-  $id('evalwhite').style.height = evalPct(d.lines[0]?.score||'0')+'%';
-  $id('evalnum').textContent = d.lines[0]?.score||'';
-};
-
-/* ---------- coach chats (game + review) ---------- */
-function gameChatContext(){
-  if(mode==='position' && posData){
-    return `Custom position FEN: ${posData.fen}\nEngine lines:\n`+
-      posData.lines.map(c=>`${c.san} (${c.score}): ${c.line}`).join('\n')+
-      `\nPosition facts:\n`+(posData.features||[]).join('\n');
-  }
-  if(cur<0||!moves[cur]) return '';
-  const m=moves[cur];
-  let ctx=`Game: ${headers.White} vs ${headers.Black}, ${headers.Result}.\n`+
-    `Currently viewing move ${m.n} (${m.side}): ${m.san} — verdict ${m.cls}, eval ${m.eval} (White's perspective).\n`+
-    `FEN after the move: ${m.fen_after}\nEngine candidates before it:\n`+
-    m.candidates.map(c=>`${c.san} (${c.score}): ${c.line}`).join('\n');
-  if(m.refutation) ctx+=`\nRefutation of the played move: ${m.refutation}`;
-  if(m.expl) ctx+=`\nCoach note for this move: ${m.expl}`;
-  if(review) ctx+=`\nWhole-game review:\n${review}`;
-  return ctx;
-}
-function reviewChatContext(){
-  let ctx = 'The player is discussing their overall coach review (not a specific game).';
-  if(prof?.summary) ctx += `\nCurrent coach review:\n${prof.summary}`;
-  return ctx;
-}
-function bindChat(logId, inputId, sendId, history, ctxFn){
-  const log=$id(logId), input=$id(inputId);
-  function add(cls,text){
-    const div=document.createElement('div');div.className='msg '+cls;
-    if(cls==='coach') div.innerHTML=md(text); else div.textContent=text;
-    log.appendChild(div);log.scrollTop=1e9;return div;
-  }
-  async function send(){
-    const text=input.value.trim(); if(!text) return;
-    input.value='';
-    history.push({role:'user',content:text});
-    add('user',text);
-    const think=add('think','coach is thinking…');
-    const r = await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({messages:history,context:ctxFn()})});
-    const d = await r.json(); think.remove();
-    if(d.error){add('coach','⚠ '+d.error);return}
-    history.push({role:'assistant',content:d.reply});
-    add('coach',d.reply);
-  }
-  $id(sendId).onclick=send;
-  input.addEventListener('keydown',e=>{if(e.key==='Enter')send()});
-}
-bindChat('chatlog','chatInput','chatSend',chatGame,gameChatContext);
-bindChat('chatlogR','chatInputR','chatSendR',chatReview,reviewChatContext);
-
-/* ---------- boot ---------- */
-loadProfiles();
-</script>
+<script src="/static/vendor/jquery-3.7.1.min.js"></script>
+<script src="/static/vendor/chessboard-1.0.0.min.js"></script>
+<script src="/static/app.js"></script>
 </body>
 </html>

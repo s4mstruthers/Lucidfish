@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lucidfish"
+dynamic = ["version"]
+description = "Explainable chess coaching: Stockfish analysis narrated by a local or cloud LLM."
+readme = "README.md"
+requires-python = ">=3.10"
+keywords = ["chess", "stockfish", "llm", "coaching", "pgn"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Games/Entertainment :: Board Games",
+]
+dependencies = [
+    "chess>=1.10",
+    "requests>=2.31",
+    "rich>=13.0",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "pydantic>=2.0",
+    "keyring>=24",
+    "anthropic>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27", "ruff>=0.5"]
+
+[project.scripts]
+lucidfish = "lucidfish.cli:main"
+lucidfish-web = "lucidfish.web:main"
+
+[tool.setuptools]
+packages = ["lucidfish"]
+
+[tool.setuptools.package-data]
+lucidfish = ["static/*", "static/vendor/*"]
+
+[tool.setuptools.dynamic]
+version = { attr = "lucidfish.__version__" }
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["lucidfish", "conftest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

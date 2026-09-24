@@ -4,16 +4,25 @@ In the opening, "engine best" and "theory best" can differ — the explorer tell
 us what strong humans actually play and what the opening is called, so early
 advice stays consistent with real plans instead of raw engine output.
 
-API docs: https://lichess.org/api#tag/Opening-Explorer (no auth needed, be polite).
+API docs: https://lichess.org/api#tag/Opening-Explorer (be polite; set LICHESS_TOKEN if
+the explorer asks for authentication).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import os
+import threading
+import time
+from dataclasses import asdict, dataclass, field
 
 import requests
 
+from . import __version__
+
 EXPLORER_URL = "https://explorer.lichess.ovh/masters"
+# After a network failure, stop asking for a while instead of paying a timeout
+# on every early move of every game (some networks silently drop these requests).
+_BACKOFF_S = 600
 
 # Offline fallback book: longest SAN-prefix match. Used when the Lichess explorer
 # is unreachable (some networks block Python clients), so opening identification
@@ -97,6 +106,16 @@ _LOCAL_BOOK: list[tuple[str, str, str]] = [
 ]
 
 
+def local_book_depth(sans: list[str]) -> int:
+    """How many opening plies of `sans` follow a line in the built-in book."""
+    best = 0
+    for seq, _, _ in _LOCAL_BOOK:
+        line = seq.split()
+        if len(line) > best and sans[:len(line)] == line:
+            best = len(line)
+    return best
+
+
 def local_opening_name(sans: list[str]) -> str:
     """Longest-prefix match against the built-in book. Returns 'Name (ECO)' or ''."""
     played = " ".join(sans)
@@ -112,7 +131,7 @@ def local_opening_name(sans: list[str]) -> str:
 class OpeningInfo:
     name: str = ""
     eco: str = ""
-    top_moves: list[dict] = field(default_factory=list)  # [{san, games, white%, draw%, black%}]
+    top_moves: list[dict] = field(default_factory=list)  # [{san, games, white_pct, draw_pct, black_pct}]
 
     @property
     def known(self) -> bool:
@@ -120,44 +139,76 @@ class OpeningInfo:
 
 
 class OpeningExplorer:
-    def __init__(self, timeout_s: int = 10):
+    """Lichess masters-database client with a persistent cache and a circuit breaker.
+
+    Results are cached in memory and (optionally) in the local database, so
+    positions from your usual openings are looked up once, ever. Set
+    LICHESS_TOKEN to send an API token if the explorer requires authentication.
+    """
+
+    _disabled_until = 0.0            # shared by all instances: one outage, one timeout
+    _state_lock = threading.Lock()
+
+    def __init__(self, timeout_s: float = 4.0, persistent: bool = True):
         self.timeout_s = timeout_s
+        self.persistent = persistent
         self._session = requests.Session()
-        self._session.headers["User-Agent"] = "lucidfish/0.1 (personal chess study tool)"
+        self._session.headers["User-Agent"] = f"lucidfish/{__version__} (personal chess study tool)"
+        token = os.environ.get("LICHESS_TOKEN")
+        if token:
+            self._session.headers["Authorization"] = f"Bearer {token}"
         self._cache: dict[str, OpeningInfo] = {}
+
+    @classmethod
+    def available(cls) -> bool:
+        return time.monotonic() >= cls._disabled_until
 
     def lookup(self, fen: str) -> OpeningInfo:
         """Masters-database stats for a position. Fails soft: network errors → empty info."""
         if fen in self._cache:
             return self._cache[fen]
+        if self.persistent:
+            from . import store
+            cached = store.explorer_get(fen)
+            if cached is not None:
+                info = OpeningInfo(**cached)
+                self._cache[fen] = info
+                return info
+        if not self.available():
+            return OpeningInfo()
+
         info = OpeningInfo()
         try:
-            r = self._session.get(
-                EXPLORER_URL, params={"fen": fen, "moves": 5, "topGames": 0},
-                timeout=self.timeout_s,
-            )
+            r = self._session.get(EXPLORER_URL, params={"fen": fen, "moves": 5, "topGames": 0},
+                                  timeout=self.timeout_s)
             r.raise_for_status()
             data = r.json()
-            opening = data.get("opening") or {}
-            info.name = opening.get("name", "")
-            info.eco = opening.get("eco", "")
-            for m in data.get("moves", []):
-                total = m["white"] + m["draws"] + m["black"]
-                if total == 0:
-                    continue
-                info.top_moves.append({
-                    "san": m["san"],
-                    "games": total,
-                    "white_pct": round(100 * m["white"] / total),
-                    "draw_pct": round(100 * m["draws"] / total),
-                    "black_pct": round(100 * m["black"] / total),
-                })
-        except requests.RequestException:
-            pass  # offline or rate-limited → just skip opening context
+        except (requests.RequestException, ValueError):
+            with self._state_lock:   # offline, blocked, rate-limited or auth required
+                OpeningExplorer._disabled_until = time.monotonic() + _BACKOFF_S
+            return info
+        opening = data.get("opening") or {}
+        info.name = opening.get("name", "")
+        info.eco = opening.get("eco", "")
+        for m in data.get("moves", []):
+            total = m.get("white", 0) + m.get("draws", 0) + m.get("black", 0)
+            if total == 0:
+                continue
+            info.top_moves.append({
+                "san": m["san"],
+                "games": total,
+                "white_pct": round(100 * m["white"] / total),
+                "draw_pct": round(100 * m["draws"] / total),
+                "black_pct": round(100 * m["black"] / total),
+            })
         self._cache[fen] = info
+        if self.persistent:
+            from . import store
+            store.explorer_put(fen, asdict(info))
         return info
 
-    def summary_lines(self, info: OpeningInfo) -> list[str]:
+    @staticmethod
+    def summary_lines(info: OpeningInfo) -> list[str]:
         if not info.known:
             return []
         out = []
