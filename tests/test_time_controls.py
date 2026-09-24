@@ -87,8 +87,9 @@ def test_refreshing_one_time_controls_review(monkeypatch):
     fake = SimpleNamespace(available=True, hard=lambda f: f(SimpleNamespace(
         generate=lambda system, prompt: prompts.append(prompt) or "Your rapid games: fine.")))
     monkeypatch.setattr(jobs, "build_coach", lambda cfg: (fake, []))
-    assert jobs.refresh_player_summary(pid, "rapid") == ("Your rapid games: fine.", "")
-    assert store.get_profile(pid)["summaries"]["rapid"] == "Your rapid games: fine."
+    summary, error = jobs.refresh_player_summary(pid, "rapid")
+    assert not error and summary.startswith("Your rapid games: fine.")      # tidied into the fixed structure
+    assert store.get_profile(pid)["summaries"]["rapid"] == summary
     assert store.get_profile(pid)["summary"] in ("", None)                    # the overall one is untouched
     assert "ONLY the player's rapid games (2 of them)" in prompts[0]
     assert jobs.refresh_player_summary(pid, "blitz")[1] == "Analyse at least two blitz games first."

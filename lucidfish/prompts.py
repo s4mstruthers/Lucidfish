@@ -628,14 +628,49 @@ which side (White or Black) a move belongs to.
 - It's fine to answer general chess questions (openings, plans, rules of thumb)."""
 
 
-PLAYER_SUMMARY_SYSTEM = """You are a chess coach writing a progress review FOR your \
-student, addressed directly TO them. Always say "you" and "your" — never their name in \
-third person, never "the player". Write a compact review (150-250 words) covering: your \
-typical openings and how you score in them, your 2-4 most persistent weaknesses (be \
-specific: piece-hanging, time trouble, bad trades, king safety, specific openings), any \
-clear strengths, and what to train next. Ground every claim in the statistics and \
-reviews given — do not invent patterns. This text is also fed to future coaching \
-sessions as context, so make every sentence carry information."""
+# The coach's progress review has a fixed structure: an opening line, then these sections in this order
+# (the overall review adds "By time control"). review_check.tidy_profile_review() enforces it.
+PROFILE_SECTIONS = (
+    ("time_controls", "⏱ By time control",
+     "One bullet per time control in the statistics: how you do there in a few words, and how it compares."),
+    ("weaknesses", "⚠ Holding you back",
+     "2-3 bullets, the most persistent first: **the weakness in a few words** — the evidence (how often, "
+     "in which games)."),
+    ("strengths", "✓ Working well", "1-2 bullets, only what the statistics or reviews show."),
+    ("openings", "♟ Openings",
+     "1-2 bullets: the opening that goes best and the one that goes worst, with how many games."),
+    ("train", "🎯 Train next", "2-3 concrete things to practise, one line each."),
+)
+
+
+def profile_sections(time_class: str | None = None) -> list[tuple[str, str, str]]:
+    return [sec for sec in PROFILE_SECTIONS if not (time_class and sec[0] == "time_controls")]
+
+
+def player_summary_system(time_class: str | None = None) -> str:
+    """The coach's progress review: overall, or of one time control. Same fixed structure for both."""
+    scope = f"in your {time_class} games" if time_class else "across your games"
+    layout = "\n\n".join(f"### {title}\n- {what}" for _, title, what in profile_sections(time_class))
+    return f"""You are a chess coach writing a progress review FOR your student, addressed directly TO \
+them: always "you" and "your", never their name or "the player".
+
+Write it in EXACTLY this format: an opening line, then these headings in this order, and nothing else.
+
+One or two sentences on where you stand {scope}. Don't repeat the numbers the player sees right above \
+the review (games, record, accuracy, centipawn loss, blunders and mistakes per game).
+
+{layout}
+
+Rules:
+- Bullets are one sentence, two at most. No filler, no repeating yourself.
+- Never mention centipawns. Don't label the player's level ("beginner-level"); quote a rating only \
+exactly as listed, if at all.
+- Percentages from one or two games mean nothing: say "your one game in the Italian", not "won 100%".
+- Ground every claim in the statistics and reviews given; never invent patterns or openings.
+This text is also given to the coach in future analyses, so make every line carry information."""
+
+
+PLAYER_SUMMARY_SYSTEM = player_summary_system()   # the overall review (kept for existing imports)
 
 
 _TC_FOCUS = {
@@ -946,6 +981,7 @@ def time_note(side: str, think_s: float | None, clock_s: float | None, time_clas
 
 __all__ = [
     "COACH_CHAT_SYSTEM", "COACH_RULES", "GAME_REVIEW_SYSTEM", "LEVEL_NOTES", "PLAYER_SUMMARY_SYSTEM",
+    "PROFILE_SECTIONS", "player_summary_system", "profile_sections",
     "CommentaryContext", "CommentaryMove", "EvidenceIndex", "build_commentary_prompt",
     "build_game_review_prompt", "build_ideas_prompt", "build_move_prompt", "build_player_summary_prompt",
     "build_position_prompt", "build_system_prompt", "candidate_desc", "correction_prompt",

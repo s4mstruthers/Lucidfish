@@ -189,3 +189,13 @@ def test_punished_errors_and_critical_finds_are_highlights():
     facts = game_facts(moves, {"Result": "*"}, "Black")
     assert facts.highlights[0] == "20... Rxe1: Black found the only good move at a critical moment."
     assert "10... Nf3+ punished White's blunder 10. Qd2 straight away." in facts.highlights
+
+
+def test_the_post_game_review_keeps_its_fixed_order():
+    from lucidfish.review_check import order_game_review
+    messy = ("A sharp game.\n**Key takeaways:**\n- Move 9 (Qxb7): the queen was trapped.\n"
+             "### What went well\n- 4... Nf6 developed with tempo.\n# Story of the game\n- Moves 1-8: quiet opening.")
+    assert order_game_review(messy) == (
+        "## Summary\nA sharp game.\n\n## How the game unfolded\n- Moves 1-8: quiet opening.\n\n"
+        "## What went well\n- 4... Nf6 developed with tempo.\n\n"
+        "## Key takeaways\n- Move 9 (Qxb7): the queen was trapped.")

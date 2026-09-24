@@ -37,6 +37,7 @@ import chess
 import chess.svg
 
 from . import __version__, store, training
+from .review_check import presentable_review
 
 STATIC = Path(__file__).parent / "static"
 _SHARE_KEY = "share"
@@ -78,12 +79,17 @@ def export_data(profile_id: int) -> dict:
     public = {k: profile.get(k) for k in ("id", "name", "level", "chesscom_user", "lichess_user", "ratings",
                                            "summary", "summaries")}
     public["games"] = len(games)
+    by_class = {tc: store.aggregate_stats(profile_id, games, tc) for tc in store.time_class_counts(games)}
+    overall = store.aggregate_stats(profile_id, games)
+    public["summary"] = presentable_review(public.get("summary") or "", overall)
+    public["summaries"] = {tc: presentable_review(text, by_class.get(tc, {}), tc)
+                           for tc, text in (public.get("summaries") or {}).items()}
     return {
         "version": __version__,
         "generated": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "profile": public,
-        "stats": store.aggregate_stats(profile_id, games),
-        "stats_by_class": {tc: store.aggregate_stats(profile_id, games, tc) for tc in store.time_class_counts(games)},
+        "stats": overall,
+        "stats_by_class": by_class,
         "time_classes": store.time_class_counts(games),
         "games": games,
         "details": details,

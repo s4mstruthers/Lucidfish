@@ -31,7 +31,8 @@ from .pipeline import (
     parse_game,
     prefetch_engine,
 )
-from .prompts import PLAYER_SUMMARY_SYSTEM, build_player_summary_prompt
+from .prompts import build_player_summary_prompt, player_summary_system
+from .review_check import tidy_profile_review
 
 _QUEUE_KEY = "queue"
 _TIMINGS_KEY = "timings"
@@ -661,7 +662,8 @@ def refresh_player_summary(pid: int, time_class: str | None = None) -> tuple[str
     prompt = build_player_summary_prompt(stats, store.recent_reviews(pid, time_class=time_class),
                                          profile=store.get_profile(pid), time_class=time_class)
     try:
-        summary = coach.hard(lambda llm: llm.generate(PLAYER_SUMMARY_SYSTEM, prompt))
+        raw = coach.hard(lambda llm: llm.generate(player_summary_system(time_class), prompt))
+        summary = tidy_profile_review(raw, stats, time_class)   # the fixed structure, whatever the model did
     except LLMError as e:
         return "", str(e)
     store.set_summary(pid, summary, time_class)

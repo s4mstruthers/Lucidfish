@@ -47,6 +47,7 @@ from .export import annotated_pgn, markdown_report
 from .llm import PROVIDERS, LLMError, make_provider
 from .pipeline import analyze_position, build_coach, check_move
 from .prompts import COACH_CHAT_SYSTEM
+from .review_check import presentable_review
 
 STATIC = Path(__file__).parent / "static"
 DEFAULT_PORT = 8420
@@ -560,7 +561,12 @@ def profile(tc: TimeClass = ""):
     if p is None:
         return {"profile": None}
     games = store.list_games(pid)
-    return {"profile": p, "stats": store.aggregate_stats(pid, games, tc or None), "games": games,
+    stats = store.aggregate_stats(pid, games, tc or None)
+    if tc and p["summaries"].get(tc):
+        p["summaries"][tc] = presentable_review(p["summaries"][tc], stats, tc)
+    elif not tc:
+        p["summary"] = presentable_review(p["summary"], stats)
+    return {"profile": p, "stats": stats, "games": games,
             "time_classes": store.time_class_counts(games), "review": QUEUE.review_state(pid)}
 
 

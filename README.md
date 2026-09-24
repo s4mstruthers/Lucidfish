@@ -470,6 +470,13 @@ its time control in mind. The review updates by itself after new analyses (Setti
 has finished, so it never slows an analysis down, and the Home page shows when it was last
 updated, or that an update is on its way. *⟳ Update review* rewrites it on demand.
 
+Every review has a fixed layout, so they're quick to read and easy to compare. The coach's review
+starts with a sentence or two on where you stand, then *⏱ By time control* (in the overall review),
+*⚠ Holding you back*, *✓ Working well*, *♟ Openings* and *🎯 Train next*, as short bullets. The
+post-game review has *Summary*, *How the game unfolded*, *What went well* and *Key takeaways*. If
+the AI drifts from the layout, Lucidfish puts it back, and fills a missing section from the verified
+statistics (for example, *Train next* points you at the matching puzzles on the Train page).
+
 ## Sharing a profile
 
 Lucidfish needs a reasonably fast computer for the analysis, but the *results* can go
