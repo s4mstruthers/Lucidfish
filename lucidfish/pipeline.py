@@ -40,7 +40,7 @@ import chess
 import chess.pgn
 
 from . import features as feat
-from . import plans, review_check, tactics
+from . import plans, ratings, review_check, tactics
 from .config import Config
 from .engine import EngineAnalyzer, Line, MoveAnalysis, build_move_analysis, describe_move
 from .llm import LLMError, LLMProvider, make_provider
@@ -384,8 +384,8 @@ def analyze_game(
     detail = cfg.analysis.detail if cfg.analysis.detail in DETAIL_LEVELS else "standard"
     side_filter = side_filter.lower() if side_filter else None
     coached_color = None if side_filter is None else side_filter == "white"
-    base_s, inc_s, time_class = parse_time_control(game.headers.get("TimeControl", ""))
-    report.time_class = time_class
+    base_s, inc_s, _ = parse_time_control(game.headers.get("TimeControl", ""))
+    report.time_class = time_class = ratings.time_class(dict(game.headers))   # the site's own classes
 
     # The whole game is known up front: history and "what happened next" for any move.
     played: list[plans.PlayedMove] = []

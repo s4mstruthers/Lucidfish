@@ -84,7 +84,10 @@ _MIGRATIONS = [
     ("profiles", "ratings_json", "TEXT"),
     ("games", "good_moves", "INTEGER"),
     ("games", "great_moves", "INTEGER"),
+    ("profiles", "summaries_json", "TEXT"),
 ]
+
+TIME_CLASSES = ("bullet", "blitz", "rapid", "classical", "daily")
 
 # (The elo_* columns hold ratings typed into older versions; they are migrated into ratings_json.)
 PROFILE_FIELDS = ("name", "chesscom_user", "lichess_user", "level")
@@ -131,6 +134,7 @@ def init() -> None:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
             # after the migrations, so databases from older versions have the column
             conn.execute("CREATE INDEX IF NOT EXISTS games_profile ON games(profile_id, id)")
+            _reclassify_time_controls(conn)
             _backfill_ratings(conn)
             _backfill_move_counts(conn)
     finally:
@@ -146,6 +150,31 @@ def _backfill_ratings(conn: sqlite3.Connection) -> None:
         for g in conn.execute("SELECT pgn, user_side, time_class FROM games WHERE profile_id=?", (p["id"],)):
             ratings.from_game(found, ratings.pgn_headers(g["pgn"] or ""), g["user_side"], g["time_class"] or "")
         conn.execute("UPDATE profiles SET ratings_json=? WHERE id=?", (json.dumps(found), p["id"]))
+
+
+def _reclassify_time_controls(conn: sqlite3.Connection) -> None:
+    """Once: games from before time controls followed each site's own rules (a 30-minute chess.com game is
+    rapid there, not classical). Their insights are recomputed, and ratings taken from games re-filed."""
+    conn.row_factory = sqlite3.Row
+    if conn.execute("SELECT 1 FROM kv WHERE key='time_classes_by_site'").fetchone():
+        return
+    changed: set[int] = set()
+    for g in conn.execute("SELECT id, profile_id, pgn, time_class FROM games").fetchall():
+        cls = ratings.time_class(ratings.pgn_headers(g["pgn"] or ""))
+        if cls != (g["time_class"] or ""):
+            conn.execute("UPDATE games SET time_class=?, insights=NULL WHERE id=?", (cls, g["id"]))
+            changed.add(g["profile_id"])
+    for pid in changed:
+        r = conn.execute("SELECT ratings_json FROM profiles WHERE id=?", (pid,)).fetchone()
+        if r is None or r["ratings_json"] is None:
+            continue      # not migrated yet: _backfill_ratings uses the corrected classes
+        kept = {site: {k: e for k, e in entries.items() if e.get("source") != "game"}
+                for site, entries in json.loads(r["ratings_json"] or "{}").items()}
+        for g in conn.execute("SELECT pgn, user_side, time_class FROM games WHERE profile_id=?", (pid,)):
+            ratings.from_game(kept, ratings.pgn_headers(g["pgn"] or ""), g["user_side"], g["time_class"] or "")
+        conn.execute("UPDATE profiles SET ratings_json=? WHERE id=?",
+                     (json.dumps({s: e for s, e in kept.items() if e}), pid))
+    conn.execute("INSERT OR REPLACE INTO kv (key, value) VALUES ('time_classes_by_site', '1')")
 
 
 def _move_counts(moves: list[dict], user_side: str | None) -> dict[str, int]:
@@ -167,6 +196,7 @@ def _backfill_move_counts(conn: sqlite3.Connection) -> None:
 def _profile_row(r: sqlite3.Row) -> dict:
     d = dict(r)
     d["ratings"] = json.loads(d.pop("ratings_json", None) or "{}")
+    d["summaries"] = json.loads(d.pop("summaries_json", None) or "{}")   # coach review per time control
     for k in ("elo_bullet", "elo_blitz", "elo_rapid"):
         d.pop(k, None)
     return d
@@ -243,9 +273,18 @@ def set_active(pid: int) -> None:
     _set_kv("active_profile", str(pid))
 
 
-def set_summary(pid: int, text: str) -> None:
+def set_summary(pid: int, text: str, time_class: str | None = None) -> None:
+    """The coach review of all games, or (with `time_class`) of the games in one time control."""
     with _db(write=True) as c:
-        c.execute("UPDATE profiles SET summary=? WHERE id=?", (text, pid))
+        if not time_class:
+            c.execute("UPDATE profiles SET summary=? WHERE id=?", (text, pid))
+            return
+        r = c.execute("SELECT summaries_json FROM profiles WHERE id=?", (pid,)).fetchone()
+        if r is None:
+            return
+        summaries = json.loads(r["summaries_json"] or "{}")
+        summaries[time_class] = text
+        c.execute("UPDATE profiles SET summaries_json=? WHERE id=?", (json.dumps(summaries), pid))
 
 
 # ---------------------------------------------------------------- games
@@ -354,8 +393,25 @@ def _wld(row: dict) -> str:
     return "W" if (row["result"] == "1-0") == (row["user_side"].lower() == "white") else "L"
 
 
-def aggregate_stats(profile_id: int, games: list[dict] | None = None) -> dict:
+def _record(games: list[dict]) -> dict:
+    wld = [_wld(g) for g in games]
+    accs = [g["accuracy"] for g in games if g.get("accuracy") is not None]
+    return {"games": len(games), "wins": wld.count("W"), "losses": wld.count("L"), "draws": wld.count("D"),
+            "avg_accuracy": round(sum(accs) / len(accs), 1) if accs else None,
+            "blunders_per_game": round(sum(g["blunders"] or 0 for g in games) / len(games), 2),
+            "mistakes_per_game": round(sum(g["mistakes"] or 0 for g in games) / len(games), 2)}
+
+
+def time_class_counts(games: list[dict]) -> dict[str, int]:
+    counts = {tc: sum(1 for g in games if g.get("time_class") == tc) for tc in TIME_CLASSES}
+    return {tc: n for tc, n in counts.items() if n}
+
+
+def aggregate_stats(profile_id: int, games: list[dict] | None = None, time_class: str | None = None) -> dict:
+    """Statistics over a profile's games, or only those of one time control."""
     games = list_games(profile_id) if games is None else games
+    if time_class:
+        games = [g for g in games if g.get("time_class") == time_class]
     if not games:
         return {"games": 0}
     wld = [_wld(g) for g in games]
@@ -373,8 +429,12 @@ def aggregate_stats(profile_id: int, games: list[dict] | None = None) -> dict:
             o["acpl"].append(g["acpl"])
     for o in openings.values():
         o["acpl"] = round(sum(o["acpl"]) / len(o["acpl"]), 1) if o["acpl"] else None
+    by_class = {} if time_class else {
+        tc: _record([g for g in games if g.get("time_class") == tc]) for tc in time_class_counts(games)}
     return {
-        **aggregate_insights(_insights(profile_id)),
+        **aggregate_insights(_insights(profile_id, time_class)),
+        "time_class": time_class or "",
+        "by_time_class": by_class,
         "games": len(games),
         "wins": wld.count("W"), "losses": wld.count("L"), "draws": wld.count("D"),
         "avg_acpl": round(sum(acpls) / len(acpls), 1) if acpls else None,
@@ -387,11 +447,12 @@ def aggregate_stats(profile_id: int, games: list[dict] | None = None) -> dict:
     }
 
 
-def _insights(profile_id: int) -> list[dict]:
+def _insights(profile_id: int, time_class: str | None = None) -> list[dict]:
     """Every game's insights; (re)computed and saved for games stored by older versions."""
     with _db() as c:
-        rows = c.execute("SELECT id, insights, user_side, result, time_class FROM games WHERE profile_id=?",
-                         (profile_id,)).fetchall()
+        rows = c.execute("SELECT id, insights, user_side, result, time_class FROM games WHERE profile_id=?"
+                         + (" AND time_class=?" if time_class else ""),
+                         (profile_id, time_class) if time_class else (profile_id,)).fetchall()
     out, backfill = [], []
     for r in rows:
         stored = json.loads(r["insights"]) if r["insights"] else None
@@ -408,13 +469,14 @@ def _insights(profile_id: int) -> list[dict]:
     return out
 
 
-def recent_reviews(profile_id: int, n: int = 8) -> list[dict]:
+def recent_reviews(profile_id: int, n: int = 8, time_class: str | None = None) -> list[dict]:
     """Recent reviews WITH game context, so the summary can cite games by opponent."""
     with _db() as c:
         rows = c.execute(
-            "SELECT review, white, black, result, date, user_side, opening "
-            "FROM games WHERE profile_id=? AND review != '' "
-            "ORDER BY id DESC LIMIT ?", (profile_id, n)).fetchall()
+            "SELECT review, white, black, result, date, user_side, opening, time_class "
+            "FROM games WHERE profile_id=? AND review != ''" + (" AND time_class=?" if time_class else "")
+            + " ORDER BY id DESC LIMIT ?",
+            (profile_id, time_class, n) if time_class else (profile_id, n)).fetchall()
     return [dict(r) for r in rows]
 
 

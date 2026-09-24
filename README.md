@@ -67,10 +67,20 @@ The feedback is pitched at your level and linked to the mistakes you keep making
   move on the board, and the engine tells you straight away whether it works and, if not,
   shows the line that refutes it. The answer to your own mistakes stays hidden until you
   have tried (or choose to see it), so you actually get to think.
-- **Train on your own mistakes.** The *Train* page turns every position where you went wrong,
-  across all your games, into a puzzle. Solve it and it comes back less and less often (after
-  1, 3, 7, 16 and 35 days); miss it and it returns at the end of the session and again the
-  next day. This is spaced repetition, the way flashcard apps make things stick.
+- **Train on your own mistakes.** The *Train* page turns the positions where you went wrong,
+  across all your games, into puzzles, ranked by importance (★★★ the error changed the game,
+  ★★ a clear mistake, ★ minor) and grouped by theme (missed threats, hanging
+  material, missed tactics, mates, king safety, game phase). Solve one and it comes back less
+  and less often (after 1, 3, 7, 16 and 35 days); miss it and it returns at the end of the
+  session and again the next day. This is spaced repetition, the way flashcard apps make
+  things stick. By default it's kept manageable: key and costly errors only, no bullet games or
+  moves made in time trouble, and at most 10 new puzzles a day.
+- **Everything per time control.** Pick *Bullet*, *Blitz*, *Rapid*, … at the top of Home,
+  Games, Train or *Analyse new games*, and every page follows: the statistics, patterns and
+  openings, the games list, the puzzles, and the recent games fetched from chess.com or
+  Lichess (so "analyse my last 5 rapid games" is two clicks). Each time control gets its own
+  coach review, and the overall review compares them. Time controls follow each site's own
+  rules: a 30-minute game is rapid on chess.com and classical on Lichess.
 - **Explore any position.** Press 🔍 *Explore* (<kbd>E</kbd>) and move the pieces yourself:
   Stockfish runs inside the browser and shows the evaluation and its three best lines as you
   go. Take moves back and forth with the arrow keys.
@@ -395,8 +405,9 @@ is next to it.
    games without a rating (e.g. over the board) and the board editor. To add another person or
    switch between profiles, click your name in the top-right corner.
 2. **Analyse games** (Games → *Analyse new games*): choose chess.com or Lichess to list your
-   recent games. Click games to select them (<kbd>Shift</kbd>-click selects a range, or use
-   *Select all*), then *Analyze selected*, or *Analyze batch* for your last 5–20 games. The
+   recent games, and a time control to list only those (for chess.com, Lucidfish looks back up
+   to a year to find them). Click games to select them (<kbd>Shift</kbd>-click selects a range,
+   or use *Select all*), then *Analyze selected*, or *Analyze batch* for your last 5–20 games. The
    *Analyze* button on a row analyses just that game, and *Open* shows one you've already
    analysed. You can choose a lighter or heavier coaching level for a batch, or paste or drop
    a PGN file instead.
@@ -423,8 +434,9 @@ is next to it.
    *✎ Draw* (<kbd>D</kbd>) to draw with a normal click or a finger. A plain click on the
    board clears the drawing. *👁 Board* switches the best-move arrow (<kbd>A</kbd>), the
    last-move highlight, the evaluation bar and the graph on or off.
-7. **Games:** every analysed game is saved to your profile. Search and filter them (e.g. all
-   your losses as Black in blitz, or every Sicilian), see your record and average accuracy
+7. **Games:** every analysed game is saved to your profile. Search and filter them by time
+   control, result, colour or text (e.g. all your losses as Black in blitz, or every
+   Sicilian), see your record and average accuracy
    for that selection, and click a game to review it. Each game has its own address, so a
    reload keeps you on it. *↻ Re-analyse* runs a game again with your current settings.
 8. **Ask the coach** about the position you're looking at, or about your overall progress on
@@ -439,17 +451,21 @@ is next to it.
     <kbd>←</kbd>/<kbd>→</kbd> take moves back and replay them, *⟲ Reset* returns to where you
     started, and <kbd>Esc</kbd> or *✕ Done* goes back to the game. During practice, Explore
     unlocks once you've tried the position.
-12. **Train:** the *Train* page lists how many puzzles are new, due for review, being learned
-    and mastered. *Start training* gives you a session of 5, 10 or 20: first the ones due for
-    review, then new ones, the costliest mistakes first. Each puzzle opens in its game, so after
-    solving it you can read the coach's note, play out the lines, or explore. Solve a puzzle on
-    the first try and it moves up a level; miss it (or ask for the answer) and it starts again.
-    Progress is saved in your browser.
+12. **Train:** the *Train* page shows how many puzzles are to do today, not started, being
+    learned and mastered. Choose a time control, a theme (e.g. *Missed threats*), how important
+    the puzzles must be (★★★ key only, ★★ key and costly, or everything), how many new ones a
+    day, and whether to include bullet games or moves made in time trouble. *Start training*
+    gives you a session of 5, 10 or 20: first the ones due for review, then new ones, the most
+    important first. Each puzzle opens in its game, so after solving it you can read the coach's
+    note, play out the lines, or explore. Solve a puzzle on the first try and it moves up a
+    level; miss it (or ask for the answer) and it starts again. Progress is saved in your browser.
 
 The **Home** page shows your record, average accuracy, patterns across your games, your
 accuracy in each phase of the game (with your weakest phase highlighted), your most common
 mistake types, your openings and how you score in them, and the coach's written review of
-your progress.
+your progress. Choose a time control at the top to see all of it for, say, your rapid games
+only, with the coach's review of those games; each game is also coached with the review for
+its time control in mind.
 
 ## Sharing a profile
 

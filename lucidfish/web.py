@@ -549,22 +549,31 @@ def delete_profile(pid: int):
     return {"ok": True, "active": store.active_id()}
 
 
+TimeClass = Literal["", "bullet", "blitz", "rapid", "classical", "daily"]
+
+
 @app.get("/api/profile")
-def profile():
+def profile(tc: TimeClass = ""):
+    """The active profile with its games, and statistics over all of them or one time control (`tc`)."""
     pid = store.active_id()
     p = store.get_profile(pid)
     if p is None:
         return {"profile": None}
     games = store.list_games(pid)
-    return {"profile": p, "stats": store.aggregate_stats(pid, games), "games": games}
+    return {"profile": p, "stats": store.aggregate_stats(pid, games, tc or None), "games": games,
+            "time_classes": store.time_class_counts(games)}
+
+
+class RefreshSummaryReq(BaseModel):
+    time_class: TimeClass = ""
 
 
 @app.post("/api/profile/refresh_summary")
-def refresh_summary():
+def refresh_summary(req: RefreshSummaryReq | None = None):
     pid = store.active_id()
     if not pid:
         return _error("No active profile.")
-    summary, error = jobs.refresh_player_summary(pid)
+    summary, error = jobs.refresh_player_summary(pid, (req.time_class if req else "") or None)
     if error:
         return _error(error)
     return {"summary": summary}

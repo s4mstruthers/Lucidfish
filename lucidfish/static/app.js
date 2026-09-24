@@ -215,7 +215,8 @@ function showPage(name, fromRoute = false) {
   if (name === "games" || name === "analyze") renderResume();
   if (name === "dashboard") loadDashboard();
   if (name === "games") loadDashboard().then(renderGames);
-  if (name === "analyze" && !state.recent.length) loadRecentGames();
+  if (name === "analyze" && (!state.recent.length || state.recentTc !== state.tc)) loadRecentGames();
+  if (name === "analyze") renderTcBars();
   if (name === "editor") ensureEditor();
   if (name === "train") showTrainPage();
   if (name !== "game" && state.explore) Engine.stop();   // don't keep analysing a board nobody sees
@@ -922,7 +923,11 @@ function exportApi(path, { method = "GET", body } = {}) {
           coach: { enabled: false, ok: true } });
       }
       if (p === "/api/profiles") return Promise.resolve({ profiles: [E.profile], active: E.profile.id });
-      if (p === "/api/profile") return Promise.resolve({ profile: E.profile, stats: E.stats, games: E.games });
+      if (p === "/api/profile") {
+        const tc = new URLSearchParams(path.split("?")[1] || "").get("tc");
+        return Promise.resolve({ profile: E.profile, games: E.games, time_classes: E.time_classes || {},
+          stats: tc ? (E.stats_by_class?.[tc] || { games: 0 }) : E.stats });
+      }
       if ((m = p.match(/^\/api\/profile\/game\/(\d+)$/))) {
         const g = E.details[m[1]];
         if (!g) return Promise.reject(new Error("unknown game"));
@@ -960,11 +965,50 @@ document.querySelectorAll(".modal-back").forEach((m) => {
 });
 const modalOpen = () => [...document.querySelectorAll(".modal-back")].some((m) => !m.classList.contains("hidden"));
 
+/* ================================================================ time control filter (Home, Games, Analyse) */
+
+const TIME_CLASSES = ["bullet", "blitz", "rapid", "classical", "daily"];
+state.tc = (() => { try { return localStorage.getItem("lucidfish-tc") || ""; } catch { return ""; } })();
+state.timeClasses = {};   // analysed games per time control
+state.gamesTotal = 0;     // all analysed games (some have no time control, e.g. over the board)
+
+/** Chips: "All" plus the time controls you have games in (Home, Games), or every one (Analyse). */
+function renderTcBars() {
+  const total = state.gamesTotal;
+  document.querySelectorAll("[data-tc-bar]").forEach((bar) => {
+    const analysed = bar.dataset.tcBar === "analysed";
+    const classes = analysed ? TIME_CLASSES.filter((c) => state.timeClasses[c] || c === state.tc) : TIME_CLASSES;
+    if (analysed && !total) { bar.innerHTML = ""; return; }
+    const chip = (tc, label, n) => `<button data-tc="${tc}" class="${state.tc === tc ? "active" : ""}" aria-pressed="${state.tc === tc}">`
+      + `${label}${n != null ? ` <span class="n">${n}</span>` : ""}</button>`;
+    bar.innerHTML = chip("", "All", analysed ? total : null)
+      + classes.map((c) => chip(c, cap(c), analysed ? state.timeClasses[c] || 0 : null)).join("");
+  });
+}
+document.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-tc-bar] [data-tc]");
+  if (b) setTc(b.dataset.tc);
+});
+
+function setTc(tc) {
+  if (tc === state.tc) return;
+  state.tc = tc;
+  try { localStorage.setItem("lucidfish-tc", tc); } catch { /* remembered for this visit only */ }
+  renderTcBars();
+  if (state.page === "dashboard") loadDashboard();
+  else if (state.page === "games") rerenderGames();
+  else if (state.page === "analyze") loadRecentGames();
+  else if (state.page === "train") renderTrainPage();
+}
+
 /* ================================================================ dashboard */
 
 async function loadDashboard() {
   let d;
-  try { d = await api("/api/profile"); } catch (e) { toast(e.message, true); return; }
+  try { d = await api(`/api/profile${state.tc ? `?tc=${state.tc}` : ""}`); } catch (e) { toast(e.message, true); return; }
+  state.timeClasses = d.time_classes || {};
+  state.gamesTotal = (d.games || []).length;
+  renderTcBars();
   if (!d.profile) {
     $("dashTitle").textContent = "Welcome to Lucidfish";
     $("stats").innerHTML = "";
@@ -982,17 +1026,22 @@ async function loadDashboard() {
   state.savedGames = d.games || [];
   const s = d.stats || {};
   $("dashTitle").textContent = `${d.profile.name}'s coach review`;
+  const tcName = state.tc ? cap(state.tc) : "";
+  $("summaryTitle").textContent = tcName ? `Coach review · ${tcName}` : "Coach review";
   const stat = (label, value) => `<div class="stat"><b>${value ?? "—"}</b><span>${label}</span></div>`;
   $("stats").innerHTML = s.games
     ? stat("games analysed", s.games) + stat("record (W-L-D)", `${s.wins}-${s.losses}-${s.draws}`)
       + stat("average accuracy", s.avg_accuracy != null ? `${s.avg_accuracy}%` : "—")
       + stat("avg centipawn loss", s.avg_acpl) + stat("blunders / game", s.blunders_per_game)
       + stat("mistakes / game", s.mistakes_per_game)
-    : "";
+    : state.tc ? `<div class="empty small">No ${esc(state.tc)} games analysed yet.</div>` : "";
   renderInsights(s);
-  $("summary").innerHTML = d.profile.summary
-    ? md(d.profile.summary)
-    : `<div class="empty small">${s.games ? "Analyse one more game and your coach will write a review of your play." : "Analyse a couple of your games and your coach will write a review of your play here."}</div>`;
+  const review = state.tc ? d.profile.summaries?.[state.tc] : d.profile.summary;
+  const waiting = !state.tc
+    ? (s.games ? "Analyse one more game and your coach will write a review of your play." : "Analyse a couple of your games and your coach will write a review of your play here.")
+    : s.games >= 2 ? `No ${state.tc} review yet.${EXPORT ? "" : " Press ⟳ Update review to write one."}`
+      : `Your ${state.tc} review appears after two analysed ${state.tc} games.`;
+  $("summary").innerHTML = review ? md(review) : `<div class="empty small">${esc(waiting)}</div>`;
   renderSavedGames();
   loadTrainItems().then(() => renderGoTrain());
   $("openings").innerHTML = (s.openings || []).length
@@ -1044,12 +1093,13 @@ function resultChip(r) {
 const RECENT_ON_DASHBOARD = 6;
 
 function renderSavedGames() {
-  const box = $("savedGames"), n = state.savedGames.length;
+  const box = $("savedGames"), mine = state.savedGames.filter((g) => !state.tc || g.time_class === state.tc);
+  const n = mine.length;
   $("seeAllGames").classList.toggle("hidden", !n);
   $("seeAllGames").textContent = n > RECENT_ON_DASHBOARD ? `See all ${n} games →` : "All games →";
   if (!n) { box.innerHTML = `<div class="empty small">No analysed games yet.</div>`; return; }
   box.innerHTML = "";
-  for (const g of state.savedGames.slice(0, RECENT_ON_DASHBOARD)) {
+  for (const g of mine.slice(0, RECENT_ON_DASHBOARD)) {
     const el = document.createElement("div");
     el.className = "item";
     el.innerHTML = `<span class="title">${esc(g.white)} vs ${esc(g.black)}</span>${resultChip(resultFor(g))}
@@ -1072,7 +1122,7 @@ $("refreshSummary").addEventListener("click", async () => {
   const btn = $("refreshSummary");
   btn.disabled = true; $("summaryStatus").textContent = "Your coach is writing…";
   try {
-    const d = await api("/api/profile/refresh_summary", { method: "POST" });
+    const d = await api("/api/profile/refresh_summary", { method: "POST", body: { time_class: state.tc } });
     $("summary").innerHTML = md(d.summary);
     $("summaryStatus").textContent = "Updated";
   } catch (e) { $("summaryStatus").textContent = ""; toast(e.message, true); }
@@ -1099,7 +1149,7 @@ const accClass = (v) => (v >= 90 ? "a-hi" : v >= 75 ? "a-mid" : v >= 60 ? "a-low
 
 function filteredGames() {
   const words = $("gSearch").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const res = $("gResult").value, color = $("gColor").value, tc = $("gTime").value;
+  const res = $("gResult").value, color = $("gColor").value, tc = state.tc;
   const list = state.savedGames.filter((g) => {
     if (res && resultFor(g) !== res) return false;
     if (color && g.user_side !== color) return false;
@@ -1152,10 +1202,6 @@ function gameRow(g) {
 
 function renderGames() {
   const box = $("gList"), all = state.savedGames;
-  const tcs = [...new Set(all.map((g) => g.time_class).filter(Boolean))];
-  const sel = $("gTime"), chosen = sel.value;
-  sel.innerHTML = `<option value="">All time controls</option>` + tcs.map((t) => `<option value="${esc(t)}">${esc(cap(t))}</option>`).join("");
-  sel.value = tcs.includes(chosen) ? chosen : "";
   $("gMore").classList.add("hidden");
   if (!state.profile) {
     $("gSummary").innerHTML = "";
@@ -1188,7 +1234,7 @@ function renderGames() {
 
 const rerenderGames = () => { gamesView.limit = 50; renderGames(); };
 $("gSearch").addEventListener("input", debounce(rerenderGames, 120));
-["gResult", "gColor", "gTime", "gSort"].forEach((id) => $(id).addEventListener("change", rerenderGames));
+["gResult", "gColor", "gSort"].forEach((id) => $(id).addEventListener("change", rerenderGames));
 $("gMore").addEventListener("click", () => { gamesView.limit += 50; renderGames(); });
 
 
@@ -1205,7 +1251,7 @@ $("gList").addEventListener("click", async (e) => {
     const what = empty.dataset.gempty;
     if (what === "profile") openProfile(null);
     else if (what === "analyze") showPage("analyze");
-    else { $("gSearch").value = ""; ["gResult", "gColor", "gTime"].forEach((id) => { $(id).value = ""; }); rerenderGames(); }
+    else { $("gSearch").value = ""; ["gResult", "gColor"].forEach((id) => { $(id).value = ""; }); setTc(""); rerenderGames(); }
     return;
   }
   const row = e.target.closest(".g-row");
@@ -1240,16 +1286,19 @@ document.querySelectorAll("#sourceSeg button").forEach((b) => b.addEventListener
 }));
 $("reloadGames").addEventListener("click", () => loadRecentGames());
 
-async function fetchChesscom(user) {
+/** Your latest 25 chess.com games (of one time control, looking back up to a year for them). */
+async function fetchChesscom(user, tc = "") {
+  if (tc === "classical") return [];   // chess.com calls every game of 10 minutes or more "rapid"
   const r = await fetch(`https://api.chess.com/pub/player/${encodeURIComponent(user.toLowerCase())}/games/archives`);
   if (r.status === 404) throw new Error(`chess.com user "${user}" not found`);
   if (!r.ok) throw new Error(`chess.com answered HTTP ${r.status}`);
   const archives = (await r.json()).archives || [];
   const games = [];
-  for (const url of archives.slice(-3).reverse()) {
+  for (const url of archives.slice(tc ? -12 : -3).reverse()) {
     const month = await (await fetch(url)).json();
     for (const g of (month.games || []).reverse()) {
       if (!g.pgn || !["chess", "chess960"].includes(g.rules || "chess")) continue;
+      if (tc && g.time_class !== tc) continue;
       const isWhite = g.white.username.toLowerCase() === user.toLowerCase();
       const me = isWhite ? g.white : g.black, them = isWhite ? g.black : g.white;
       games.push({
@@ -1264,8 +1313,13 @@ async function fetchChesscom(user) {
   return games.slice(0, 25);
 }
 
-async function fetchLichess(user) {
-  const url = `https://lichess.org/api/games/user/${encodeURIComponent(user)}?max=25&pgnInJson=true&clocks=true&opening=true&accuracy=true`;
+const LICHESS_PERF = { bullet: "ultraBullet,bullet", blitz: "blitz", rapid: "rapid", classical: "classical", daily: "correspondence" };
+const LICHESS_CLASS = { ultraBullet: "bullet", correspondence: "daily" };
+
+/** Your latest 25 Lichess games (of one time control). */
+async function fetchLichess(user, tc = "") {
+  const url = `https://lichess.org/api/games/user/${encodeURIComponent(user)}?max=25&pgnInJson=true&clocks=true&opening=true&accuracy=true`
+    + (tc ? `&perfType=${LICHESS_PERF[tc]}` : "");
   const r = await fetch(url, { headers: { Accept: "application/x-ndjson" } });
   if (r.status === 404) throw new Error(`Lichess user "${user}" not found`);
   if (!r.ok) throw new Error(`Lichess answered HTTP ${r.status}`);
@@ -1282,7 +1336,7 @@ async function fetchLichess(user) {
     games.push({
       pgn: g.pgn, white: wName, black: bName, side: isWhite ? "white" : "black", rating: me.rating || null,
       result: !g.winner ? "D" : (g.winner === (isWhite ? "white" : "black") ? "W" : "L"),
-      date: new Date(g.createdAt), timeClass: g.speed || "", accuracy: me.analysis?.accuracy ?? null,
+      date: new Date(g.createdAt), timeClass: LICHESS_CLASS[g.speed] || g.speed || "", accuracy: me.analysis?.accuracy ?? null,
     });
   }
   return games;
@@ -1301,9 +1355,13 @@ async function loadRecentGames() {
     state.recent = [];
     return;
   }
-  box.innerHTML = `<div class="empty small">Loading ${esc(site)} games for ${esc(user)}…</div>`;
+  const tc = state.tc;
+  state.recentTc = tc;
+  renderTcBars();
+  box.innerHTML = `<div class="empty small">Loading ${esc(site)} ${esc(tc)} games for ${esc(user)}…</div>`;
   try {
-    state.recent = state.source === "chesscom" ? await fetchChesscom(user) : await fetchLichess(user);
+    state.recent = state.source === "chesscom" ? await fetchChesscom(user, tc) : await fetchLichess(user, tc);
+    if (state.recentTc !== tc) return;   // the filter changed meanwhile: a newer load is on its way
   } catch (e) {
     state.recent = [];
     box.innerHTML = `<div class="empty small">Couldn't load games from ${esc(site)}: ${esc(e.message)}.<br>You can paste a PGN instead.</div>`;
@@ -1335,8 +1393,12 @@ function recentRow(g, i) {
 function renderRecentGames() {
   const box = $("gameList");
   $("selectBar").classList.toggle("hidden", !state.recent.length);
+  const tc = state.recentTc;
   box.innerHTML = state.recent.length ? state.recent.map(recentRow).join("")
-    : `<div class="empty small">No recent games found.</div>`;
+    : `<div class="empty small">${tc === "classical" && state.source === "chesscom"
+      ? "chess.com has no classical games: it calls every game of 10 minutes or more rapid."
+      : `No ${tc ? `${esc(tc)} ` : ""}games found${tc && state.source === "chesscom" ? " in the last 12 months" : ""}.`}</div>`;
+  $("analyzeBatch").textContent = tc ? `Analyze ${tc} batch` : "Analyze batch";
   updateSelection();
 }
 
@@ -1481,6 +1543,9 @@ const STATUS_LABELS = { done: "Done", stopped: "Stopped", error: "Failed", cance
 function detailChip(detail) {
   return detail ? `<span class="chip" title="Coaching detail for this game">${esc(DETAIL_NAMES[detail] || detail)}</span>` : "";
 }
+function tcChip(tc) {
+  return tc ? `<span class="chip tc-chip" title="Time control">${esc(cap(tc))}</span>` : "";
+}
 
 function renderQueue() {
   const d = queue.data;
@@ -1503,7 +1568,7 @@ function renderQueue() {
 
   const r = d.running;
   $("queueRunning").innerHTML = r ? `<div class="section-label">Now analysing</div>`
-    + `<div class="qjob" data-id="${r.id}"><div class="row"><span class="dot busy"></span><b class="grow ellipsis">${esc(r.title)}</b>${detailChip(r.detail)}`
+    + `<div class="qjob" data-id="${r.id}"><div class="row"><span class="dot busy"></span><b class="grow ellipsis">${esc(r.title)}</b>${tcChip(r.time_class)}${detailChip(r.detail)}`
     + `<span class="small">${r.reviewing ? "writing the review…" : `about ${fmtDuration(r.eta_s)} left`}</span>`
     + `<button class="secondary sm" data-qa="open">Open</button><button class="danger sm" data-qa="cancel">Stop</button></div>`
     + `<div class="bar dual"><div class="eng" style="width:${(100 * r.engine_done / Math.max(1, r.total)).toFixed(1)}%"></div>`
@@ -1512,7 +1577,7 @@ function renderQueue() {
 
   $("queueUpcoming").innerHTML = d.queued.length ? `<div class="section-label">Up next</div><div class="list">`
     + d.queued.map((j, i) => `<div class="item qrow" data-id="${j.id}" title="Open this game">`
-      + `<span class="qpos">${i + 1}</span><span class="title">${esc(j.title)}</span>${detailChip(j.detail)}`
+      + `<span class="qpos">${i + 1}</span><span class="title">${esc(j.title)}</span>${tcChip(j.time_class)}${detailChip(j.detail)}`
       + `<span class="meta">${d.paused ? "" : `starts in ${fmtDuration(j.start_in_s)} · `}takes ~${fmtDuration(j.eta_s)}`
       + `${j.prefetched ? ` · engine ${Math.min(100, Math.round(100 * j.prefetched / (j.total + 1)))}% ahead` : ""}</span>`
       + `<button class="ghost icon" data-qa="top" title="Analyse next" aria-label="Move to the front"${i === 0 ? " disabled" : ""}>⤒</button>`
@@ -1524,7 +1589,7 @@ function renderQueue() {
   $("queueDone").innerHTML = d.finished.length ? `<div class="section-label">Finished</div><div class="list">`
     + d.finished.map((j) => `<div class="item qrow ${j.game_id || j.status === "done" ? "" : "static"}" data-id="${j.id}">`
       + `<span class="chip ${j.status === "done" ? "win" : j.status === "error" ? "loss" : ""}">${esc(STATUS_LABELS[j.status] || j.status)}</span>`
-      + `<span class="title">${esc(j.title)}</span>`
+      + `<span class="title">${esc(j.title)}</span>${tcChip(j.time_class)}`
       + `<span class="meta">${[j.accuracy != null ? `${j.accuracy}% accuracy` : "", j.duration_s ? `took ${fmtDuration(j.duration_s)}` : "",
         j.error ? esc(j.error) : ""].filter(Boolean).join(" · ")}</span></div>`).join("")
     + `</div>` : "";
@@ -2331,6 +2396,10 @@ function renderPractice() {
     html = `<div class="expl-title"><span class="san">🎯 Puzzle ${t.pos + 1} of ${t.queue.length}</span>`
       + `<span class="small">From your game against <b>${esc(puzzle.opponent)}</b>${playedDate(puzzle) ? ` (${esc(fmtDate(playedDate(puzzle)))})` : ""}, `
       + `move ${m.n}. You played <b>${esc(label)} ${esc(m.san)}</b> ${badge(m.cls)} here. Find a better move.</span></div>`
+      + `<div class="row puzzle-tags"><span class="chip imp-${importanceOf(puzzle)}" title="${esc(puzzle.why || "")}">`
+      + `${IMPORTANCE[importanceOf(puzzle)].join(" ")}</span>`
+      + themesOf(puzzle).map((th) => `<span class="chip">${esc(THEME_LABELS[th] || th)}</span>`).join("")
+      + (p.result || p.showAnswer ? `<span class="small">${esc(puzzle.why || "")}</span>` : "") + `</div>`
       + (t.again.has(puzzle.id) && t.queue.indexOf(puzzle) !== t.pos ? `<div class="callout">🔁 Again: you missed this one earlier in the session.</div>` : "");
   } else {
     html = `<div class="expl-title"><span class="san">🎯 Practice · ${esc(label)}</span>`
@@ -2593,9 +2662,55 @@ async function loadTrainItems() {
   return train.items;
 }
 
+/* What to train on. Defaults keep it manageable: key and costly errors only, no bullet games, nothing played in
+ * time trouble (that's the clock, not a gap in knowledge), and at most 10 new puzzles a day. */
+const TRAIN_DEFAULTS = { level: 2, perDay: 10, hurried: false, bullet: false, theme: "" };
+const IMPORTANCE = { 3: ["★★★", "Key"], 2: ["★★", "Costly"], 1: ["★", "Minor"] };
+const THEME_LABELS = {
+  missed_threat: "Missed threats", hanging: "Hanging material", missed_tactic: "Missed tactics",
+  missed_mate: "Missed mates", allowed_mate: "Allowed mates", king_attack: "King safety",
+  "phase:opening": "Opening", "phase:middlegame": "Middlegame", "phase:endgame": "Endgame",
+};
+const importanceOf = (it) => it.importance ?? (it.cls === "inaccuracy" ? 1 : 2);   // copies made before levels
+const themesOf = (it) => [...(it.themes || []), ...(it.phase ? [`phase:${it.phase}`] : [])];
+
+function trainSettings() {
+  try { return { ...TRAIN_DEFAULTS, ...JSON.parse(localStorage.getItem("lucidfish-train-settings") || "{}") }; }
+  catch { return { ...TRAIN_DEFAULTS, ...(train.settings || {}) }; }
+}
+function saveTrainSettings(changes) {
+  train.settings = { ...trainSettings(), ...changes };
+  try { localStorage.setItem("lucidfish-train-settings", JSON.stringify(train.settings)); } catch { /* this visit */ }
+}
+
+/** New puzzles started today (the daily limit), kept per profile like the progress. */
+function newToday() {
+  const today = new Date().toDateString();
+  try {
+    const m = JSON.parse(localStorage.getItem(`${trainKey()}-new`) || "{}");
+    return m.date === today ? m.count : 0;
+  } catch { return train.newToday || 0; }
+}
+function countNewToday() {
+  const today = new Date().toDateString(), n = newToday() + 1;
+  train.newToday = n;
+  try { localStorage.setItem(`${trainKey()}-new`, JSON.stringify({ date: today, count: n })); } catch { /* this visit */ }
+}
+function newLeftToday() {
+  const per = trainSettings().perDay;
+  return per > 0 ? Math.max(0, per - newToday()) : Infinity;
+}
+
+/** The puzzles that pass every filter except the theme (the theme chips count within this). */
+function trainBase() {
+  const s = trainSettings();
+  return (train.items || []).filter((it) => importanceOf(it) >= s.level
+    && (s.hurried || !it.hurried)
+    && (state.tc ? it.time_class === state.tc : s.bullet || it.time_class !== "bullet"));
+}
 function trainPool() {
-  const serious = $("trainFilter").value === "serious";
-  return (train.items || []).filter((it) => !serious || it.cls !== "inaccuracy");
+  const theme = trainSettings().theme;
+  return trainBase().filter((it) => !theme || themesOf(it).includes(theme));
 }
 
 function trainCounts(pool, rec, now = Date.now()) {
@@ -2606,6 +2721,8 @@ function trainCounts(pool, rec, now = Date.now()) {
     if (r.due <= now) c.due += 1; else c.nextDue = Math.min(c.nextDue, r.due);
     if (r.box >= 5) c.mastered += 1; else if (r.box >= 3) c.reviewing += 1; else c.learning += 1;
   }
+  c.newToday = Math.min(c.fresh, newLeftToday());
+  c.todo = c.due + c.newToday;
   return c;
 }
 
@@ -2615,31 +2732,52 @@ function whenText(ts) {
 }
 
 async function showTrainPage() {
-  $("trainLevels").innerHTML = `<div class="small">Loading your puzzles…</div>`;
+  if (!train.items) $("trainLevels").innerHTML = `<div class="small">Loading your puzzles…</div>`;
+  else renderTrainPage();   // show what we have while the list refreshes
   await loadTrainItems();
   renderTrainPage();
 }
 
+function renderTrainControls() {
+  const s = trainSettings();
+  $("trainFilter").value = String(s.level);
+  $("trainPerDay").value = String(s.perDay);
+  $("trainHurried").checked = s.hurried;
+  $("trainBullet").checked = s.bullet;
+  $("trainBulletWrap").classList.toggle("hidden", !!state.tc || !(train.items || []).some((it) => it.time_class === "bullet"));
+  const base = trainBase(), counts = {};
+  for (const it of base) for (const t of themesOf(it)) counts[t] = (counts[t] || 0) + 1;
+  const chip = (t, label, n) => `<button data-theme="${t}" class="${s.theme === t ? "active" : ""}" aria-pressed="${s.theme === t}">`
+    + `${esc(label)} <span class="n">${n}</span></button>`;
+  const themes = Object.keys(THEME_LABELS).filter((t) => counts[t] || t === s.theme);
+  $("trainThemes").innerHTML = base.length && themes.length
+    ? chip("", "All themes", base.length) + themes.map((t) => chip(t, THEME_LABELS[t], counts[t] || 0)).join("") : "";
+}
+
 function renderTrainPage() {
+  renderTrainControls();
   const pool = trainPool(), rec = trainRecords(), c = trainCounts(pool, rec);
   const tile = (cls, n, label, hint) => `<div class="stat tl-${cls}" title="${esc(hint)}"><b>${n}</b><span>${label}</span></div>`;
   $("trainLevels").innerHTML = pool.length
-    ? `<div class="stats train-stats">${tile("due", c.due + c.fresh, "to do now", "Puzzles due for review, plus the ones you haven't tried yet")}`
-      + tile("new", c.fresh, "new", "Never tried")
+    ? `<div class="stats train-stats">${tile("due", c.todo, "to do today", "Puzzles due for review, plus today's new ones")}`
+      + tile("new", c.fresh, "not started", "Never tried; a few are added each day")
       + tile("learning", c.learning, "learning", "Levels 1–2: missed recently or solved once or twice")
       + tile("reviewing", c.reviewing, "reviewing", "Levels 3–4: solved several times")
       + tile("mastered", c.mastered, "mastered", "Level 5: solved every time; comes back every 35 days") + `</div>`
       + `<div class="tl-bar" aria-hidden="true">${["new", "learning", "reviewing", "mastered"].map((k) =>
         `<div class="tl-${k}" style="flex:${c[k === "new" ? "fresh" : k]}"></div>`).join("")}</div>`
     : `<div class="empty small">${(train.items || []).length
-      ? "No mistakes or blunders yet: choose “All my mistakes” to train on your inaccuracies."
+      ? "No puzzles match these settings. Try “Everything”, another time control or theme, or include time trouble."
       : "No puzzles yet. They come from analysed games in which Lucidfish knows which side you played."}</div>`;
-  const todo = c.due + c.fresh;
   $("trainStart").disabled = !pool.length;
-  $("trainStart").textContent = todo || !pool.length ? "▶ Start training" : "▶ Practise anyway";
+  $("trainStart").textContent = c.todo || !pool.length ? "▶ Start training" : "▶ Practise anyway";
+  const waiting = c.fresh - c.newToday;
   $("trainNote").textContent = !pool.length ? ""
-    : todo ? `${pool.length} puzzle${pool.length === 1 ? "" : "s"} from your games · ${c.due} due for review · ${c.fresh} new.`
-      : `All caught up! The next puzzle is due ${whenText(c.nextDue)}. You can still practise the ones you know least.`;
+    : c.todo ? `${pool.length} puzzle${pool.length === 1 ? "" : "s"} · ${c.due} due for review · ${c.newToday} new today`
+      + (waiting > 0 ? ` (${waiting} more new ones wait for the next days).` : ".")
+      : c.fresh ? `Done for today: ${c.fresh} new puzzle${c.fresh === 1 ? "" : "s"} wait for tomorrow (or raise “New per day”). `
+        + "You can still practise the ones you know least."
+        : `All caught up! The next puzzle is due ${whenText(c.nextDue)}. You can still practise the ones you know least.`;
   const s = train.summary;
   $("trainDone").classList.toggle("hidden", !s);
   if (s) {
@@ -2654,32 +2792,42 @@ function renderTrainPage() {
   renderGoTrain(c);
 }
 
-/** The dashboard button, with how many puzzles are waiting. */
+/** The dashboard button, with how many puzzles are waiting today. */
 function renderGoTrain(c) {
-  const pool = train.items || [];
-  if (!c) c = trainCounts(pool, trainRecords());
-  const todo = c.due + c.fresh;
-  $("goTrain").classList.toggle("hidden", !pool.length);
-  $("goTrain").textContent = todo ? `🎯 Train · ${todo} to do` : "🎯 Train";
+  const all = train.items || [];
+  if (!c) c = trainCounts(trainPool(), trainRecords());
+  $("goTrain").classList.toggle("hidden", !all.length);
+  $("goTrain").textContent = c.todo ? `🎯 Train · ${c.todo} to do` : "🎯 Train";
 }
 
 function startTraining() {
   const pool = trainPool(), rec = trainRecords(), now = Date.now();
   const size = Number($("trainSize").value) || 10;
+  const byImportance = (a, b) => importanceOf(b) - importanceOf(a);
   const due = pool.filter((it) => rec[it.id] && rec[it.id].due <= now)
-    .sort((a, b) => rec[a.id].box - rec[b.id].box || rec[a.id].due - rec[b.id].due);
-  const fresh = pool.filter((it) => !rec[it.id]).sort((a, b) => b.loss - a.loss);   // the costliest first
+    .sort((a, b) => rec[a.id].box - rec[b.id].box || byImportance(a, b) || rec[a.id].due - rec[b.id].due);
+  const fresh = pool.filter((it) => !rec[it.id]).sort((a, b) => byImportance(a, b) || b.loss - a.loss)
+    .slice(0, newLeftToday());                      // the most important first, a few a day
   let queue = [...due, ...fresh].slice(0, size);
   const extra = !queue.length;   // nothing due: practise the least-known puzzles, without moving them up
   if (extra) {
-    queue = [...pool].sort((a, b) => (rec[a.id]?.box ?? 0) - (rec[b.id]?.box ?? 0)
-      || (rec[a.id]?.due ?? 0) - (rec[b.id]?.due ?? 0)).slice(0, size);
+    queue = pool.filter((it) => rec[it.id]).sort((a, b) => (rec[a.id].box - rec[b.id].box) || byImportance(a, b))
+      .slice(0, size);
   }
   if (!queue.length) return;
   train.summary = null;
   train.session = { queue, pos: 0, graded: {}, again: new Set(), solved: 0, missed: 0, extra };
   openPuzzle();
 }
+
+$("trainFilter").addEventListener("change", (e) => { saveTrainSettings({ level: Number(e.target.value) }); renderTrainPage(); });
+$("trainPerDay").addEventListener("change", (e) => { saveTrainSettings({ perDay: Number(e.target.value) }); renderTrainPage(); });
+$("trainHurried").addEventListener("change", (e) => { saveTrainSettings({ hurried: e.target.checked }); renderTrainPage(); });
+$("trainBullet").addEventListener("change", (e) => { saveTrainSettings({ bullet: e.target.checked }); renderTrainPage(); });
+$("trainThemes").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-theme]");
+  if (b) { saveTrainSettings({ theme: b.dataset.theme }); renderTrainPage(); }
+});
 
 function currentPuzzle() {
   const t = train.session, it = t?.queue[t.pos], p = state.practice;
@@ -2726,6 +2874,7 @@ function gradePuzzle(ok) {
   const repeat = t.again.has(it.id) && t.queue.indexOf(it) !== t.pos;   // the end-of-session repeat is practice only
   if (!repeat) {
     const rec = trainRecords(), now = Date.now();
+    if (!rec[it.id] && !t.extra) countNewToday();
     const r = rec[it.id] || { box: 0, seen: 0, right: 0, due: now };
     r.seen += 1; r.last = now;
     if (ok) {
@@ -2754,7 +2903,6 @@ function renderTrainBar() {
 }
 
 $("trainStart").addEventListener("click", startTraining);
-$("trainFilter").addEventListener("change", renderTrainPage);
 $("goTrain").addEventListener("click", () => showPage("train"));
 $("trainNext").addEventListener("click", nextPuzzle);
 $("trainEnd").addEventListener("click", () => finishTraining(true));

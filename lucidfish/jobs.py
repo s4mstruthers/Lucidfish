@@ -29,7 +29,6 @@ from .pipeline import (
     analyze_game,
     build_coach,
     parse_game,
-    parse_time_control,
     prefetch_engine,
 )
 from .prompts import PLAYER_SUMMARY_SYSTEM, build_player_summary_prompt
@@ -107,7 +106,7 @@ def rating_for_game(pgn: str, side: str | None, given: int | None, profile: dict
     """
     headers = ratings.pgn_headers(pgn)
     site = ratings.game_site(headers)
-    time_class = parse_time_control(headers.get("TimeControl", ""))[2]
+    time_class = ratings.time_class(headers)
     own = ratings.game_rating(headers, side) or given
     if own:
         return own, ratings.label(site, time_class)
@@ -133,6 +132,7 @@ class Job:
         self.headers = dict(h)
         self.fingerprint = store.fingerprint(pgn)
         self.title = f"{h.get('White', '?')} vs {h.get('Black', '?')}"
+        self.time_class = ratings.time_class(self.headers)   # shown in the queue
         self.total = sum(1 for _ in game.mainline_moves())
         self.lock = threading.Lock()
         self.status = "queued"                 # queued → running → done | stopped | error | cancelled
@@ -207,6 +207,7 @@ class Job:
         with self.lock:
             return {
                 "id": self.id, "title": self.title, "date": self.headers.get("Date", ""), "side": self.side,
+                "time_class": self.time_class,
                 "source": self.source, "detail": self.detail, "status": self.status, "label": self.label,
                 "total": self.total, "done": len(self.moves), "engine_done": self.engine_done,
                 "prefetched": self.prefetched, "eta_s": None if eta is None else round(eta, 1),
@@ -244,7 +245,8 @@ class AnalysisQueue:
         self._finished: deque[Job] = deque()
         self._jobs: dict[str, Job] = {}
         self._session: list[str] = []          # jobs since the queue was last idle (overall progress)
-        self._touched: set[int] = set()        # profiles with new games (review refreshed when idle)
+        # Profiles with new games, and their time controls (their reviews are refreshed when idle).
+        self._touched: dict[int, set[str]] = {}
         self._worker: threading.Thread | None = None
         self._prefetch: tuple[threading.Thread, threading.Event] | None = None
         self.paused = False
@@ -440,7 +442,7 @@ class AnalysisQueue:
 
     def _loop(self) -> None:
         while not self._closed:
-            job, refresh = None, set()
+            job, refresh = None, {}
             with self._cond:
                 while not self._closed:
                     if self._queued and not self.paused:
@@ -449,12 +451,14 @@ class AnalysisQueue:
                         self._running = job
                         break
                     if not self._queued and self._touched:
-                        refresh, self._touched = set(self._touched), set()
+                        refresh, self._touched = dict(self._touched), {}
                         break
                     self._cond.wait(timeout=5)
             if job is None:
-                for pid in refresh:
+                for pid, classes in refresh.items():
                     refresh_player_summary(pid)
+                    for tc in sorted(c for c in classes if c):
+                        refresh_player_summary(pid, tc)
                 continue
             self._persist()
             try:
@@ -486,7 +490,7 @@ class AnalysisQueue:
 
         report = analyze_game(job.pgn, cfg, side_filter=job.side, progress=progress, on_move=job.add_move,
                               should_stop=lambda: job.stop,
-                              player_context=(profile or {}).get("summary") or "",
+                              player_context=coach_context(profile, job.pgn),
                               level=(profile or {}).get("level") or None, engine_cache=cache)
         end = time.time()
         with job.lock:
@@ -508,7 +512,7 @@ class AnalysisQueue:
                                           report.accuracy, replace=job.replace, chapters=report.chapters)
                 if game_id and cfg.llm.enabled:
                     with self._cond:
-                        self._touched.add(profile["id"])
+                        self._touched.setdefault(profile["id"], set()).add(report.time_class or "")
                 if game_id:
                     share.sync_profile(profile["id"])   # keep a shared copy up to date, if enabled
         # Only now is the result final: a page that sees "done" can rely on the game being saved.
@@ -594,19 +598,30 @@ class AnalysisQueue:
             pass   # persistence is a convenience; never break the queue over it
 
 
-def refresh_player_summary(pid: int) -> tuple[str, str]:
-    """Re-write a profile's coach review from its stats and recent reviews. Returns (summary, error)."""
-    stats = store.aggregate_stats(pid)
+def coach_context(profile: dict | None, pgn: str) -> str:
+    """What the coach knows about the player when analysing a game: the review of their games in that time
+    control if there is one (lessons differ between bullet and classical), else the overall review."""
+    if not profile:
+        return ""
+    tc = ratings.time_class(ratings.pgn_headers(pgn))
+    return (profile.get("summaries") or {}).get(tc) or profile.get("summary") or ""
+
+
+def refresh_player_summary(pid: int, time_class: str | None = None) -> tuple[str, str]:
+    """Re-write a profile's coach review (of all games, or of one time control) from its stats and recent
+    reviews. Returns (summary, error)."""
+    stats = store.aggregate_stats(pid, time_class=time_class)
     if stats.get("games", 0) < 2:
-        return "", "Analyse at least two games first."
+        return "", f"Analyse at least two {time_class + ' ' if time_class else ''}games first."
     coach, warnings = build_coach(settings.load_config())
     if not coach.available:
         return "", warnings[0] if warnings else "The AI coach is turned off in Settings."
-    prompt = build_player_summary_prompt(stats, store.recent_reviews(pid), profile=store.get_profile(pid))
+    prompt = build_player_summary_prompt(stats, store.recent_reviews(pid, time_class=time_class),
+                                         profile=store.get_profile(pid), time_class=time_class)
     try:
         summary = coach.hard(lambda llm: llm.generate(PLAYER_SUMMARY_SYSTEM, prompt))
     except LLMError as e:
         return "", str(e)
-    store.set_summary(pid, summary)
+    store.set_summary(pid, summary, time_class)
     share.sync_profile(pid)
     return summary, ""
