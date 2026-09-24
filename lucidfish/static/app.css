@@ -492,3 +492,11 @@ label.field.inline { flex-direction: row; align-items: center; gap: 8px; }
   .g-errs { grid-column: 2; justify-content: flex-start; }
   .g-actions { grid-column: 3; }
 }
+
+/* ------------------------------------------------------------ recent games selection */
+.select-bar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 0 2px 10px; }
+.item.recent { user-select: none; }
+.item.recent input[type="checkbox"] { pointer-events: none; }
+.item.recent.selected { background: var(--accent-soft); border-color: var(--accent); }
+.item.recent:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.item.recent button { flex: none; }

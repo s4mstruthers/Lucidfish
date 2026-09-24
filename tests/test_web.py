@@ -83,3 +83,15 @@ def test_practice_move_endpoint(client):
     bad = client.post("/api/check_move", json={"fen": fen, "uci": "a1a8"}, headers=H)
     assert bad.status_code == 400 and "not legal" in bad.json()["error"]
     assert client.post("/api/check_move", json={"fen": fen, "uci": "zz"}, headers=H).status_code == 422
+
+
+def test_update_detection_and_static_caching(client, monkeypatch):
+    h = client.get("/api/health").json()
+    assert h["stale"] is False and h["build"]
+    monkeypatch.setattr(web, "_BUILD", "old-build")          # as if the files changed after startup
+    assert client.get("/api/health").json()["stale"] is True
+    assert client.get("/static/app.js").headers["cache-control"] == "no-cache"
+    assert "max-age" in client.get("/static/vendor/jquery-3.7.1.min.js").headers["cache-control"]
+    # An unknown API route answers with FastAPI's "Not Found", which the page explains as "restart needed".
+    r = client.post("/api/does-not-exist", json={}, headers=H)
+    assert r.status_code == 404 and r.json() == {"detail": "Not Found"}

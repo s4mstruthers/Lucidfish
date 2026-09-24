@@ -21,6 +21,7 @@ Design notes:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import re
 import socket
@@ -49,6 +50,22 @@ from .prompts import COACH_CHAT_SYSTEM
 STATIC = Path(__file__).parent / "static"
 DEFAULT_PORT = 8420
 _LOOPBACK = {"127.0.0.1", "localhost", "::1", "[::1]"}
+
+
+def _code_fingerprint() -> str:
+    """Changes whenever Lucidfish's files change on disk (e.g. after `git pull`)."""
+    root = Path(__file__).parent
+    parts = []
+    for path in sorted([*root.glob("*.py"), *STATIC.glob("*.*")]):
+        try:
+            st = path.stat()
+        except OSError:
+            continue
+        parts.append(f"{path.name}:{st.st_mtime_ns}:{st.st_size}")
+    return hashlib.sha1("|".join(parts).encode()).hexdigest()[:12]
+
+
+_BUILD = _code_fingerprint()   # the code this process is actually running
 
 
 def _allowed_hosts() -> set[str]:
@@ -100,6 +117,11 @@ async def _security(request: Request, call_next):
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("X-Frame-Options", "DENY")
     response.headers.setdefault("Content-Security-Policy", _CSP)
+    if request.url.path.startswith("/static/"):
+        # Revalidate the app's own scripts and styles on every load (cheap on localhost),
+        # so the page always matches the running server after an update.
+        vendor = request.url.path.startswith("/static/vendor/")
+        response.headers["Cache-Control"] = "public, max-age=604800" if vendor else "no-cache"
     return response
 
 
@@ -455,6 +477,9 @@ def health(refresh: bool = False):
         "engine": _cached("engine", 120, _engine_health),
         "coach": _cached("coach", 20, _coach_health),
         "busy": QUEUE.busy,
+        "build": _BUILD,
+        # The files changed after this server started: it needs a restart to run the new code.
+        "stale": _code_fingerprint() != _BUILD,
     }
 
 

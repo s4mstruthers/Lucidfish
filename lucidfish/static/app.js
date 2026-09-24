@@ -52,6 +52,11 @@ function toast(message, bad = false) {
   setTimeout(() => el.remove(), bad ? 7000 : 3500);
 }
 
+/* An unknown API route means this page is newer than the server process running it:
+ * the files were updated (e.g. `git pull`) while Lucidfish was still running. */
+const RESTART_MESSAGE = "Lucidfish needs a restart to finish updating: this page is new, but the program serving it "
+  + "is still the old version. Close Lucidfish (Ctrl+C in its window) and start it again, then reload this page.";
+
 /** fetch() wrapper: JSON in/out, the CSRF header, and readable errors. */
 async function api(path, { method = "GET", body, raw = false } = {}) {
   const opts = { method, headers: { "X-Lucidfish": "1" } };
@@ -64,6 +69,7 @@ async function api(path, { method = "GET", body, raw = false } = {}) {
     try {
       const data = await res.json();
       if (data.error) msg = data.error;
+      else if (res.status === 404 && data.detail === "Not Found") msg = RESTART_MESSAGE;
       else if (Array.isArray(data.detail)) msg = data.detail.map((d) => `${(d.loc || []).slice(-1)[0]}: ${d.msg}`).join("; ");
     } catch { /* not JSON */ }
     throw new Error(msg);
@@ -256,6 +262,11 @@ function renderHealth() {
 
 function renderBanners() {
   const h = state.health, out = [];
+  if (h?.stale) {
+    out.push({ id: "stale", cls: "bad", title: "Lucidfish was updated while it was running",
+      body: "Restart it to use the new version: close Lucidfish (Ctrl+C in its window) and start it again, then reload this page.",
+      actions: [] });
+  }
   if (h && !h.engine.ok && !state.dismissed.has("engine")) {
     out.push({ id: "engine", cls: "bad", title: "Stockfish isn't set up yet",
       body: esc(h.engine.error || ""), actions: [["Open settings", () => openSettings("analysis")]] });
@@ -690,7 +701,8 @@ async function loadRecentGames() {
   const box = $("gameList");
   const user = state.source === "chesscom" ? state.profile?.chesscom_user : state.profile?.lichess_user;
   const site = state.source === "chesscom" ? "chess.com" : "Lichess";
-  state.selected.clear(); updateSelection();
+  state.selected.clear(); lastPicked = null; updateSelection();
+  $("selectBar").classList.add("hidden");
   if (!user) {
     box.innerHTML = `<div class="empty small">Add your ${site} username to your profile to see your recent games here.<br><br>
       <button class="secondary sm" id="addUser">${state.profile ? "Edit profile" : "Create profile"}</button></div>`;
@@ -707,45 +719,86 @@ async function loadRecentGames() {
     return;
   }
   const analysed = new Map(state.savedGames.map((g) => [g.fingerprint, g.id]));
-  box.innerHTML = state.recent.length ? "" : `<div class="empty small">No recent games found.</div>`;
-  for (const [i, g] of state.recent.entries()) {
+  for (const g of state.recent) {
     g.fingerprint = await sha1(g.pgn.trim());
     g.storedId = analysed.get(g.fingerprint);
-    const el = document.createElement("div");
-    g.el = el;
-    el.className = "item";
-    el.innerHTML = `<input type="checkbox" aria-label="Select game">
-      <span class="title">${esc(g.white)} vs ${esc(g.black)}</span>${resultChip(g.result)}
-      <span class="chip accent${g.storedId ? "" : " hidden"}">ANALYSED</span>
-      <span class="meta">${g.accuracy != null ? `${Number(g.accuracy).toFixed(1)}% · ` : ""}${esc(g.timeClass)}${g.rating ? ` · ${g.rating}` : ""} · ${fmtDate(g.date)}</span>`;
-    const cb = el.querySelector("input");
-    cb.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (cb.checked) state.selected.add(i); else state.selected.delete(i);
-      updateSelection();
-    });
-    el.addEventListener("click", () => {
-      if (g.storedId && !$("redo").checked) openStoredGame(g.storedId);
-      else startAnalysis(g.pgn, g.side, g.rating);
-    });
-    box.appendChild(el);
   }
+  renderRecentGames();
 }
+
+/* Clicking a game selects it (for "Analyze selected"); only the button on the right
+ * starts an analysis or opens a saved one, so nothing expensive happens by accident. */
+function recentRow(g, i) {
+  const sel = state.selected.has(i);
+  const action = g.storedId
+    ? `<button class="secondary sm" data-ra="open" title="Open the saved analysis">Open</button>`
+    : `<button class="secondary sm" data-ra="analyze" title="Analyse just this game now">Analyze</button>`;
+  return `<div class="item recent${sel ? " selected" : ""}" data-i="${i}" role="option" aria-selected="${sel}" tabindex="0">
+    <input type="checkbox" tabindex="-1" aria-hidden="true"${sel ? " checked" : ""}>
+    <span class="title">${esc(g.white)} vs ${esc(g.black)}</span>${resultChip(g.result)}
+    ${g.storedId ? `<span class="chip accent">ANALYSED</span>` : ""}
+    <span class="meta">${g.accuracy != null ? `${Number(g.accuracy).toFixed(1)}% · ` : ""}${esc(g.timeClass)}${g.rating ? ` · ${g.rating}` : ""} · ${fmtDate(g.date)}</span>
+    ${action}</div>`;
+}
+
+function renderRecentGames() {
+  const box = $("gameList");
+  $("selectBar").classList.toggle("hidden", !state.recent.length);
+  box.innerHTML = state.recent.length ? state.recent.map(recentRow).join("")
+    : `<div class="empty small">No recent games found.</div>`;
+  updateSelection();
+}
+
+let lastPicked = null;
+function pickRecent(i, shift) {
+  const on = !state.selected.has(i);
+  const [from, to] = shift && lastPicked != null ? [Math.min(lastPicked, i), Math.max(lastPicked, i)] : [i, i];
+  for (let k = from; k <= to; k++) { if (on) state.selected.add(k); else state.selected.delete(k); }
+  lastPicked = i;
+  document.querySelectorAll("#gameList .item.recent").forEach((row) => {
+    const sel = state.selected.has(Number(row.dataset.i));
+    row.classList.toggle("selected", sel);
+    row.setAttribute("aria-selected", sel);
+    row.querySelector("input").checked = sel;
+  });
+  updateSelection();
+}
+$("gameList").addEventListener("mousedown", (e) => { if (e.shiftKey) e.preventDefault(); });   // no text selection
+$("gameList").addEventListener("click", (e) => {
+  const row = e.target.closest(".item.recent");
+  if (!row) return;
+  const i = Number(row.dataset.i), g = state.recent[i];
+  const action = e.target.closest("[data-ra]")?.dataset.ra;
+  if (action === "open") openStoredGame(g.storedId);
+  else if (action === "analyze") startAnalysis(g.pgn, g.side, g.rating);
+  else pickRecent(i, e.shiftKey);
+});
+$("gameList").addEventListener("keydown", (e) => {
+  const row = e.target.closest?.(".item.recent");
+  if (row && e.target === row && (e.key === " " || e.key === "Enter")) {
+    e.preventDefault();
+    pickRecent(Number(row.dataset.i), e.shiftKey);
+  }
+});
+$("selectAll").addEventListener("change", (e) => {
+  state.selected = new Set(e.target.checked ? state.recent.map((_, i) => i) : []);
+  lastPicked = null;
+  renderRecentGames();
+});
 
 /** Refresh the ANALYSED marks after queued games finish (no refetch from the site). */
 function markAnalysed() {
   const analysed = new Map(state.savedGames.map((g) => [g.fingerprint, g.id]));
-  for (const g of state.recent) {
-    if (!g.fingerprint || !g.el) continue;
-    g.storedId = analysed.get(g.fingerprint);
-    g.el.querySelector(".chip.accent").classList.toggle("hidden", !g.storedId);
-  }
+  for (const g of state.recent) if (g.fingerprint) g.storedId = analysed.get(g.fingerprint);
+  renderRecentGames();
 }
 
 function updateSelection() {
-  const n = state.selected.size;
+  const n = state.selected.size, all = $("selectAll");
   $("analyzeSelected").disabled = !n;
   $("analyzeSelected").textContent = n ? `Analyze selected (${n})` : "Analyze selected";
+  all.checked = n > 0 && n === state.recent.length;
+  all.indeterminate = n > 0 && n < state.recent.length;
 }
 
 /* ================================================================ batch → queue */
@@ -761,8 +814,8 @@ async function startImport(games) {
   const skipped = d.skipped ? ` (${d.skipped} already analysed or queued)` : "";
   toast(d.added ? `Added ${d.added} game${d.added === 1 ? "" : "s"} to the queue${skipped}.` : `Nothing to add${skipped}.`);
   if (d.errors.length) toast(d.errors[0], true);
-  state.selected.clear(); updateSelection();
-  document.querySelectorAll("#gameList input[type=checkbox]").forEach((cb) => { cb.checked = false; });
+  state.selected.clear(); lastPicked = null;
+  renderRecentGames();
   pollQueue();
 }
 $("analyzeSelected").addEventListener("click", () => startImport([...state.selected].sort((a, b) => a - b).map((i) => state.recent[i])));

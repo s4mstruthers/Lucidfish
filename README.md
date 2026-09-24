@@ -311,9 +311,11 @@ Start it with `./scripts/start.sh`, `scripts\start.bat`, or `lucidfish web`. It 
 
 1. **Create a profile** (first launch): your name, level, chess.com and Lichess usernames and
    ratings. The coach uses these to pitch explanations at your level.
-2. **Analyze games:** choose chess.com or Lichess to list your recent games and click one, or
-   tick several and click *Analyze selected* (or *Analyze batch* for your last 5–20 games) to
-   add them to the queue. You can choose a lighter or heavier coaching level for a batch.
+2. **Analyze games:** choose chess.com or Lichess to list your recent games. Click games to
+   select them (<kbd>Shift</kbd>-click selects a range, or use *Select all*), then click
+   *Analyze selected*, or use *Analyze batch* for your last 5–20 games, to add them to the
+   queue. The *Analyze* button on a row analyses just that game straight away, and *Open*
+   shows a game you have already analysed. You can choose a lighter or heavier coaching level for a batch.
    You can also paste or drop a PGN file.
 3. **Watch the queue:** the pill at the top shows the current game and the time left. Click it
    to open the queue: an overall progress bar with the estimated finish time, a bar for the
@@ -448,6 +450,7 @@ clumsily even when the facts are right; a larger model or a cloud model writes b
 | chess.com / Lichess games don't load | Check the username in your profile. Some networks block these sites; paste the PGN instead. |
 | Opening names show without master statistics | The Lichess opening explorer couldn't be reached, so a built-in opening book is used. Analysis is unaffected. |
 | Port 8420 already in use | Lucidfish picks the next free port automatically and prints the address. Or run `lucidfish web --port 9000`. |
+| "Lucidfish needs a restart to finish updating" | The files were updated (e.g. with `git pull`) while Lucidfish was running, so the page is new but the running program is old. Close Lucidfish (<kbd>Ctrl</kbd>+<kbd>C</kbd> in its window) and start it again. |
 | Queued games didn't start after a restart | Games left in the queue come back **paused**, so nothing starts by surprise. Open the queue and press *Resume*. |
 | Time estimates look wrong | The first estimate is a rough guess. After one game with the same settings has finished, estimates use your computer's measured speed. |
 | `ModuleNotFoundError` | Run from the Lucidfish folder with the virtual environment active, or use the launcher script. |

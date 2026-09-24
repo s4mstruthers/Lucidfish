@@ -142,7 +142,11 @@
           </div>
           <button class="ghost icon" id="reloadGames" title="Refresh" aria-label="Refresh game list">↻</button>
         </div>
-        <div class="list scroll" id="gameList"></div>
+        <div class="select-bar hidden" id="selectBar">
+          <label class="check"><input type="checkbox" id="selectAll"> Select all</label>
+          <span class="small">Click games to select them · Shift-click selects a range</span>
+        </div>
+        <div class="list scroll" id="gameList" role="listbox" aria-multiselectable="true" aria-label="Recent games"></div>
         <div class="row" style="margin-top:12px">
           <button id="analyzeSelected" disabled>Analyze selected</button>
           <label class="check" title="Re-analyse games you have already analysed"><input type="checkbox" id="redo"> Redo analysed</label>
