@@ -149,3 +149,14 @@ def test_analyze_position():
     result = pipeline.analyze_position("6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1", fast_config())
     assert result["lines"][0]["san"] == "Rd8#" and result["lines"][0]["score"] == "#1"
     assert result["turn"] == "White" and result["features"]
+
+
+@needs_engine
+def test_check_move_for_practice_mode():
+    fen = "6k1/5ppp/8/8/8/8/5PPP/3R2K1 w - - 0 1"
+    good = pipeline.check_move(fen, "d1d8", fast_config())
+    assert good["solved"] and good["san"] == "Rd8#" and good["eval"] == "1-0"
+    bad = pipeline.check_move(fen, "h2h3", fast_config())
+    assert not bad["solved"] and bad["best"] == "Rd8#" and bad["best_steps"][0]["san"] == "Rd8#"
+    with pytest.raises(ValueError):
+        pipeline.check_move(fen, "a1a8", fast_config())            # no piece there: illegal

@@ -4,9 +4,11 @@ Run with ``lucidfish web`` (or ``python -m lucidfish.web``) → http://127.0.0.1
 
 Design notes:
 
-- Analyses run in background threads, one at a time: a second Stockfish would
-  only halve the speed of the first. The frontend polls ``/api/job/<id>?since=N``
-  and receives only the moves it has not seen yet, rendering them live.
+- Analyses go through one queue (``jobs.AnalysisQueue``) and run one at a
+  time: a second Stockfish would only halve the speed of the first. While the
+  coach writes up one game, the engine gets a head start on the next. The
+  frontend polls ``/api/job/<id>?since=N`` (only moves it has not seen yet) and
+  ``/api/queue`` (live progress and time-left estimates for everything queued).
 - Game lists from chess.com / Lichess are fetched IN THE BROWSER (their APIs
   allow it, and a real browser passes the bot checks that block scripts).
   The backend only ever receives PGN text.
@@ -24,7 +26,6 @@ import re
 import socket
 import threading
 import time
-import uuid
 import webbrowser
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -38,12 +39,12 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import __version__, credentials, settings, store
+from . import __version__, credentials, jobs, settings, store
 from .engine import EngineAnalyzer
 from .export import annotated_pgn, markdown_report
 from .llm import PROVIDERS, LLMError, make_provider
-from .pipeline import analyze_game, analyze_position, build_coach, parse_game
-from .prompts import COACH_CHAT_SYSTEM, PLAYER_SUMMARY_SYSTEM, build_player_summary_prompt
+from .pipeline import analyze_position, build_coach, check_move
+from .prompts import COACH_CHAT_SYSTEM
 
 STATIC = Path(__file__).parent / "static"
 DEFAULT_PORT = 8420
@@ -59,11 +60,18 @@ def _error(message: str, status: int = 400) -> JSONResponse:
     return JSONResponse({"error": message}, status_code=status)
 
 
+QUEUE = jobs.AnalysisQueue()
+
+
 @asynccontextmanager
 async def _lifespan(_app: FastAPI):
+    global QUEUE
     settings.load_config()   # loads .env once and initialises the database
     store.init()
+    QUEUE = jobs.AnalysisQueue()
+    QUEUE.restore()          # games left over from last time come back paused
     yield
+    QUEUE.shutdown()
 
 
 app = FastAPI(title="Lucidfish", version=__version__, docs_url=None, redoc_url=None,
@@ -115,179 +123,115 @@ def piece(name: str):
                     headers={"Cache-Control": "public, max-age=604800"})
 
 
-# ================================================================ jobs
+# ================================================================ analysis queue
 
-class Job:
-    """State of one background analysis, safe to read while it is written."""
-
-    def __init__(self, total: int, headers: dict, side: str | None):
-        self.id = uuid.uuid4().hex[:12]
-        self.lock = threading.Lock()
-        self.status = "queued"            # queued → running → done | stopped | error
-        self.total = total
-        self.headers = headers
-        self.side = side
-        self.engine_done = 0
-        self.label = "Waiting for the engine…"
-        self.moves: list[dict] = []
-        self.review = ""
-        self.error = ""
-        self.warnings: list[str] = []
-        self.accuracy: dict = {}
-        self.opening = ""
-        self.coach = ""
-        self.game_id: int | None = None
-        self.stop = False
-        self.created = time.time()
-        self.finished: float | None = None
-
-    def progress(self, stage: str, done: int, total: int, label: str) -> None:
-        with self.lock:
-            if stage == "engine":
-                self.engine_done = done
-            elif stage == "review":
-                self.label = "Writing the post-game review…"
-                return
-            self.label = label
-
-    def add_move(self, move) -> None:
-        data = move.to_dict()
-        with self.lock:
-            self.moves.append(data)
-
-    def snapshot(self, since: int = 0) -> dict:
-        with self.lock:
-            return {
-                "id": self.id, "status": self.status, "total": self.total, "headers": self.headers,
-                "side": self.side, "engine_done": self.engine_done, "done": len(self.moves),
-                "label": self.label, "moves": self.moves[since:], "since": since,
-                "review": self.review, "error": self.error, "warnings": self.warnings,
-                "accuracy": self.accuracy, "opening": self.opening, "coach": self.coach,
-                "game_id": self.game_id,
-            }
-
-
-JOBS: dict[str, Job] = {}
-_JOBS_LOCK = threading.Lock()
-_ENGINE_SLOT = threading.Semaphore(1)   # one analysis at a time gets the full CPU
-_ENGINE_BUSY = threading.Event()
-
-
-def _register(job: Job) -> None:
-    with _JOBS_LOCK:
-        cutoff = time.time() - 3600
-        for jid in [j for j, v in JOBS.items() if v.finished and v.finished < cutoff]:
-            del JOBS[jid]
-        while len(JOBS) >= 30:
-            JOBS.pop(next(iter(JOBS)))
-        JOBS[job.id] = job
-
-
-def _acquire_engine(should_stop) -> bool:
-    """Wait for the engine slot; gives up if the caller is stopped meanwhile."""
-    while not should_stop():
-        if _ENGINE_SLOT.acquire(timeout=0.5):
-            _ENGINE_BUSY.set()
-            return True
-    return False
-
-
-def _release_engine() -> None:
-    _ENGINE_BUSY.clear()
-    _ENGINE_SLOT.release()
+Detail = Literal["key", "standard", "full"]   # pipeline.DETAIL_LEVELS
 
 
 def _active_profile() -> dict | None:
     return store.get_profile(store.active_id())
 
 
-def _refresh_player_summary(pid: int) -> tuple[str, str]:
-    """Re-write the coach profile from stats + recent reviews. Returns (summary, error)."""
-    stats = store.aggregate_stats(pid)
-    if stats.get("games", 0) < 2:
-        return "", "Analyse at least two games first."
-    coach, warnings = build_coach(settings.load_config())
-    if not coach.available:
-        return "", warnings[0] if warnings else "The AI coach is turned off in Settings."
-    try:
-        summary = coach.llm.generate(
-            PLAYER_SUMMARY_SYSTEM,
-            build_player_summary_prompt(stats, store.recent_reviews(pid), profile=store.get_profile(pid)))
-    except LLMError as e:
-        return "", str(e)
-    store.set_summary(pid, summary)
-    return summary, ""
-
-
-def _run_analysis(job: Job, pgn: str, side: str | None, elo: int | None) -> None:
-    should_stop = lambda: job.stop  # noqa: E731
-    if not _acquire_engine(should_stop):
-        with job.lock:
-            job.status, job.finished = "stopped", time.time()
-        return
-    try:
-        with job.lock:
-            job.status, job.label = "running", "Starting the engine…"
-        cfg = settings.load_config()
-        cfg.user_elo = elo
-        profile = _active_profile() or {}
-        report = analyze_game(pgn, cfg, side_filter=side, progress=job.progress, on_move=job.add_move,
-                              should_stop=should_stop, player_context=profile.get("summary") or "",
-                              level=profile.get("level") or None, engine_cache=store.EngineCache())
-        with job.lock:
-            job.review, job.warnings = report.review, report.warnings
-            job.accuracy, job.opening, job.coach = report.accuracy, report.opening, report.coach
-            job.status = "stopped" if job.stop else "done"
-            moves = list(job.moves)
-        pid = profile.get("id")
-        if job.status == "done" and pid:
-            job.game_id = store.save_game(pid, pgn, report.headers, side, elo, report.opening, report.review,
-                                          moves, report.time_class, report.accuracy, replace=True)
-            threading.Thread(target=_refresh_player_summary, args=(pid,), daemon=True).start()
-    except Exception as e:  # surface any failure to the UI instead of dying silently
-        with job.lock:
-            job.status, job.error = "error", str(e)
-    finally:
-        _release_engine()
-        with job.lock:
-            job.finished = time.time()
-
-
 class AnalyzeReq(BaseModel):
     pgn: str = Field(max_length=2_000_000)
     side: Literal["white", "black"] | None = None
     elo: int | None = Field(default=None, ge=100, le=3500)
+    detail: Detail | None = None
 
 
 @app.post("/api/analyze")
 def analyze(req: AnalyzeReq):
+    """Analyse one game now: it goes to the front of the queue (after the game in progress)."""
+    existing = QUEUE.find_pending(req.pgn)
+    if existing:                      # already queued (e.g. by a batch): just bring it forward
+        QUEUE.move(existing.id, "top")
+        return {"job_id": existing.id}
     try:
-        game, warnings = parse_game(req.pgn)
+        job = jobs.Job(req.pgn, side=req.side, elo=req.elo, detail=req.detail,
+                       profile_id=store.active_id(), source="single", replace=True)
     except ValueError as e:
         return _error(str(e))
-    job = Job(sum(1 for _ in game.mainline_moves()), dict(game.headers), req.side)
-    job.warnings = warnings
-    _register(job)
-    threading.Thread(target=_run_analysis, args=(job, req.pgn, req.side, req.elo),
-                     name=f"lucidfish-job-{job.id}", daemon=True).start()
+    QUEUE.add([job], front=True)
     return {"job_id": job.id}
 
 
 @app.get("/api/job/{job_id}")
 def job_status(job_id: str, since: int = 0):
-    job = JOBS.get(job_id)
-    if job is None:
+    view = QUEUE.job_view(job_id, max(0, since))
+    if view is None:
         return _error("This analysis no longer exists (the server may have restarted).", 404)
-    return job.snapshot(max(0, since))
+    return view
 
 
 @app.post("/api/job/{job_id}/stop")
 def job_stop(job_id: str):
-    job = JOBS.get(job_id)
-    if job is None:
+    if not QUEUE.cancel(job_id):
         return _error("unknown job", 404)
-    job.stop = True
     return {"ok": True}
+
+
+class QueueGame(BaseModel):
+    pgn: str = Field(max_length=2_000_000)
+    side: Literal["white", "black"] | None = None
+    elo: int | None = Field(default=None, ge=100, le=3500)
+
+
+class QueueReq(BaseModel):
+    games: list[QueueGame] = Field(min_length=1, max_length=200)
+    detail: Detail | None = None      # this batch only; None = the level from Settings
+    force: bool = False               # re-analyse games already in the profile
+
+
+@app.post("/api/queue")
+def queue_add(req: QueueReq):
+    """Add a batch of games. Games already analysed or already queued are skipped."""
+    pid = store.active_id()
+    if not pid:
+        return _error("Create a profile first.")
+    added, skipped, errors, seen = [], 0, [], set()
+    for g in req.games:
+        fp = store.fingerprint(g.pgn)
+        if fp in seen or QUEUE.find_pending(g.pgn) or (not req.force and store.has_game(pid, g.pgn)):
+            skipped += 1
+            continue
+        seen.add(fp)
+        try:
+            added.append(jobs.Job(g.pgn, side=g.side, elo=g.elo, detail=req.detail, profile_id=pid,
+                                  source="batch", replace=req.force))
+        except ValueError as e:
+            errors.append(str(e))
+    if added:
+        QUEUE.add(added)
+    return {"added": len(added), "skipped": skipped, "errors": errors}
+
+
+@app.get("/api/queue")
+def queue_state():
+    return QUEUE.snapshot()
+
+
+class MoveReq(BaseModel):
+    where: Literal["top", "up", "down", "bottom"]
+
+
+@app.post("/api/queue/{job_id}/move")
+def queue_move(job_id: str, req: MoveReq):
+    if not QUEUE.move(job_id, req.where):
+        return _error("That game is no longer waiting in the queue.", 409)
+    return QUEUE.snapshot()
+
+
+@app.post("/api/queue/{job_id}/cancel")
+def queue_cancel(job_id: str):
+    if not QUEUE.cancel(job_id):
+        return _error("That game is no longer in the queue.", 409)
+    return QUEUE.snapshot()
+
+
+@app.post("/api/queue/{action}")
+def queue_action(action: Literal["pause", "resume", "stop_all", "clear_finished"]):
+    getattr(QUEUE, action)()
+    return QUEUE.snapshot()
 
 
 # ================================================================ positions
@@ -337,6 +281,25 @@ def position(req: PositionReq):
         return _error(str(e), 500)
     result["fen"] = board.fen()
     return result
+
+
+class CheckMoveReq(BaseModel):
+    fen: str = Field(max_length=100)
+    uci: str = Field(min_length=4, max_length=5, pattern=r"^[a-h][1-8][a-h][1-8][qrbn]?$")
+
+
+@app.post("/api/check_move")
+def practice_move(req: CheckMoveReq):
+    """"Practise your mistakes": is the move you tried now good enough?"""
+    cfg = settings.load_config()
+    if QUEUE.busy:   # share the CPU with the analysis in progress instead of stalling it
+        cfg.engine.threads = max(1, cfg.engine.threads // 2)
+    try:
+        return check_move(req.fen, req.uci, cfg, engine_cache=store.EngineCache())
+    except ValueError as e:
+        return _error(str(e))
+    except RuntimeError as e:
+        return _error(str(e), 500)
 
 
 # ================================================================ settings
@@ -491,7 +454,7 @@ def health(refresh: bool = False):
         "version": __version__,
         "engine": _cached("engine", 120, _engine_health),
         "coach": _cached("coach", 20, _coach_health),
-        "busy": _ENGINE_BUSY.is_set(),
+        "busy": QUEUE.busy,
     }
 
 
@@ -563,7 +526,7 @@ def refresh_summary():
     pid = store.active_id()
     if not pid:
         return _error("No active profile.")
-    summary, error = _refresh_player_summary(pid)
+    summary, error = jobs.refresh_player_summary(pid)
     if error:
         return _error(error)
     return {"summary": summary}
@@ -585,88 +548,6 @@ def profile_game(game_id: int):
 @app.delete("/api/profile/game/{game_id}")
 def delete_game(game_id: int):
     store.delete_game(game_id)
-    return {"ok": True}
-
-
-# ---------------------------------------------------------------- batch import
-
-class ImportGame(BaseModel):
-    pgn: str = Field(max_length=2_000_000)
-    side: Literal["white", "black"] | None = None
-    elo: int | None = Field(default=None, ge=100, le=3500)
-
-
-class ImportReq(BaseModel):
-    games: list[ImportGame] = Field(max_length=50)
-    force: bool = False   # re-analyse games already in the profile
-
-
-_IMPORT: dict = {"status": "idle", "done": 0, "total": 0, "current": "", "errors": 0, "skipped": 0,
-                 "last_error": "", "stop": False}
-_IMPORT_LOCK = threading.Lock()
-
-
-@app.post("/api/profile/import")
-def profile_import(req: ImportReq):
-    pid = store.active_id()
-    if not pid:
-        return _error("Create a profile first.")
-    with _IMPORT_LOCK:
-        if _IMPORT["status"] == "running":
-            return _error("A batch analysis is already running.", 409)
-        _IMPORT.update(status="running", done=0, total=len(req.games), current="Queued…", errors=0,
-                       skipped=0, last_error="", stop=False)
-
-    def run():
-        profile_row = store.get_profile(pid) or {}
-        for g in req.games:
-            if _IMPORT["stop"]:
-                break
-            try:
-                if not req.force and store.has_game(pid, g.pgn):
-                    _IMPORT["skipped"] += 1
-                    continue
-                if not _acquire_engine(lambda: _IMPORT["stop"]):
-                    break
-                try:
-                    _IMPORT["current"] = f"Analysing game {_IMPORT['done'] + 1} of {_IMPORT['total']}"
-                    cfg = settings.load_config()
-                    cfg.user_elo = g.elo
-                    moves: list[dict] = []
-                    report = analyze_game(g.pgn, cfg, side_filter=g.side,
-                                          on_move=lambda m, acc=moves: acc.append(m.to_dict()),
-                                          should_stop=lambda: _IMPORT["stop"],
-                                          player_context=profile_row.get("summary") or "",
-                                          level=profile_row.get("level") or None,
-                                          engine_cache=store.EngineCache())
-                finally:
-                    _release_engine()
-                if not _IMPORT["stop"]:
-                    store.save_game(pid, g.pgn, report.headers, g.side, g.elo, report.opening, report.review,
-                                    moves, report.time_class, report.accuracy, replace=req.force)
-            except Exception as e:
-                _IMPORT["errors"] += 1
-                _IMPORT["last_error"] = str(e)
-            finally:
-                _IMPORT["done"] += 1
-        if not _IMPORT["stop"]:
-            _IMPORT["current"] = "Updating your coach review…"
-            _refresh_player_summary(pid)
-        _IMPORT["status"] = "stopped" if _IMPORT["stop"] else "done"
-        _IMPORT["current"] = ""
-
-    threading.Thread(target=run, name="lucidfish-import", daemon=True).start()
-    return {"ok": True}
-
-
-@app.get("/api/profile/import_status")
-def profile_import_status():
-    return {k: v for k, v in _IMPORT.items() if k != "stop"}
-
-
-@app.post("/api/profile/import/stop")
-def profile_import_stop():
-    _IMPORT["stop"] = True
     return {"ok": True}
 
 

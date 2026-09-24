@@ -81,7 +81,7 @@ def validate(values: dict) -> dict:
             if parsed.scheme not in ("http", "https") or not parsed.netloc:
                 raise ValueError("The server URL must look like http://host:port.")
         clean["base_urls"] = {**saved.get("base_urls", {}), provider: url}
-    for key in ("llm_enabled", "factcheck"):
+    for key in ("llm_enabled", "factcheck", "prefetch"):
         if key in values:
             clean[key] = bool(values[key])
     ranges = {"depth": (6, 30), "threads": (1, max(1, os.cpu_count() or 1)), "hash_mb": (16, 4096),
@@ -132,6 +132,7 @@ def public_settings() -> dict:
         "model": cfg.llm.model or PROVIDERS[cfg.llm.provider].default_model,
         "llm_enabled": cfg.llm.enabled,
         "factcheck": cfg.llm.factcheck,
+        "prefetch": saved.get("prefetch", True),
         "concurrency": saved.get("concurrency"),
         "detail": cfg.analysis.detail,
         "depth": cfg.engine.depth,

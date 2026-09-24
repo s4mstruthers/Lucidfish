@@ -106,6 +106,7 @@ class Job:
         self.source = source                   # "single" (opened by you) or "batch"
         self.replace = replace                 # overwrite a stored analysis of the same game
         self.headers = dict(h)
+        self.fingerprint = store.fingerprint(pgn)
         self.title = f"{h.get('White', '?')} vs {h.get('Black', '?')}"
         self.total = sum(1 for _ in game.mainline_moves())
         self.lock = threading.Lock()
@@ -222,6 +223,7 @@ class AnalysisQueue:
         self.paused = False
         self.restored = 0
         self.timings = Timings()
+        self._closed = False
 
     # ---------------------------------------------------------- public API
 
@@ -231,6 +233,13 @@ class AnalysisQueue:
 
     def get(self, job_id: str) -> Job | None:
         return self._jobs.get(job_id)
+
+    def find_pending(self, pgn: str) -> Job | None:
+        """The running or queued job for this exact game, if any (avoids analysing it twice)."""
+        fp = store.fingerprint(pgn)
+        with self._cond:
+            return next((j for j in ([self._running] if self._running else []) + self._queued
+                         if j.fingerprint == fp and not j.stop), None)
 
     def add(self, jobs: list[Job], front: bool = False) -> None:
         with self._cond:
@@ -306,6 +315,18 @@ class AnalysisQueue:
                 self._jobs.pop(job.id, None)
             self._finished.clear()
             self._session = [jid for jid in self._session if jid in self._jobs]
+
+    def shutdown(self) -> None:
+        """Server stopping: remember the queue (the running game included), stop the worker."""
+        self._persist()
+        with self._cond:
+            self._closed = True
+            if self._running:
+                self._running.stop = True
+            self._cond.notify_all()
+        self._stop_prefetch()
+        if self._worker:
+            self._worker.join(timeout=10)
 
     def restore(self) -> int:
         """Re-queue games left over from the last run (paused until you resume)."""
@@ -391,10 +412,10 @@ class AnalysisQueue:
                 self._worker.start()
 
     def _loop(self) -> None:
-        while True:
+        while not self._closed:
             job, refresh = None, set()
             with self._cond:
-                while True:
+                while not self._closed:
                     if self._queued and not self.paused:
                         job = self._queued.pop(0)
                         job.status, job.started, job.label = "running", time.time(), "Starting the engine…"
@@ -524,6 +545,8 @@ class AnalysisQueue:
                 self._jobs.pop(old.id, None)
 
     def _persist(self) -> None:
+        if self._closed:
+            return   # shutting down: keep the state saved by shutdown()
         with self._cond:
             pending = ([self._running] if self._running and not self._running.stop else []) + self._queued
             state = {"paused": self.paused, "jobs": [j.record() for j in pending]}

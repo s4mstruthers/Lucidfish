@@ -25,6 +25,8 @@ from contextlib import contextmanager
 from pathlib import Path
 
 from .config import data_dir
+from .insights import aggregate as aggregate_insights
+from .insights import game_insights
 
 _lock = threading.Lock()
 _initialised: set[Path] = set()
@@ -74,6 +76,7 @@ _MIGRATIONS = [
     ("games", "profile_id", "INTEGER"),
     ("games", "accuracy", "REAL"),
     ("profiles", "lichess_user", "TEXT DEFAULT ''"),
+    ("games", "insights", "TEXT"),
 ]
 
 PROFILE_FIELDS = ("name", "chesscom_user", "lichess_user", "level", "elo_bullet", "elo_blitz", "elo_rapid")
@@ -223,14 +226,15 @@ def save_game(profile_id: int, pgn: str, headers: dict, user_side: str | None,
                 f"""{verb} INTO games (profile_id, fingerprint, pgn, white, black, result,
                                       date, time_class, user_side, user_elo, opening, review,
                                       moves_json, acpl, accuracy, blunders, mistakes,
-                                      inaccuracies, best_moves)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                                      inaccuracies, best_moves, insights)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (profile_id, fingerprint(pgn), pgn,
                  headers.get("White", "?"), headers.get("Black", "?"),
                  headers.get("Result", ""), headers.get("Date", ""),
                  time_class, user_side, user_elo, opening, review,
                  json.dumps(moves, separators=(",", ":")), acpl, acc,
-                 n("blunder"), n("mistake"), n("inaccuracy"), n("best")))
+                 n("blunder"), n("mistake"), n("inaccuracy"), n("best"),
+                 json.dumps(game_insights(moves, user_side), separators=(",", ":"))))
             return cur.lastrowid
         except sqlite3.IntegrityError:
             return None
@@ -288,6 +292,7 @@ def aggregate_stats(profile_id: int, games: list[dict] | None = None) -> dict:
     for o in openings.values():
         o["acpl"] = round(sum(o["acpl"]) / len(o["acpl"]), 1) if o["acpl"] else None
     return {
+        **aggregate_insights(_insights(profile_id)),
         "games": len(games),
         "wins": wld.count("W"), "losses": wld.count("L"), "draws": wld.count("D"),
         "avg_acpl": round(sum(acpls) / len(acpls), 1) if acpls else None,
@@ -298,6 +303,25 @@ def aggregate_stats(profile_id: int, games: list[dict] | None = None) -> dict:
             ({"name": k, **v} for k, v in openings.items()),
             key=lambda x: -x["games"])[:12],
     }
+
+
+def _insights(profile_id: int) -> list[dict]:
+    """Every game's insights; computed and saved for games stored by older versions."""
+    with _db() as c:
+        rows = c.execute("SELECT id, insights, user_side FROM games WHERE profile_id=?", (profile_id,)).fetchall()
+    out, backfill = [], []
+    for r in rows:
+        if r["insights"]:
+            out.append(json.loads(r["insights"]))
+            continue
+        game = get_game(r["id"]) or {}
+        data = game_insights(game.get("moves", []), r["user_side"])
+        out.append(data)
+        backfill.append((json.dumps(data, separators=(",", ":")), r["id"]))
+    if backfill:
+        with _db(write=True) as c:
+            c.executemany("UPDATE games SET insights=? WHERE id=?", backfill)
+    return out
 
 
 def recent_reviews(profile_id: int, n: int = 8) -> list[dict]:

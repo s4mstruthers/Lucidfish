@@ -841,6 +841,35 @@ def prefetch_engine(pgn_text: str, cfg: Config, engine_cache, should_stop: Calla
     return done
 
 
+# ------------------------------------------------------------------ practice
+
+def check_move(fen: str, uci: str, cfg: Config, engine_cache=None) -> dict:
+    """Judge a move tried in "practise your mistakes" mode, with the same verdict
+    thresholds as the game analysis (the position's lines usually come from the
+    engine cache, so only the reply position needs a fresh search)."""
+    board = chess.Board(fen)
+    move = chess.Move.from_uci(uci)
+    if move not in board.legal_moves:
+        raise ValueError("That move is not legal in this position.")
+    after = board.copy(stack=False)
+    after.push(move)
+    with EngineAnalyzer(cfg.engine, cache=engine_cache) as engine:
+        candidates = engine.top_lines(board)
+        lines_after = [] if after.is_game_over() else engine.top_lines(after)
+    a = build_move_analysis(board, move, candidates, lines_after, cfg.analysis)
+    mover_white = board.turn == chess.WHITE
+    solved = a.classification in ("best", "good") or a.mate_event == "delivered_mate"
+    return {
+        "san": a.played_san, "uci": uci, "cls": a.classification, "solved": solved,
+        "best": a.best_san, "best_uci": a.best_uci, "cp_loss": a.cp_loss,
+        "eval": a.game_result or eval_text(*_white_after(a, mover_white)),
+        "fen_after": after.fen(),
+        "refutation": "" if solved else a.refutation_text,
+        "refutation_steps": [] if solved else _line_steps(after, a.refutation_san),
+        "best_steps": _line_steps(board, a.candidates[0].pv_san) if a.candidates else [],
+    }
+
+
 # ------------------------------------------------------------------ positions
 
 def analyze_position(fen: str, cfg: Config, perspective: str | None = None, level: str | None = None,
