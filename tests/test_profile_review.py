@@ -6,7 +6,7 @@ STATS = {
     "patterns": [{"id": "missed_threat", "label": "Missed the opponent's threat", "count": 5, "games": 2},
                  {"id": "hanging", "label": "Left material hanging", "count": 4, "games": 3}],
     "openings": [{"name": "Italian Game", "games": 3, "w": 3, "l": 0, "d": 0},
-                 {"name": "Scandinavian Defense", "games": 2, "w": 0, "l": 2, "d": 0},
+                 {"name": "Scandinavian Defence", "games": 2, "w": 0, "l": 2, "d": 0},
                  {"name": "Queen's Pawn Game", "games": 1, "w": 1, "l": 0, "d": 0}],
     "phase_accuracy": {"opening": 77.7, "middlegame": 86.2, "endgame": 96.9}, "findings": [],
     "by_time_class": {"blitz": {"games": 3, "wins": 1, "losses": 2, "draws": 0, "avg_accuracy": 70.1,
@@ -69,9 +69,9 @@ def test_prose_is_rebuilt_into_the_structure():
 
 
 def test_one_opening_is_not_called_the_best():
-    stats = {**STATS, "openings": [{"name": "Scandinavian Defense", "games": 2, "w": 1, "l": 1, "d": 0}]}
+    stats = {**STATS, "openings": [{"name": "Scandinavian Defence", "games": 2, "w": 1, "l": 1, "d": 0}]}
     out = tidy_profile_review("Fine.", stats, "rapid")
-    assert "- **Scandinavian Defense**: 1W 1L 0D in 2 games." in out and "best opening" not in out
+    assert "- **Scandinavian Defence**: 1W 1L 0D in 2 games." in out and "best opening" not in out
 
 
 def test_counts_read_naturally():

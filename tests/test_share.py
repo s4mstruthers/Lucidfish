@@ -182,7 +182,7 @@ def test_a_finished_analysis_updates_the_shared_copy(client, tmp_path):
     client.post("/api/share", json={"folder": str(tmp_path), "auto": True}, headers=H)
     page = tmp_path / "Lucidfish - Ann.html"
     assert _page_data(page.read_text(encoding="utf-8"))["games"] == []
-    job = client.post("/api/analyze", json={"pgn": SHORT_PGN, "side": "white"}, headers=H).json()["job_id"]
+    job = client.post("/api/analyse", json={"pgn": SHORT_PGN, "side": "white"}, headers=H).json()["job_id"]
     deadline = time.time() + 120
     while time.time() < deadline and client.get(f"/api/job/{job}").json()["status"] != "done":
         time.sleep(0.2)

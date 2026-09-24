@@ -29,15 +29,15 @@ def wing(square: chess.Square) -> str:
     return next(name for name, files in WINGS.items() if f in files)
 
 
-def color_name(color: chess.Color) -> str:
-    return "White" if color == chess.WHITE else "Black"
+def colour_name(colour: chess.Color) -> str:
+    return "White" if colour == chess.WHITE else "Black"
 
 
 @dataclass(frozen=True)
 class PlayedMove:
     """One move of the game as seen by the tracker."""
     ply: int
-    color: chess.Color
+    colour: chess.Color
     san: str
     move: chess.Move
     board: chess.Board        # position before the move
@@ -45,7 +45,7 @@ class PlayedMove:
     @property
     def label(self) -> str:
         n = self.board.fullmove_number
-        return f"{n}. {self.san}" if self.color == chess.WHITE else f"{n}... {self.san}"
+        return f"{n}. {self.san}" if self.colour == chess.WHITE else f"{n}... {self.san}"
 
 
 def labelled(moves: list[PlayedMove]) -> str:
@@ -53,7 +53,7 @@ def labelled(moves: list[PlayedMove]) -> str:
     out = []
     for m in moves:
         n = m.board.fullmove_number
-        out.append(f"{n}. White {m.san}" if m.color == chess.WHITE else f"{n}... Black {m.san}")
+        out.append(f"{n}. White {m.san}" if m.colour == chess.WHITE else f"{n}... Black {m.san}")
     return ", ".join(out)
 
 
@@ -90,7 +90,7 @@ def gist(board: chess.Board, move: chess.Move) -> str:
 
 def with_gists(moves: list[PlayedMove]) -> str:
     """Labelled moves each followed by their gist in brackets."""
-    return ", ".join(f"{m.label.split(' ')[0]} {color_name(m.color)} {m.san} [{gist(m.board, m.move)}]"
+    return ", ".join(f"{m.label.split(' ')[0]} {colour_name(m.colour)} {m.san} [{gist(m.board, m.move)}]"
                      for m in moves)
 
 
@@ -105,11 +105,11 @@ def _files(board: chess.Board) -> list[str]:
         if white_p and black_p:
             continue
         heavy = []
-        for color in (chess.WHITE, chess.BLACK):
+        for colour in (chess.WHITE, chess.BLACK):
             for pt in (chess.ROOK, chess.QUEEN):
-                for sq in board.pieces(pt, color):
+                for sq in board.pieces(pt, colour):
                     if chess.square_file(sq) == f:
-                        heavy.append(f"{color_name(color)}'s {chess.piece_name(pt)} on {chess.square_name(sq)}")
+                        heavy.append(f"{colour_name(colour)}'s {chess.piece_name(pt)} on {chess.square_name(sq)}")
         name = chess.FILE_NAMES[f]
         if not white_p and not black_p:
             kind = f"the {name}-file is open"
@@ -119,12 +119,12 @@ def _files(board: chess.Board) -> list[str]:
     return out
 
 
-def pawn_breaks(board: chess.Board, color: chess.Color) -> list[str]:
-    """Pawn pushes available to `color` that would attack an enemy pawn."""
+def pawn_breaks(board: chess.Board, colour: chess.Color) -> list[str]:
+    """Pawn pushes available to `colour` that would attack an enemy pawn."""
     out = []
-    step = 8 if color == chess.WHITE else -8
-    start_rank = 1 if color == chess.WHITE else 6
-    for sq in board.pieces(chess.PAWN, color):
+    step = 8 if colour == chess.WHITE else -8
+    start_rank = 1 if colour == chess.WHITE else 6
+    for sq in board.pieces(chess.PAWN, colour):
         targets = []
         one = sq + step
         if 0 <= one < 64 and board.piece_at(one) is None:
@@ -134,13 +134,13 @@ def pawn_breaks(board: chess.Board, color: chess.Color) -> list[str]:
                 targets.append(two)
         for t in targets:
             f, r = chess.square_file(t), chess.square_rank(t)
-            ahead = r + (1 if color == chess.WHITE else -1)
+            ahead = r + (1 if colour == chess.WHITE else -1)
             if not 0 <= ahead <= 7:
                 continue
             hits = [chess.square(ff, ahead) for ff in (f - 1, f + 1) if 0 <= ff <= 7
-                    and board.piece_at(chess.square(ff, ahead)) == chess.Piece(chess.PAWN, not color)]
+                    and board.piece_at(chess.square(ff, ahead)) == chess.Piece(chess.PAWN, not colour)]
             if hits:
-                mark = "" if color == chess.WHITE else "..."
+                mark = "" if colour == chess.WHITE else "..."
                 out.append(f"{mark}{chess.square_name(t)} (attacks the pawn on {chess.square_name(hits[0])})")
     return out
 
@@ -148,9 +148,9 @@ def pawn_breaks(board: chess.Board, color: chess.Color) -> list[str]:
 def plan_lines(history: list[PlayedMove], board: chess.Board, window: int = 6) -> list[str]:
     """Verified plan facts for both sides, given the moves so far and the current position."""
     out = []
-    for color in (chess.WHITE, chess.BLACK):
-        own = [m for m in history if m.color == color][-window:]
-        name = color_name(color)
+    for colour in (chess.WHITE, chess.BLACK):
+        own = [m for m in history if m.colour == colour][-window:]
+        name = colour_name(colour)
         if own:
             sectors = Counter("kingside" if m.board.is_castling(m.move) and chess.square_file(m.move.to_square) > 4
                               else "queenside" if m.board.is_castling(m.move)
@@ -168,7 +168,7 @@ def plan_lines(history: list[PlayedMove], board: chess.Board, window: int = 6) -
                 if n >= 2 and w != "centre":
                     sans = ", ".join(m.san for m in pawn_moves if wing(m.move.to_square) == w)
                     out.append(f"{name} has advanced {w} pawns recently ({sans}).")
-        breaks = pawn_breaks(board, color)
+        breaks = pawn_breaks(board, colour)
         if breaks:
             out.append(f"Pawn breaks available to {name}: {'; '.join(breaks[:4])}.")
     white_k, black_k = board.king(chess.WHITE), board.king(chess.BLACK)

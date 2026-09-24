@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en-GB">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -18,7 +18,7 @@
   </a>
   <nav class="nav" id="nav" aria-label="Main">
     <button data-page="dashboard" class="active">Home</button>
-    <button data-page="games" data-also="analyze game">Games</button>
+    <button data-page="games" data-also="analyse game">Games</button>
     <button data-page="train">Train</button>
     <button data-page="editor" class="server-only">Board editor</button>
   </nav>
@@ -58,7 +58,7 @@
       </div>
       <div class="spacer"></div>
       <button id="goTrain" class="secondary hidden" title="Puzzles from your own mistakes, with spaced repetition">🎯 Train</button>
-      <button id="goAnalyze" class="server-only">Analyze a game</button>
+      <button id="goAnalyse" class="server-only">Analyse a game</button>
     </div>
     <div class="tc-bar" data-tc-bar="analysed" role="group" aria-label="Time control"></div>
     <div class="card">
@@ -116,7 +116,7 @@
     </div>
     <div class="page-tabs" role="tablist">
       <button data-page="games" role="tab">Analysed games</button>
-      <button data-page="analyze" role="tab" class="server-only">＋ Analyse new games</button>
+      <button data-page="analyse" role="tab" class="server-only">＋ Analyse new games</button>
     </div>
     <div class="tc-bar" data-tc-bar="analysed" role="group" aria-label="Time control"></div>
     <div class="card">
@@ -125,7 +125,7 @@
         <select id="gResult" aria-label="Result">
           <option value="">All results</option><option value="W">Wins</option><option value="L">Losses</option><option value="D">Draws</option>
         </select>
-        <select id="gColor" aria-label="Your colour">
+        <select id="gColour" aria-label="Your colour">
           <option value="">Both colours</option><option value="white">As White</option><option value="black">As Black</option>
         </select>
         <select id="gSort" aria-label="Sort by">
@@ -143,8 +143,8 @@
     </div>
   </section>
 
-  <!-- ============================================================ ANALYZE -->
-  <section id="page-analyze" class="hidden" data-page-section>
+  <!-- ============================================================ ANALYSE -->
+  <section id="page-analyse" class="hidden" data-page-section>
     <div class="page-head">
       <div>
         <h1>Games</h1>
@@ -155,7 +155,7 @@
     </div>
     <div class="page-tabs" role="tablist">
       <button data-page="games" role="tab">Analysed games</button>
-      <button data-page="analyze" role="tab" class="server-only">＋ Analyse new games</button>
+      <button data-page="analyse" role="tab" class="server-only">＋ Analyse new games</button>
     </div>
     <div class="grid-2">
       <div class="card">
@@ -174,13 +174,13 @@
         </div>
         <div class="list scroll" id="gameList" role="listbox" aria-multiselectable="true" aria-label="Recent games"></div>
         <div class="row" style="margin-top:12px">
-          <button id="analyzeSelected" disabled>Analyze selected</button>
+          <button id="analyseSelected" disabled>Analyse selected</button>
           <label class="check" title="Re-analyse games you have already analysed"><input type="checkbox" id="redo"> Redo analysed</label>
           <div class="spacer"></div>
           <select id="batchCount" aria-label="Batch size">
             <option value="5">Last 5</option><option value="10">Last 10</option><option value="20">Last 20</option>
           </select>
-          <button class="secondary" id="analyzeBatch">Analyze batch</button>
+          <button class="secondary" id="analyseBatch">Analyse batch</button>
         </div>
         <div class="row" style="margin-top:10px">
           <label class="field inline">Coaching for these games
@@ -207,7 +207,7 @@
             <option value="both">Coach both sides</option>
           </select>
           <div class="spacer"></div>
-          <button id="analyzePgn">Analyze</button>
+          <button id="analysePgn">Analyse</button>
         </div>
       </div>
     </div>
@@ -243,7 +243,7 @@
             <button class="secondary" id="edFlip">Flip</button>
           </div>
           <p class="small">Castling rights are inferred from where the kings and rooks stand. Paste a FEN to set them exactly.</p>
-          <div><button id="edAnalyze">Analyze position</button></div>
+          <div><button id="edAnalyse">Analyse position</button></div>
         </div>
       </div>
     </div>
@@ -385,10 +385,10 @@
             <button class="secondary sm" id="btnExplore" aria-pressed="false" title="Move the pieces yourself and let the engine analyse any position (E)">🔍 Explore</button>
             <button class="secondary sm" id="btnDraw" aria-pressed="false" title="Draw arrows and circles with a normal click or a finger (D)">✎ Draw</button>
             <div class="swatches" id="drawSwatches" role="radiogroup" aria-label="Pen colour">
-              <button class="swatch green active" data-color="green" role="radio" aria-checked="true" aria-label="Green"></button>
-              <button class="swatch red" data-color="red" role="radio" aria-checked="false" aria-label="Red"></button>
-              <button class="swatch blue" data-color="blue" role="radio" aria-checked="false" aria-label="Blue"></button>
-              <button class="swatch yellow" data-color="yellow" role="radio" aria-checked="false" aria-label="Yellow"></button>
+              <button class="swatch green active" data-colour="green" role="radio" aria-checked="true" aria-label="Green"></button>
+              <button class="swatch red" data-colour="red" role="radio" aria-checked="false" aria-label="Red"></button>
+              <button class="swatch blue" data-colour="blue" role="radio" aria-checked="false" aria-label="Blue"></button>
+              <button class="swatch yellow" data-colour="yellow" role="radio" aria-checked="false" aria-label="Yellow"></button>
             </div>
             <button class="ghost sm hidden" id="btnClearDrawing" title="Remove your drawings from this position">✕ Clear drawing</button>
             <div class="view-opts">
@@ -434,7 +434,7 @@
             <button class="secondary sm server-only" id="exportMd">⬇ Report (.md)</button>
             <button class="secondary sm" id="copyFen" title="Copy the FEN of the current position">Copy FEN</button>
             <button class="secondary sm hidden server-only" id="reanalyseBtn" title="Analyse this game again with your current settings">↻ Re-analyse</button>
-            <button class="sm hidden" id="practiceAll" title="Replay the positions where you went wrong and look for a better move">🎯 Practise my mistakes</button>
+            <button class="sm hidden" id="practiseAll" title="Replay the positions where you went wrong and look for a better move">🎯 Practise my mistakes</button>
           </div>
           <div id="gameWarnings"></div>
         </div>
@@ -640,7 +640,7 @@
       </section>
       <section>
         <h3 class="pf-h">Your accounts <span class="small">(optional)</span></h3>
-        <p class="small" style="margin:0 0 10px">Your recent games appear on the Analyze page, and <b>Look up</b> fetches your current ratings.</p>
+        <p class="small" style="margin:0 0 10px">Your recent games appear on the Analyse page, and <b>Look up</b> fetches your current ratings.</p>
         <div class="account-row">
           <span class="site chesscom" aria-hidden="true">♟</span>
           <label class="field grow">chess.com username <input id="pfChesscom" maxlength="40" autocomplete="off" spellcheck="false"></label>

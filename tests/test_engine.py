@@ -5,7 +5,7 @@ import chess
 
 from conftest import fast_config, needs_engine
 from lucidfish.config import AnalysisConfig
-from lucidfish.engine import EngineAnalyzer, Line, build_move_analysis, describe_move, numbered_line
+from lucidfish.engine import EngineAnalyser, Line, build_move_analysis, describe_move, numbered_line
 
 TH = AnalysisConfig()
 
@@ -90,7 +90,7 @@ def test_engine_lines_and_cache():
     cfg = fast_config()
     cache = DictCache()
     board = chess.Board(BACK_RANK)
-    with EngineAnalyzer(cfg.engine, cache=cache) as engine:
+    with EngineAnalyser(cfg.engine, cache=cache) as engine:
         lines = engine.top_lines(board)
         assert lines[0].move_san == "Rd8#" and lines[0].mate_in == 1
         assert len(cache.data) == 1

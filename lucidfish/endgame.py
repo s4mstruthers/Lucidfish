@@ -21,39 +21,39 @@ import chess
 _CENTRE = (chess.D4, chess.E4, chess.D5, chess.E5)
 
 
-def _name(color: chess.Color) -> str:
-    return "White" if color == chess.WHITE else "Black"
+def _name(colour: chess.Color) -> str:
+    return "White" if colour == chess.WHITE else "Black"
 
 
-def king_activity(board: chess.Board, color: chess.Color) -> tuple[int, str]:
+def king_activity(board: chess.Board, colour: chess.Color) -> tuple[int, str]:
     """(distance to the nearest centre square, description)."""
-    king = board.king(color)
+    king = board.king(colour)
     if king is None:
         return 9, ""
     d = min(chess.square_distance(king, c) for c in _CENTRE)
     where = chess.square_name(king)
     if d == 0:
-        return d, f"{_name(color)}'s king on {where} is fully centralised"
+        return d, f"{_name(colour)}'s king on {where} is fully centralised"
     if d == 1:
-        return d, f"{_name(color)}'s king on {where} is active, next to the centre"
-    return d, f"{_name(color)}'s king on {where} is passive, {d} squares from the centre"
+        return d, f"{_name(colour)}'s king on {where} is active, next to the centre"
+    return d, f"{_name(colour)}'s king on {where} is passive, {d} squares from the centre"
 
 
-def passed_pawns(board: chess.Board, color: chess.Color) -> list[chess.Square]:
+def passed_pawns(board: chess.Board, colour: chess.Color) -> list[chess.Square]:
     out = []
-    enemy = board.pieces(chess.PAWN, not color)
-    for sq in board.pieces(chess.PAWN, color):
+    enemy = board.pieces(chess.PAWN, not colour)
+    for sq in board.pieces(chess.PAWN, colour):
         f, r = chess.square_file(sq), chess.square_rank(sq)
-        ahead = range(r + 1, 8) if color == chess.WHITE else range(r - 1, -1, -1)
+        ahead = range(r + 1, 8) if colour == chess.WHITE else range(r - 1, -1, -1)
         if not any(chess.square(ff, rr) in enemy for ff in (f - 1, f, f + 1) if 0 <= ff < 8 for rr in ahead):
             out.append(sq)
     return out
 
 
-def _steps_to_queen(sq: chess.Square, color: chess.Color) -> int:
+def _steps_to_queen(sq: chess.Square, colour: chess.Color) -> int:
     r = chess.square_rank(sq)
-    steps = 7 - r if color == chess.WHITE else r
-    start = 1 if color == chess.WHITE else 6
+    steps = 7 - r if colour == chess.WHITE else r
+    start = 1 if colour == chess.WHITE else 6
     return steps - 1 if r == start else steps   # the double step from the starting rank
 
 
@@ -62,34 +62,34 @@ def _pawn_only(board: chess.Board) -> bool:
                for c in (chess.WHITE, chess.BLACK))
 
 
-def _catches(board: chess.Board, pawn: chess.Square, color: chess.Color) -> bool:
+def _catches(board: chess.Board, pawn: chess.Square, colour: chess.Color) -> bool:
     """Rule of the square: can the defending king reach the promotion square in time?"""
-    defender = board.king(not color)
+    defender = board.king(not colour)
     if defender is None:
         return False
-    queen_sq = chess.square(chess.square_file(pawn), 7 if color == chess.WHITE else 0)
-    pawn_moves = _steps_to_queen(pawn, color)
+    queen_sq = chess.square(chess.square_file(pawn), 7 if colour == chess.WHITE else 0)
+    pawn_moves = _steps_to_queen(pawn, colour)
     king_moves = chess.square_distance(defender, queen_sq)
     # If the pawn's side is to move, the pawn is a tempo ahead and the king needs one move less.
-    return king_moves <= pawn_moves - (1 if board.turn == color else 0)
+    return king_moves <= pawn_moves - (1 if board.turn == colour else 0)
 
 
-def passed_pawn_lines(board: chess.Board, color: chess.Color) -> list[tuple[str, str]]:
+def passed_pawn_lines(board: chess.Board, colour: chess.Color) -> list[tuple[str, str]]:
     out = []
-    for sq in passed_pawns(board, color):
+    for sq in passed_pawns(board, colour):
         name = chess.square_name(sq)
-        steps = _steps_to_queen(sq, color)
+        steps = _steps_to_queen(sq, colour)
         bits = [f"{steps} move{'s' if steps != 1 else ''} from promoting"]
-        if board.attackers(color, sq) & board.pieces(chess.PAWN, color):
+        if board.attackers(colour, sq) & board.pieces(chess.PAWN, colour):
             bits.append("protected by a pawn")
-        front = sq + (8 if color == chess.WHITE else -8)
+        front = sq + (8 if colour == chess.WHITE else -8)
         blocker = board.piece_at(front) if 0 <= front < 64 else None
-        if blocker is not None and blocker.color != color:
+        if blocker is not None and blocker.color != colour:
             bits.append(f"blocked by the {chess.piece_name(blocker.piece_type)} on {chess.square_name(front)}")
         if _pawn_only(board):
-            catch = _catches(board, sq, color)
-            bits.append(f"{_name(not color)}'s king {'can' if catch else 'cannot'} catch it (rule of the square)")
-        out.append((f"eg:passed:{name}", f"{_name(color)}'s passed pawn on {name}: {', '.join(bits)}."))
+            catch = _catches(board, sq, colour)
+            bits.append(f"{_name(not colour)}'s king {'can' if catch else 'cannot'} catch it (rule of the square)")
+        out.append((f"eg:passed:{name}", f"{_name(colour)}'s passed pawn on {name}: {', '.join(bits)}."))
     return out
 
 
@@ -110,12 +110,12 @@ def opposition_line(board: chess.Board) -> tuple[str, str] | None:
 def endgame_lines(board: chess.Board) -> list[tuple[str, str]]:
     """Keyed endgame facts (keys let callers diff two positions)."""
     out: list[tuple[str, str]] = []
-    for color in (chess.WHITE, chess.BLACK):
-        _, text = king_activity(board, color)
+    for colour in (chess.WHITE, chess.BLACK):
+        _, text = king_activity(board, colour)
         if text:
-            out.append((f"eg:king:{_name(color)}", text + "."))
-    for color in (chess.WHITE, chess.BLACK):
-        out += passed_pawn_lines(board, color)
+            out.append((f"eg:king:{_name(colour)}", text + "."))
+    for colour in (chess.WHITE, chess.BLACK):
+        out += passed_pawn_lines(board, colour)
     opp = opposition_line(board)
     if opp:
         out.append(opp)

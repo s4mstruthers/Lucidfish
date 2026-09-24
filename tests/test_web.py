@@ -49,7 +49,7 @@ def test_settings_validation_and_keys(client):
 
 
 def test_bad_inputs_get_readable_errors(client):
-    assert "error" in client.post("/api/analyze", json={"pgn": "hello"}, headers=H).json()
+    assert "error" in client.post("/api/analyse", json={"pgn": "hello"}, headers=H).json()
     r = client.post("/api/position", json={"fen": "8/8/8/8/8/8/8/8 w - - 0 1"}, headers=H)
     assert r.status_code == 400 and "needs a king" in r.json()["error"]
 
@@ -57,7 +57,7 @@ def test_bad_inputs_get_readable_errors(client):
 @needs_engine
 def test_analysis_job_streams_moves_and_saves(client):
     client.post("/api/profiles", json={"name": "Web"}, headers=H)
-    job = client.post("/api/analyze", json={"pgn": SAMPLE_PGN, "side": "white"}, headers=H).json()["job_id"]
+    job = client.post("/api/analyse", json={"pgn": SAMPLE_PGN, "side": "white"}, headers=H).json()["job_id"]
     moves, deadline = [], time.time() + 120
     while time.time() < deadline:
         snap = client.get(f"/api/job/{job}", params={"since": len(moves)}).json()
@@ -100,18 +100,18 @@ def test_update_detection_and_static_caching(client, monkeypatch):
 @needs_engine
 def test_annotations_are_saved_with_the_game(client):
     client.post("/api/profiles", json={"name": "Drawer"}, headers=H)
-    job = client.post("/api/analyze", json={"pgn": SAMPLE_PGN, "side": "white"}, headers=H).json()["job_id"]
+    job = client.post("/api/analyse", json={"pgn": SAMPLE_PGN, "side": "white"}, headers=H).json()["job_id"]
     deadline = time.time() + 120
     while time.time() < deadline and client.get(f"/api/job/{job}").json()["status"] != "done":
         time.sleep(0.2)
     gid = client.get(f"/api/job/{job}").json()["game_id"]
     fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR"
-    body = {"annotations": {fen: {"arrows": [{"from": "g1", "to": "f3", "color": "red"},
+    body = {"annotations": {fen: {"arrows": [{"from": "g1", "to": "f3", "colour": "red"},
                                              {"from": "zz", "to": "f3"}],          # invalid: dropped
-                                  "circles": [{"sq": "e4", "color": "purple"}]},   # unknown colour: green
+                                  "circles": [{"sq": "e4", "colour": "purple"}]},   # unknown colour: green
                             "8/8/8/8/8/8/8/8": {"arrows": [], "circles": []}}}      # empty: dropped
     assert client.post(f"/api/profile/game/{gid}/annotations", json=body, headers=H).json()["positions"] == 1
     saved = client.get(f"/api/profile/game/{gid}").json()["annotations"]
-    assert saved == {fen: {"arrows": [{"from": "g1", "to": "f3", "color": "red"}],
-                           "circles": [{"sq": "e4", "color": "green"}]}}
+    assert saved == {fen: {"arrows": [{"from": "g1", "to": "f3", "colour": "red"}],
+                           "circles": [{"sq": "e4", "colour": "green"}]}}
     assert client.post("/api/profile/game/99999/annotations", json=body, headers=H).status_code == 404

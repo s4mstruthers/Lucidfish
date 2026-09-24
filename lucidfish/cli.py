@@ -124,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from . import store
     from .jobs import rating_for_game
-    from .pipeline import analyze_game
+    from .pipeline import analyse_game
     if cfg.user_elo is None:   # no --elo: the game's own rating, else the active profile's
         cfg.user_elo, cfg.user_elo_label = rating_for_game(pgn_text, args.side, None,
                                                            store.get_profile(store.active_id()))
@@ -141,7 +141,7 @@ def main(argv: list[str] | None = None) -> int:
                 elif stage == "review":
                     bar.update(tasks["coach"], label=label[:1].lower() + label[1:])
 
-            report = analyze_game(pgn_text, cfg, side_filter=args.side, progress=progress,
+            report = analyse_game(pgn_text, cfg, side_filter=args.side, progress=progress,
                                   engine_cache=store.EngineCache() if cfg.engine.use_cache else None)
     except (RuntimeError, ValueError) as e:
         console.print(f"[red]Error:[/red] {e}")
@@ -272,11 +272,11 @@ def _share_command(argv: list[str]) -> int:
 def _check(cfg, console: Console) -> int:
     """Diagnose the setup: engine, AI coach, storage."""
     from .config import data_dir
-    from .engine import EngineAnalyzer
+    from .engine import EngineAnalyser
     from .llm import LLMError, make_provider
     ok = True
     try:
-        with EngineAnalyzer(cfg.engine) as engine:
+        with EngineAnalyser(cfg.engine) as engine:
             console.print(f"[green]✔[/green] Engine: {engine.name} ({cfg.engine.path}), "
                           f"{cfg.engine.threads} threads, depth {cfg.engine.depth}", soft_wrap=True)
     except RuntimeError as e:

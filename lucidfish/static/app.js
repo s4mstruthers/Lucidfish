@@ -122,8 +122,10 @@ function debounce(fn, ms) {
   return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), ms); };
 }
 
+const LOCALE = "en-GB";   // Lucidfish is written in British English: "24 Sept 2026", 24-hour clock
+
 function fmtDate(d) {
-  try { return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }); }
+  try { return d.toLocaleDateString(LOCALE, { day: "numeric", month: "short", year: "numeric" }); }
   catch { return ""; }
 }
 
@@ -137,7 +139,7 @@ function fmtDuration(s) {
   return m ? `${h} h ${m} min` : `${h} h`;
 }
 function fmtClock(ts) {
-  return ts ? new Date(ts * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : "";
+  return ts ? new Date(ts * 1000).toLocaleTimeString(LOCALE, { hour: "2-digit", minute: "2-digit" }) : "";
 }
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : "");
 const DETAIL_NAMES = { key: "Key moments", standard: "Commentary", full: "Every move" };
@@ -164,7 +166,7 @@ const state = {
   moveView: "moves",     // "moves" grid or "story" transcript
   practice: null,        // "practise your mistakes" attempt in progress
   revealed: new Set(),   // your mistakes whose answer you chose to see (practice-first mode)
-  draw: { mode: false, color: "green" },   // board drawing: pen mode for touch / left mouse, colour
+  draw: { mode: false, colour: "green" },   // board drawing: pen mode for touch / left mouse, colour
   view: { bestArrow: true, highlight: true, evalBar: true, graph: true },   // what the board shows
 };
 try { Object.assign(state.view, JSON.parse(localStorage.getItem("lucidfish-view") || "{}")); } catch { /* defaults */ }
@@ -212,11 +214,11 @@ function showPage(name, fromRoute = false) {
   document.querySelectorAll("#nav button").forEach((b) => b.classList.toggle("active",
     b.dataset.page === section || (b.dataset.also || "").split(" ").includes(section)));
   document.querySelectorAll(".page-tabs [data-page]").forEach((b) => b.classList.toggle("active", b.dataset.page === name));
-  if (name === "games" || name === "analyze") renderResume();
+  if (name === "games" || name === "analyse") renderResume();
   if (name === "dashboard") loadDashboard();
   if (name === "games") loadDashboard().then(renderGames);
-  if (name === "analyze" && (!state.recent.length || state.recentTc !== state.tc)) loadRecentGames();
-  if (name === "analyze") renderTcBars();
+  if (name === "analyse" && (!state.recent.length || state.recentTc !== state.tc)) loadRecentGames();
+  if (name === "analyse") renderTcBars();
   if (name === "editor") ensureEditor();
   if (name === "train") showTrainPage();
   if (name !== "game" && state.explore) Engine.stop();   // don't keep analysing a board nobody sees
@@ -242,7 +244,7 @@ function renderResume() {
   });
 }
 document.addEventListener("click", (e) => { if (e.target.closest("[data-resume-open]")) showPage("game"); });
-$("goAnalyze").addEventListener("click", () => showPage("analyze"));
+$("goAnalyse").addEventListener("click", () => showPage("analyse"));
 
 /* Pages and games have addresses (#/games, #/game/12, …), so the browser's Back button
  * returns to the list you came from and a reload reopens the same game. */
@@ -261,7 +263,7 @@ function syncRoute(replace = false) {
 }
 async function route() {
   let [, page, id] = location.hash.match(/^#\/(\w+)(?:\/([\w-]+))?$/) || [];
-  if (EXPORT && (page === "analyze" || page === "editor" || page === "job")) page = "games";   // need the server
+  if (EXPORT && (page === "analyse" || page === "editor" || page === "job")) page = "games";   // need the server
   if (page === "game" && id) {
     if (state.game?.gameId === Number(id)) showPage("game", true);
     else await openStoredGame(Number(id), true);
@@ -270,7 +272,7 @@ async function route() {
   } else if (page === "game" && state.game) {
     showPage("game", true);
   } else {
-    showPage(["dashboard", "games", "train", "analyze", "editor"].includes(page) ? page : "dashboard", true);
+    showPage(["dashboard", "games", "train", "analyse", "editor"].includes(page) ? page : "dashboard", true);
   }
 }
 window.addEventListener("popstate", route);
@@ -449,7 +451,7 @@ async function switchProfile(id) {
   catch (err) { toast(err.message, true); return; }
   await loadProfiles();   // clears the previous profile's game, puzzles and chat
   loadDashboard().then(() => { if (state.page === "games") renderGames(); });
-  if (state.page === "analyze") loadRecentGames();
+  if (state.page === "analyse") loadRecentGames();
   toast(`Switched to ${state.profile?.name}.`);
 }
 
@@ -604,7 +606,7 @@ let shareCfg = null;
 function renderShareStatus(d) {
   shareCfg = d;
   const out = $("shareStatus");
-  const when = d.last_synced ? new Date(d.last_synced * 1000).toLocaleString(undefined,
+  const when = d.last_synced ? new Date(d.last_synced * 1000).toLocaleString(LOCALE,
     { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "";
   out.className = "small" + (d.last_error ? " bad" : d.last_synced ? " ok" : "");
   out.textContent = d.last_error ? `✗ ${d.last_error}`
@@ -870,6 +872,16 @@ function drawingsKey(id) {
   return `lucidfish-shared-drawings-${row?.fingerprint || id}`;
 }
 
+/** Drawings kept by older versions (in this browser or a progress file) have a "color" key, now "colour". */
+function britishDrawings(annotations) {
+  for (const d of Object.values(annotations || {})) {
+    for (const x of [...(d.arrows || []), ...(d.circles || [])]) {
+      if (x.colour === undefined && "color" in x) { x.colour = x.color; delete x.color; }
+    }
+  }
+  return annotations;
+}
+
 function winPct(cp) { return 50 + 50 * (2 / (1 + Math.exp(-0.00368208 * cp)) - 1); }
 
 /** Every analysed position of the shared copy, to find the stored engine lines of a practice position. */
@@ -934,7 +946,7 @@ function exportApi(path, { method = "GET", body } = {}) {
         const copy = JSON.parse(JSON.stringify(g));   // the page changes games (drawings); keep the original
         try {
           const mine = localStorage.getItem(drawingsKey(g.id));
-          if (mine) copy.annotations = JSON.parse(mine);
+          if (mine) copy.annotations = britishDrawings(JSON.parse(mine));
         } catch { /* storage unavailable: show the shared drawings */ }
         return Promise.resolve(copy);
       }
@@ -997,7 +1009,7 @@ function setTc(tc) {
   renderTcBars();
   if (state.page === "dashboard") loadDashboard();
   else if (state.page === "games") rerenderGames();
-  else if (state.page === "analyze") loadRecentGames();
+  else if (state.page === "analyse") loadRecentGames();
   else if (state.page === "train") renderTrainPage();
 }
 
@@ -1034,10 +1046,10 @@ async function loadDashboard() {
     $("dashTitle").textContent = "Welcome to Lucidfish";
     $("stats").innerHTML = "";
     $("summary").innerHTML = `<div class="empty"><div class="big">♞</div>Create a profile so the coach can learn your style,
-      or jump straight into <a href="#" id="emptyAnalyze">analysing a game</a>.<br><br>
+      or jump straight into <a href="#" id="emptyAnalyse">analysing a game</a>.<br><br>
       <button id="emptyProfile">Create profile</button></div>`;
     $("emptyProfile").addEventListener("click", () => openProfile(null));
-    $("emptyAnalyze").addEventListener("click", (e) => { e.preventDefault(); showPage("analyze"); });
+    $("emptyAnalyse").addEventListener("click", (e) => { e.preventDefault(); showPage("analyse"); });
     $("savedGames").innerHTML = `<div class="empty small">No games yet.</div>`;
     $("openings").innerHTML = `<div class="empty small">Appears after your first analysis.</div>`;
     state.savedGames = [];
@@ -1162,7 +1174,7 @@ function playedDate(g) {
 }
 /** SQLite UTC timestamp "2026-09-24 12:34:56" → Date. */
 function analysedDate(g) {
-  return g.analyzed_at ? new Date(`${g.analyzed_at.replace(" ", "T")}Z`) : null;
+  return g.analysed_at ? new Date(`${g.analysed_at.replace(" ", "T")}Z`) : null;
 }
 function opponentOf(g) {
   return g.user_side === "white" ? g.black : g.user_side === "black" ? g.white : null;
@@ -1171,10 +1183,10 @@ const accClass = (v) => (v >= 90 ? "a-hi" : v >= 75 ? "a-mid" : v >= 60 ? "a-low
 
 function filteredGames() {
   const words = $("gSearch").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  const res = $("gResult").value, color = $("gColor").value, tc = state.tc;
+  const res = $("gResult").value, colour = $("gColour").value, tc = state.tc;
   const list = state.savedGames.filter((g) => {
     if (res && resultFor(g) !== res) return false;
-    if (color && g.user_side !== color) return false;
+    if (colour && g.user_side !== colour) return false;
     if (tc && (g.time_class || "") !== tc) return false;
     if (words.length) {
       const hay = [g.white, g.black, g.opening, g.date, g.time_class, g.result].join(" ").toLowerCase();
@@ -1234,7 +1246,7 @@ function renderGames() {
   if (!all.length) {
     $("gSummary").innerHTML = "";
     box.innerHTML = `<div class="empty"><div class="big">♞</div>No analysed games yet. Games you analyse are saved here automatically.<br><br>
-      <button data-gempty="analyze">Analyze a game</button></div>`;
+      <button data-gempty="analyse">Analyse a game</button></div>`;
     return;
   }
   const list = filteredGames();
@@ -1256,7 +1268,7 @@ function renderGames() {
 
 const rerenderGames = () => { gamesView.limit = 50; renderGames(); };
 $("gSearch").addEventListener("input", debounce(rerenderGames, 120));
-["gResult", "gColor", "gSort"].forEach((id) => $(id).addEventListener("change", rerenderGames));
+["gResult", "gColour", "gSort"].forEach((id) => $(id).addEventListener("change", rerenderGames));
 $("gMore").addEventListener("click", () => { gamesView.limit += 50; renderGames(); });
 
 
@@ -1272,8 +1284,8 @@ $("gList").addEventListener("click", async (e) => {
     e.preventDefault();
     const what = empty.dataset.gempty;
     if (what === "profile") openProfile(null);
-    else if (what === "analyze") showPage("analyze");
-    else { $("gSearch").value = ""; ["gResult", "gColor"].forEach((id) => { $(id).value = ""; }); setTc(""); rerenderGames(); }
+    else if (what === "analyse") showPage("analyse");
+    else { $("gSearch").value = ""; ["gResult", "gColour"].forEach((id) => { $(id).value = ""; }); setTc(""); rerenderGames(); }
     return;
   }
   const row = e.target.closest(".g-row");
@@ -1397,13 +1409,13 @@ async function loadRecentGames() {
   renderRecentGames();
 }
 
-/* Clicking a game selects it (for "Analyze selected"); only the button on the right
+/* Clicking a game selects it (for "Analyse selected"); only the button on the right
  * starts an analysis or opens a saved one, so nothing expensive happens by accident. */
 function recentRow(g, i) {
   const sel = state.selected.has(i);
   const action = g.storedId
     ? `<button class="secondary sm" data-ra="open" title="Open the saved analysis">Open</button>`
-    : `<button class="secondary sm" data-ra="analyze" title="Analyse just this game now">Analyze</button>`;
+    : `<button class="secondary sm" data-ra="analyse" title="Analyse just this game now">Analyse</button>`;
   return `<div class="item recent${sel ? " selected" : ""}" data-i="${i}" role="option" aria-selected="${sel}" tabindex="0">
     <input type="checkbox" tabindex="-1" aria-hidden="true"${sel ? " checked" : ""}>
     <span class="title">${esc(g.white)} vs ${esc(g.black)}</span>${resultChip(g.result)}
@@ -1420,7 +1432,7 @@ function renderRecentGames() {
     : `<div class="empty small">${tc === "classical" && state.source === "chesscom"
       ? "chess.com has no classical games: it calls every game of 10 minutes or more rapid."
       : `No ${tc ? `${esc(tc)} ` : ""}games found${tc && state.source === "chesscom" ? " in the last 12 months" : ""}.`}</div>`;
-  $("analyzeBatch").textContent = tc ? `Analyze ${tc} batch` : "Analyze batch";
+  $("analyseBatch").textContent = tc ? `Analyse ${tc} batch` : "Analyse batch";
   updateSelection();
 }
 
@@ -1445,7 +1457,7 @@ $("gameList").addEventListener("click", (e) => {
   const i = Number(row.dataset.i), g = state.recent[i];
   const action = e.target.closest("[data-ra]")?.dataset.ra;
   if (action === "open") openStoredGame(g.storedId);
-  else if (action === "analyze") startAnalysis(g.pgn, g.side, g.rating);
+  else if (action === "analyse") startAnalysis(g.pgn, g.side, g.rating);
   else pickRecent(i, e.shiftKey);
 });
 $("gameList").addEventListener("keydown", (e) => {
@@ -1470,8 +1482,8 @@ function markAnalysed() {
 
 function updateSelection() {
   const n = state.selected.size, all = $("selectAll");
-  $("analyzeSelected").disabled = !n;
-  $("analyzeSelected").textContent = n ? `Analyze selected (${n})` : "Analyze selected";
+  $("analyseSelected").disabled = !n;
+  $("analyseSelected").textContent = n ? `Analyse selected (${n})` : "Analyse selected";
   all.checked = n > 0 && n === state.recent.length;
   all.indeterminate = n > 0 && n < state.recent.length;
 }
@@ -1493,8 +1505,8 @@ async function startImport(games) {
   renderRecentGames();
   pollQueue();
 }
-$("analyzeSelected").addEventListener("click", () => startImport([...state.selected].sort((a, b) => a - b).map((i) => state.recent[i])));
-$("analyzeBatch").addEventListener("click", () => {
+$("analyseSelected").addEventListener("click", () => startImport([...state.selected].sort((a, b) => a - b).map((i) => state.recent[i])));
+$("analyseBatch").addEventListener("click", () => {
   if (!state.recent.length) { toast("No games loaded to analyse.", true); return; }
   startImport(state.recent.slice(0, parseInt($("batchCount").value, 10)));
 });
@@ -1524,7 +1536,7 @@ async function pollQueue() {
   if (wasReviewing && !queue.reviewing && state.page === "dashboard" && !saved) loadDashboard();   // the new review
   if (saved) {
     loadDashboard().then(() => {
-      if (state.page === "analyze") markAnalysed();
+      if (state.page === "analyse") markAnalysed();
       if (state.page === "games") renderGames();
     });
   }
@@ -1594,7 +1606,7 @@ function renderQueue() {
       + `<span class="small">${d.paused ? "Paused" : `about <b>${fmtDuration(t.seconds_left)}</b> left · done around ${fmtClock(t.finish_at)}`}</span></div>`
       + `<div class="bar big"><div style="width:${(100 * t.progress).toFixed(1)}%"></div></div>`
       + (t.learned ? "" : `<p class="small" style="margin:6px 0 0">Rough estimate for now — it gets accurate once a game with these settings has finished on this computer.</p>`)
-    : `<div class="empty small">The queue is empty. Add games from <a href="#" data-qa="analyze">Analyze games</a> — pick several and press “Analyze selected”, or queue your last 5–20 games at once.</div>`;
+    : `<div class="empty small">The queue is empty. Add games from <a href="#" data-qa="analyse">Analyse games</a> — pick several and press “Analyse selected”, or queue your last 5–20 games at once.</div>`;
   $("queuePause").textContent = d.paused ? "▶ Resume" : "Pause";
   $("queuePause").disabled = !active && !d.paused;
   $("queueStopAll").disabled = !active;
@@ -1637,7 +1649,7 @@ $("queueBody").addEventListener("click", async (e) => {
     if (btn) {
       e.preventDefault();
       const qa = btn.dataset.qa;
-      if (qa === "analyze") { closeModal("queueModal"); showPage("analyze"); return; }
+      if (qa === "analyse") { closeModal("queueModal"); showPage("analyse"); return; }
       if (qa === "open") { closeModal("queueModal"); openJob(id); return; }
       if (qa === "resume") queue.data = await api("/api/queue/resume", { method: "POST" });
       else if (qa === "cancel") queue.data = await api(`/api/queue/${id}/cancel`, { method: "POST" });
@@ -1679,7 +1691,7 @@ dz.addEventListener("drop", (e) => {
   const f = e.dataTransfer.files[0];
   if (f) f.text().then((t) => { $("pgnText").value = t; });
 });
-$("analyzePgn").addEventListener("click", () => {
+$("analysePgn").addEventListener("click", () => {
   const side = $("sideSel").value;
   startAnalysis($("pgnText").value, side === "both" ? "both" : side || null);
 });
@@ -1704,7 +1716,7 @@ async function startAnalysis(pgn, side, rating) {
   if (side === "both") side = null;
   else if (!side) side = detectSide(pgn);
   let d;
-  try { d = await api("/api/analyze", { method: "POST", body: { pgn, side, elo: rating || null } }); }
+  try { d = await api("/api/analyse", { method: "POST", body: { pgn, side, elo: rating || null } }); }
   catch (e) { toast(e.message, true); return; }
   openJob(d.job_id, pgn);
   pollQueue();
@@ -1862,7 +1874,7 @@ function renderHeader() {
       .map((s) => `<div class="acc"><b>${acc[s]}%</b><span>${s} accuracy</span></div>`).join("");
     $("exportRow").querySelectorAll("#exportPgn,#exportMd").forEach((b) => b.classList.toggle("hidden", !g.moves.length));
   }
-  $("practiceAll").classList.toggle("hidden", !(g.mode === "game" && !g.jobId && myMistakes().length));
+  $("practiseAll").classList.toggle("hidden", !(g.mode === "game" && !g.jobId && myMistakes().length));
   $("reanalyseBtn").classList.toggle("hidden", !(g.mode === "game" && g.gameId && !g.jobId));
   $("crumbTitle").textContent = g.mode === "position" ? "Board editor position"
     : `${(g.headers || {}).White || "White"} vs ${(g.headers || {}).Black || "Black"}`;
@@ -1945,15 +1957,15 @@ function drawOverlay({ arrows = [], squares = [] }) {
   for (const s of squares) {
     if (!s.sq) continue;
     const [x, y] = sqXY(s.sq);
-    out += `<rect x="${x - 0.5}" y="${y - 0.5}" width="1" height="1" fill="${s.color}"/>`;
+    out += `<rect x="${x - 0.5}" y="${y - 0.5}" width="1" height="1" fill="${s.colour}"/>`;
   }
   for (const a of arrows) {
     if (!a.from || !a.to || a.from === a.to) continue;
     const [x1, y1] = sqXY(a.from), [x2, y2] = sqXY(a.to);
     const len = Math.hypot(x2 - x1, y2 - y1), ux = (x2 - x1) / len, uy = (y2 - y1) / len;
     const hx = x2 - ux * 0.38, hy = y2 - uy * 0.38;
-    out += `<line x1="${x1}" y1="${y1}" x2="${hx}" y2="${hy}" stroke="${a.color}" stroke-width="0.16" stroke-linecap="round" opacity="0.85"/>`
-      + `<polygon points="${x2 - ux * 0.08},${y2 - uy * 0.08} ${hx - uy * 0.22},${hy + ux * 0.22} ${hx + uy * 0.22},${hy - ux * 0.22}" fill="${a.color}" opacity="0.85"/>`;
+    out += `<line x1="${x1}" y1="${y1}" x2="${hx}" y2="${hy}" stroke="${a.colour}" stroke-width="0.16" stroke-linecap="round" opacity="0.85"/>`
+      + `<polygon points="${x2 - ux * 0.08},${y2 - uy * 0.08} ${hx - uy * 0.22},${hy + ux * 0.22} ${hx + uy * 0.22},${hy - ux * 0.22}" fill="${a.colour}" opacity="0.85"/>`;
   }
   svg.innerHTML = out + drawingsSvg();
   renderDrawBar();
@@ -1963,7 +1975,7 @@ const redrawOverlay = () => drawOverlay(lastOverlay);
 /* ================================================================ your drawings */
 
 const PEN = { green: "#15781b", red: "#b3261e", blue: "#1f5fbf", yellow: "#e08e00" };
-let drawDrag = null;   // {from, to, color} while drawing
+let drawDrag = null;   // {from, to, colour} while drawing
 
 /** Drawings belong to the position on the board (placement part of the FEN), so they
  * come back whenever that position is shown, in the game, a variation or practice. */
@@ -1976,7 +1988,7 @@ function currentDrawing() {
 function arrowSvg(a, width, opacity) {
   const [x1, y1] = sqXY(a.from), [x2, y2] = sqXY(a.to);
   const len = Math.hypot(x2 - x1, y2 - y1), ux = (x2 - x1) / len, uy = (y2 - y1) / len;
-  const hx = x2 - ux * 0.42, hy = y2 - uy * 0.42, c = PEN[a.color] || PEN.green;
+  const hx = x2 - ux * 0.42, hy = y2 - uy * 0.42, c = PEN[a.colour] || PEN.green;
   return `<line x1="${x1}" y1="${y1}" x2="${hx}" y2="${hy}" stroke="${c}" stroke-width="${width}" stroke-linecap="round" opacity="${opacity}"/>`
     + `<polygon points="${x2 - ux * 0.06},${y2 - uy * 0.06} ${hx - uy * 0.26},${hy + ux * 0.26} ${hx + uy * 0.26},${hy - ux * 0.26}" fill="${c}" opacity="${opacity}"/>`;
 }
@@ -1987,13 +1999,13 @@ function drawingsSvg() {
   let out = "";
   for (const c of d.circles) {
     const [x, y] = sqXY(c.sq);
-    out += `<circle cx="${x}" cy="${y}" r="0.45" fill="none" stroke="${PEN[c.color] || PEN.green}" stroke-width="0.07" opacity="0.85"/>`;
+    out += `<circle cx="${x}" cy="${y}" r="0.45" fill="none" stroke="${PEN[c.colour] || PEN.green}" stroke-width="0.07" opacity="0.85"/>`;
   }
   for (const a of d.arrows) out += arrowSvg(a, 0.2, 0.8);
   if (drawDrag && drawDrag.from !== drawDrag.to) out += arrowSvg(drawDrag, 0.2, 0.5);
   else if (drawDrag) {
     const [x, y] = sqXY(drawDrag.from);
-    out += `<circle cx="${x}" cy="${y}" r="0.45" fill="none" stroke="${PEN[drawDrag.color]}" stroke-width="0.07" opacity="0.5"/>`;
+    out += `<circle cx="${x}" cy="${y}" r="0.45" fill="none" stroke="${PEN[drawDrag.colour]}" stroke-width="0.07" opacity="0.5"/>`;
   }
   return out;
 }
@@ -2012,7 +2024,7 @@ function penFor(e) {
   if (e.shiftKey && e.altKey) return "yellow";
   if (e.shiftKey) return "red";
   if (e.altKey || e.ctrlKey || e.metaKey) return "blue";
-  return state.draw.color;
+  return state.draw.colour;
 }
 
 function finishDrawing() {
@@ -2027,11 +2039,11 @@ function finishDrawing() {
   if (d.from === d.to) {
     const old = cur.circles.find((c) => c.sq === d.from);
     cur.circles = cur.circles.filter((c) => c.sq !== d.from);
-    if (!old || old.color !== d.color) cur.circles.push({ sq: d.from, color: d.color });
+    if (!old || old.colour !== d.colour) cur.circles.push({ sq: d.from, colour: d.colour });
   } else {
     const old = cur.arrows.find((a) => a.from === d.from && a.to === d.to);
     cur.arrows = cur.arrows.filter((a) => !(a.from === d.from && a.to === d.to));
-    if (!old || old.color !== d.color) cur.arrows.push({ from: d.from, to: d.to, color: d.color });
+    if (!old || old.colour !== d.colour) cur.arrows.push({ from: d.from, to: d.to, colour: d.colour });
   }
   if (cur.arrows.length || cur.circles.length) g.annotations[key] = cur; else delete g.annotations[key];
   redrawOverlay();
@@ -2069,7 +2081,7 @@ function startDrawing(e, point) {
   // Shift+click would otherwise extend a text selection (and scroll the page) mid-drag.
   document.getSelection()?.removeAllRanges();
   document.body.classList.add("no-select");
-  drawDrag = { from: sq, to: sq, color: penFor(e) };
+  drawDrag = { from: sq, to: sq, colour: penFor(e) };
   redrawOverlay();
   return true;
 }
@@ -2114,10 +2126,10 @@ $("boardHolder").addEventListener("touchend", () => { if (drawDrag) finishDrawin
 $("btnDraw").addEventListener("click", () => { state.draw.mode = !state.draw.mode; renderDrawBar(); });
 $("btnClearDrawing").addEventListener("click", clearDrawing);
 $("drawSwatches").addEventListener("click", (e) => {
-  const b = e.target.closest("[data-color]");
+  const b = e.target.closest("[data-colour]");
   if (!b) return;
-  state.draw.color = b.dataset.color;
-  document.querySelectorAll("#drawSwatches [data-color]").forEach((x) => {
+  state.draw.colour = b.dataset.colour;
+  document.querySelectorAll("#drawSwatches [data-colour]").forEach((x) => {
     x.classList.toggle("active", x === b);
     x.setAttribute("aria-checked", x === b);
   });
@@ -2177,10 +2189,10 @@ function goTo(i, rerender = true) {
   board.position(m.fen_after, rerender && Math.abs(state.cur - prev) === 1);
   const arrows = [];
   if (state.view.bestArrow && m.best_from && m.cls !== "best" && m.best !== m.san && !isSpoiler(state.cur)) {
-    arrows.push({ from: m.best_from, to: m.best_to, color: "#1f9d6b" });
+    arrows.push({ from: m.best_from, to: m.best_to, colour: "#1f9d6b" });
   }
   const squares = state.view.highlight
-    ? [{ sq: m.from, color: "rgba(255, 214, 10, .38)" }, { sq: m.to, color: "rgba(255, 214, 10, .55)" }] : [];
+    ? [{ sq: m.from, colour: "rgba(255, 214, 10, .38)" }, { sq: m.to, colour: "rgba(255, 214, 10, .55)" }] : [];
   drawOverlay({ arrows, squares });
   setEvalBar(winOf(m), evalWords(m.eval));
   renderMoveList();
@@ -2409,8 +2421,8 @@ function practiceBoard() {
   const p = state.practice, g = state.game;
   board.position(p.result ? p.result.fen_after : p.fen, false);
   if (p.result) {
-    const u = p.result.uci, color = p.result.solved ? "rgba(31, 157, 107, .5)" : "rgba(224, 70, 75, .45)";
-    drawOverlay({ arrows: [], squares: [{ sq: u.slice(0, 2), color }, { sq: u.slice(2, 4), color }] });
+    const u = p.result.uci, colour = p.result.solved ? "rgba(31, 157, 107, .5)" : "rgba(224, 70, 75, .45)";
+    drawOverlay({ arrows: [], squares: [{ sq: u.slice(0, 2), colour }, { sq: u.slice(2, 4), colour }] });
     setEvalBar(winFromEval(p.result.eval), evalWords(p.result.eval));
   } else {
     drawOverlay({ arrows: [], squares: [] });
@@ -2520,7 +2532,7 @@ $("reanalyseBtn").addEventListener("click", async () => {
   if (!g?.gameId) return;
   try { openJob(await reanalyse(g.gameId), g.pgn); } catch (e) { toast(e.message, true); }
 });
-$("practiceAll").addEventListener("click", () => {
+$("practiseAll").addEventListener("click", () => {
   const list = myMistakes();
   if (!list.length) return;
   startPractice(list.find((i) => i >= state.cur) ?? list[0]);
@@ -2623,9 +2635,9 @@ function renderExplore() {
   const ev = over || (top ? engineEval(top, fen) : "");
   setEvalBar(ev ? winFromEval(ev) : winFromEval(state.practice?.result?.eval || ""), ev ? evalWords(ev) : "");
   const arrows = [], squares = [];
-  if (state.view.bestArrow && top?.pv?.[0] && !over) arrows.push({ from: top.pv[0].slice(0, 2), to: top.pv[0].slice(2, 4), color: "#1f9d6b" });
+  if (state.view.bestArrow && top?.pv?.[0] && !over) arrows.push({ from: top.pv[0].slice(0, 2), to: top.pv[0].slice(2, 4), colour: "#1f9d6b" });
   const last = hist[hist.length - 1];
-  if (last && state.view.highlight) squares.push({ sq: last.from, color: "rgba(255, 214, 10, .38)" }, { sq: last.to, color: "rgba(255, 214, 10, .55)" });
+  if (last && state.view.highlight) squares.push({ sq: last.from, colour: "rgba(255, 214, 10, .38)" }, { sq: last.to, colour: "rgba(255, 214, 10, .55)" });
   drawOverlay({ arrows, squares });
   $("explorePos").textContent = hist.length ? `· ${hist.length} move${hist.length === 1 ? "" : "s"} from where you started` : "";
   $("exploreUndo").disabled = !hist.length;
@@ -3044,10 +3056,10 @@ function renderGraph() {
   let pts = `0,${y(50)}`;
   g.moves.forEach((m, i) => { pts += ` ${x(i + 1)},${y(winOf(m))}`; });
   const last = x(g.moves.length);
-  const colors = { inaccuracy: "var(--c-inaccuracy)", mistake: "var(--c-mistake)", blunder: "var(--c-blunder)" };
+  const colours = { inaccuracy: "var(--c-inaccuracy)", mistake: "var(--c-mistake)", blunder: "var(--c-blunder)" };
   let marks = "";
   g.moves.forEach((m, i) => {
-    const c = colors[m.cls] || (m.critical ? "var(--c-critical)" : null);
+    const c = colours[m.cls] || (m.critical ? "var(--c-critical)" : null);
     if (c) marks += `<circle cx="${x(i + 1)}" cy="${y(winOf(m))}" r="3.5" fill="${c}" stroke="#fff" stroke-width="1"/>`;
   });
   const cur = state.cur >= 0 ? `<line class="g-cursor" x1="${x(state.cur + 1)}" x2="${x(state.cur + 1)}" y1="0" y2="${H}"/>` : "";
@@ -3086,7 +3098,7 @@ function stepPreview(d) {
   p.idx = Math.max(-1, Math.min(p.steps.length - 1, p.idx + d));
   const s = p.idx >= 0 ? p.steps[p.idx] : null;
   board.position(s ? s.fen : p.base, true);
-  drawOverlay({ arrows: s ? [{ from: s.from, to: s.to, color: "#e2a400" }] : [], squares: [] });
+  drawOverlay({ arrows: s ? [{ from: s.from, to: s.to, colour: "#e2a400" }] : [], squares: [] });
   $("previewPos").textContent = ` · move ${p.idx + 1} of ${p.steps.length} (◀ ▶ to step)`;
 }
 
@@ -3135,15 +3147,15 @@ $("edLoad").addEventListener("click", () => {
   setTimeout(() => { $("edFen").value = fen; }, 0);
 });
 
-$("edAnalyze").addEventListener("click", async () => {
+$("edAnalyse").addEventListener("click", async () => {
   const typed = $("edFen").value.trim();
   const fen = typed && typed.split(/\s+/)[0] === editorBoard.fen() ? typed : editorFen();
-  const btn = $("edAnalyze");
+  const btn = $("edAnalyse");
   btn.disabled = true; btn.textContent = "Analysing…";
   let d;
   try { d = await api("/api/position", { method: "POST", body: { fen, perspective: $("edPersp").value, level: state.profile?.level || null } }); }
   catch (e) { toast(e.message, true); return; }
-  finally { btn.disabled = false; btn.textContent = "Analyze position"; }
+  finally { btn.disabled = false; btn.textContent = "Analyse position"; }
   clearTimeout(pollTimer);
   state.game = { mode: "position", position: d, moves: [], warnings: d.warnings || [], headers: {}, annotations: {} };
   resetGameView();
@@ -3184,7 +3196,7 @@ applyView();
 
 function positionOverlay() {
   const first = state.view.bestArrow ? state.game.position.lines[0]?.steps?.[0] : null;
-  drawOverlay({ arrows: first ? [{ from: first.from, to: first.to, color: "#1f9d6b" }] : [], squares: [] });
+  drawOverlay({ arrows: first ? [{ from: first.from, to: first.to, colour: "#1f9d6b" }] : [], squares: [] });
 }
 
 function renderPosition() {
@@ -3339,7 +3351,7 @@ async function openSettings(tab = "coach") {
   $("depthSeg").innerHTML = Object.entries(s.depth_presets)
     .map(([name, d]) => `<button data-depth="${d}">${name[0].toUpperCase() + name.slice(1)} · ${d}</button>`).join("");
   renderProviders(); renderDetail(); syncDepth(); renderCoachEnabled();
-  api("/api/cache").then((c) => { $("cacheInfo").textContent = `${c.engine_positions.toLocaleString()} engine positions · ${c.opening_positions.toLocaleString()} opening positions stored`; }).catch(() => {});
+  api("/api/cache").then((c) => { $("cacheInfo").textContent = `${c.engine_positions.toLocaleString(LOCALE)} engine positions · ${c.opening_positions.toLocaleString(LOCALE)} opening positions stored`; }).catch(() => {});
   selectTab(tab);
   openModal("settingsModal");
 }

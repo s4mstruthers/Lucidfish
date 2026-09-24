@@ -18,6 +18,7 @@ from dataclasses import asdict, dataclass, field
 import requests
 
 from . import __version__
+from .spelling import british
 
 EXPLORER_URL = "https://explorer.lichess.ovh/masters"
 # After a network failure, stop asking for a while instead of paying a timeout
@@ -31,65 +32,65 @@ _LOCAL_BOOK: list[tuple[str, str, str]] = [
     # --- 1.e4 e5 ---
     ("e4 e5 Nf3 Nc6 Bc4 Bc5 b4", "Evans Gambit", "C51"),
     ("e4 e5 Nf3 Nc6 Bc4 Bc5", "Italian Game: Giuoco Piano", "C53"),
-    ("e4 e5 Nf3 Nc6 Bc4 Nf6", "Italian Game: Two Knights Defense", "C55"),
+    ("e4 e5 Nf3 Nc6 Bc4 Nf6", "Italian Game: Two Knights Defence", "C55"),
     ("e4 e5 Nf3 Nc6 Bc4", "Italian Game", "C50"),
-    ("e4 e5 Nf3 Nc6 Bb5 a6", "Ruy Lopez: Morphy Defense", "C70"),
-    ("e4 e5 Nf3 Nc6 Bb5 Nf6", "Ruy Lopez: Berlin Defense", "C65"),
+    ("e4 e5 Nf3 Nc6 Bb5 a6", "Ruy Lopez: Morphy Defence", "C70"),
+    ("e4 e5 Nf3 Nc6 Bb5 Nf6", "Ruy Lopez: Berlin Defence", "C65"),
     ("e4 e5 Nf3 Nc6 Bb5", "Ruy Lopez", "C60"),
     ("e4 e5 Nf3 Nc6 d4", "Scotch Game", "C45"),
     ("e4 e5 Nf3 Nc6 Nc3 Nf6", "Four Knights Game", "C47"),
-    ("e4 e5 Nf3 Nf6", "Petrov's Defense", "C42"),
-    ("e4 e5 Nf3 d6", "Philidor Defense", "C41"),
+    ("e4 e5 Nf3 Nf6", "Petrov's Defence", "C42"),
+    ("e4 e5 Nf3 d6", "Philidor Defence", "C41"),
     ("e4 e5 Nf3 Nc6", "King's Knight Opening", "C44"),
     ("e4 e5 Nc3", "Vienna Game", "C25"),
     ("e4 e5 f4 exf4", "King's Gambit Accepted", "C33"),
     ("e4 e5 f4", "King's Gambit", "C30"),
     ("e4 e5 Bc4", "Bishop's Opening", "C23"),
-    ("e4 e5 d4", "Center Game", "C21"),
+    ("e4 e5 d4", "Centre Game", "C21"),
     ("e4 e5", "King's Pawn Game", "C20"),
     # --- Sicilian ---
-    ("e4 c5 c3", "Sicilian Defense: Alapin Variation", "B22"),
-    ("e4 c5 Nc3", "Sicilian Defense: Closed", "B23"),
-    ("e4 c5 d4", "Sicilian Defense: Smith-Morra Gambit", "B21"),
-    ("e4 c5", "Sicilian Defense", "B20"),
+    ("e4 c5 c3", "Sicilian Defence: Alapin Variation", "B22"),
+    ("e4 c5 Nc3", "Sicilian Defence: Closed", "B23"),
+    ("e4 c5 d4", "Sicilian Defence: Smith-Morra Gambit", "B21"),
+    ("e4 c5", "Sicilian Defence", "B20"),
     # --- French ---
-    ("e4 e6 d4 d5 e5", "French Defense: Advance Variation", "C02"),
-    ("e4 e6 d4 d5 exd5", "French Defense: Exchange Variation", "C01"),
-    ("e4 e6 d4 d5 Nd2", "French Defense: Tarrasch Variation", "C03"),
-    ("e4 e6 d4 d5 Nc3 Bb4", "French Defense: Winawer Variation", "C15"),
-    ("e4 e6 d4 d5 Nc3 Nf6", "French Defense: Classical Variation", "C11"),
-    ("e4 e6", "French Defense", "C00"),
+    ("e4 e6 d4 d5 e5", "French Defence: Advance Variation", "C02"),
+    ("e4 e6 d4 d5 exd5", "French Defence: Exchange Variation", "C01"),
+    ("e4 e6 d4 d5 Nd2", "French Defence: Tarrasch Variation", "C03"),
+    ("e4 e6 d4 d5 Nc3 Bb4", "French Defence: Winawer Variation", "C15"),
+    ("e4 e6 d4 d5 Nc3 Nf6", "French Defence: Classical Variation", "C11"),
+    ("e4 e6", "French Defence", "C00"),
     # --- Caro-Kann ---
-    ("e4 c6 d4 d5 e5", "Caro-Kann Defense: Advance Variation", "B12"),
-    ("e4 c6 d4 d5 exd5", "Caro-Kann Defense: Exchange Variation", "B13"),
-    ("e4 c6 d4 d5 Nc3 dxe4 Nxe4 Bf5", "Caro-Kann Defense: Classical Variation", "B18"),
-    ("e4 c6 d4 d5 Nc3", "Caro-Kann Defense: Main Line", "B15"),
-    ("e4 c6 Nc3 d5 Nf3", "Caro-Kann Defense: Two Knights Attack", "B11"),
-    ("e4 c6", "Caro-Kann Defense", "B10"),
+    ("e4 c6 d4 d5 e5", "Caro-Kann Defence: Advance Variation", "B12"),
+    ("e4 c6 d4 d5 exd5", "Caro-Kann Defence: Exchange Variation", "B13"),
+    ("e4 c6 d4 d5 Nc3 dxe4 Nxe4 Bf5", "Caro-Kann Defence: Classical Variation", "B18"),
+    ("e4 c6 d4 d5 Nc3", "Caro-Kann Defence: Main Line", "B15"),
+    ("e4 c6 Nc3 d5 Nf3", "Caro-Kann Defence: Two Knights Attack", "B11"),
+    ("e4 c6", "Caro-Kann Defence", "B10"),
     # --- other e4 defences ---
-    ("e4 d5 exd5 Qxd5", "Scandinavian Defense: Mieses-Kotroc", "B01"),
-    ("e4 d5 exd5 Nf6", "Scandinavian Defense: Modern Variation", "B01"),
-    ("e4 d5", "Scandinavian Defense", "B01"),
-    ("e4 d6 d4 Nf6", "Pirc Defense", "B07"),
-    ("e4 d6", "Pirc Defense", "B07"),
-    ("e4 g6", "Modern Defense", "B06"),
-    ("e4 Nf6", "Alekhine's Defense", "B02"),
+    ("e4 d5 exd5 Qxd5", "Scandinavian Defence: Mieses-Kotroc", "B01"),
+    ("e4 d5 exd5 Nf6", "Scandinavian Defence: Modern Variation", "B01"),
+    ("e4 d5", "Scandinavian Defence", "B01"),
+    ("e4 d6 d4 Nf6", "Pirc Defence", "B07"),
+    ("e4 d6", "Pirc Defence", "B07"),
+    ("e4 g6", "Modern Defence", "B06"),
+    ("e4 Nf6", "Alekhine's Defence", "B02"),
     ("e4", "King's Pawn Opening", "B00"),
     # --- 1.d4 ---
     ("d4 d5 c4 dxc4", "Queen's Gambit Accepted", "D20"),
     ("d4 d5 c4 e6", "Queen's Gambit Declined", "D30"),
-    ("d4 d5 c4 c6", "Slav Defense", "D10"),
+    ("d4 d5 c4 c6", "Slav Defence", "D10"),
     ("d4 d5 c4", "Queen's Gambit", "D06"),
     ("d4 d5 Bf4", "London System", "D02"),
     ("d4 d5 Nf3 Nf6 Bf4", "London System", "D02"),
     ("d4 Nf6 Bg5", "Trompowsky Attack", "A45"),
-    ("d4 Nf6 c4 g6 Nc3 d5", "Grünfeld Defense", "D80"),
-    ("d4 Nf6 c4 g6", "King's Indian Defense", "E60"),
-    ("d4 Nf6 c4 e6 Nc3 Bb4", "Nimzo-Indian Defense", "E20"),
-    ("d4 Nf6 c4 e6 Nf3 b6", "Queen's Indian Defense", "E12"),
+    ("d4 Nf6 c4 g6 Nc3 d5", "Grünfeld Defence", "D80"),
+    ("d4 Nf6 c4 g6", "King's Indian Defence", "E60"),
+    ("d4 Nf6 c4 e6 Nc3 Bb4", "Nimzo-Indian Defence", "E20"),
+    ("d4 Nf6 c4 e6 Nf3 b6", "Queen's Indian Defence", "E12"),
     ("d4 Nf6 c4 e6 g3", "Catalan Opening", "E01"),
-    ("d4 Nf6 c4 c5", "Benoni Defense", "A56"),
-    ("d4 f5", "Dutch Defense", "A80"),
+    ("d4 Nf6 c4 c5", "Benoni Defence", "A56"),
+    ("d4 f5", "Dutch Defence", "A80"),
     ("d4 d5", "Queen's Pawn Game", "D00"),
     ("d4", "Queen's Pawn Opening", "A40"),
     # --- flank ---
@@ -172,6 +173,7 @@ class OpeningExplorer:
             cached = store.explorer_get(fen)
             if cached is not None:
                 info = OpeningInfo(**cached)
+                info.name = british(info.name)   # cached before names were made British
                 self._cache[fen] = info
                 return info
         if not self.available():
@@ -188,7 +190,7 @@ class OpeningExplorer:
                 OpeningExplorer._disabled_until = time.monotonic() + _BACKOFF_S
             return info
         opening = data.get("opening") or {}
-        info.name = opening.get("name", "")
+        info.name = british(opening.get("name", ""))   # Lichess spells them the American way
         info.eco = opening.get("eco", "")
         for m in data.get("moves", []):
             total = m.get("white", 0) + m.get("draws", 0) + m.get("black", 0)

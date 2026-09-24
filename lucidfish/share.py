@@ -48,10 +48,10 @@ _lock = threading.Lock()
 
 def _pieces() -> dict[str, str]:
     out = {}
-    for color in "wb":
+    for colour in "wb":
         for piece in "KQRBNP":
-            svg = chess.svg.piece(chess.Piece.from_symbol(piece if color == "w" else piece.lower()))
-            out[color + piece] = "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
+            svg = chess.svg.piece(chess.Piece.from_symbol(piece if colour == "w" else piece.lower()))
+            out[colour + piece] = "data:image/svg+xml;base64," + base64.b64encode(svg.encode()).decode()
     return out
 
 

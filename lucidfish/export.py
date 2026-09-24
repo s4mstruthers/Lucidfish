@@ -33,16 +33,16 @@ def _eval_tag(ev: str) -> str:
     return ev.lstrip("+") if not ev.startswith("#") else ev
 
 
-_COLOR_CODES = {"green": "G", "red": "R", "blue": "B", "yellow": "Y"}
+_COLOUR_CODES = {"green": "G", "red": "R", "blue": "B", "yellow": "Y"}
 
 
 def _drawing_tags(drawing: dict | None) -> str:
     """Your arrows and circles as PGN [%cal]/[%csl] tags (shown by Lichess, ChessBase, ...)."""
     if not drawing:
         return ""
-    arrows = ",".join(f"{_COLOR_CODES.get(a.get('color'), 'G')}{a['from']}{a['to']}"
+    arrows = ",".join(f"{_COLOUR_CODES.get(a.get('colour'), 'G')}{a['from']}{a['to']}"
                       for a in drawing.get("arrows", []))
-    circles = ",".join(f"{_COLOR_CODES.get(c.get('color'), 'G')}{c['sq']}" for c in drawing.get("circles", []))
+    circles = ",".join(f"{_COLOUR_CODES.get(c.get('colour'), 'G')}{c['sq']}" for c in drawing.get("circles", []))
     return " ".join(filter(None, [f"[%cal {arrows}]" if arrows else "", f"[%csl {circles}]" if circles else ""]))
 
 

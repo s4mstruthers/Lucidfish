@@ -30,7 +30,7 @@ def _lost_on_time_game():
 
 
 SCREENSHOT_REVIEW = """## Summary
-White outplayed Black in the Scandinavian Defense but lost on time.
+White outplayed Black in the Scandinavian Defence but lost on time.
 
 ## Key takeaways
 - **Time management is crucial**: You made several critical mistakes under time pressure, which cost you the game.
@@ -42,7 +42,7 @@ to improve your endgame play."""
 
 def test_the_screenshot_review_loses_its_unsupported_takeaways():
     moves, headers = _lost_on_time_game()
-    facts = game_facts(moves, headers, "White", "Scandinavian Defense: Mieses-Kotroc")
+    facts = game_facts(moves, headers, "White", "Scandinavian Defence: Mieses-Kotroc")
     text = "\n".join(facts.lines)
     assert "Black won on time" in text and "White had a forced mate" in text and "but lost on time" in text
     assert "an endgame with mixed pieces" in text                    # queens, rooks and bishops: not a pawn ending

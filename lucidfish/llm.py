@@ -26,6 +26,7 @@ import requests
 from . import __version__
 from .config import LLMConfig
 from .credentials import get_key, redact
+from .spelling import british
 
 
 @dataclass(frozen=True)
@@ -92,8 +93,9 @@ _THINK_RE = re.compile(r"<think>.*?</think>|^.*?</think>", re.S)
 
 
 def clean_output(text: str | None) -> str:
-    """Strip reasoning blocks some local models (qwen3, deepseek-r1) emit inline."""
-    return _THINK_RE.sub("", text or "").strip()
+    """Strip reasoning blocks some local models (qwen3, deepseek-r1) emit inline, and make the spelling
+    British (models trained mostly on American text slip even when asked)."""
+    return british(_THINK_RE.sub("", text or "").strip())
 
 
 def _normalise_url(url: str) -> str:

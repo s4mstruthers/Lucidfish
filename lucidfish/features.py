@@ -23,7 +23,7 @@ PIECE_VALUES = {
     chess.ROOK: 5, chess.QUEEN: 9, chess.KING: 0,
 }
 
-CENTER = [chess.D4, chess.E4, chess.D5, chess.E5]
+CENTRE = [chess.D4, chess.E4, chess.D5, chess.E5]
 
 _HOME_MINORS = {
     chess.WHITE: {chess.B1, chess.G1, chess.C1, chess.F1},
@@ -46,7 +46,7 @@ class SideFeatures:
     doubled_pawn_files: list[str] = field(default_factory=list)
     isolated_pawns: list[str] = field(default_factory=list)
     passed_pawns: list[str] = field(default_factory=list)
-    center_pawns_and_attacks: int = 0  # occupancy + attacks on d4/e4/d5/e5
+    centre_pawns_and_attacks: int = 0  # occupancy + attacks on d4/e4/d5/e5
     mobility: int = 0                  # legal-move count (proxy for activity)
 
 
@@ -94,8 +94,8 @@ class PositionFeatures:
                 out.append((f"passed:{name}", f"{name} has passed pawns on {', '.join(s.passed_pawns)}."))
         out.extend(self.tactical)
         out.extend(self.endgame)
-        out.append(("center", f"Center control (pawns + attacks on d4/e4/d5/e5): "
-                              f"White {w.center_pawns_and_attacks}, Black {b.center_pawns_and_attacks}."))
+        out.append(("centre", f"Centre control (pawns + attacks on d4/e4/d5/e5): "
+                              f"White {w.centre_pawns_and_attacks}, Black {b.centre_pawns_and_attacks}."))
         out.append(("mobility", f"Mobility (legal moves): White {w.mobility}, Black {b.mobility}."))
         return out
 
@@ -120,36 +120,36 @@ def diff_lines(before: PositionFeatures, after: PositionFeatures) -> list[str]:
 
 # ------------------------------------------------------------------ internals
 
-def _material(board: chess.Board, color: chess.Color) -> int:
-    return sum(PIECE_VALUES[pt] * len(board.pieces(pt, color)) for pt in PIECE_VALUES)
+def _material(board: chess.Board, colour: chess.Color) -> int:
+    return sum(PIECE_VALUES[pt] * len(board.pieces(pt, colour)) for pt in PIECE_VALUES)
 
 
-def _development(board: chess.Board, color: chess.Color) -> tuple[int, int, list[str]]:
+def _development(board: chess.Board, colour: chess.Color) -> tuple[int, int, list[str]]:
     """(minors on board, minors developed, labels of minors still at home).
 
     Counting actual pieces (rather than empty home squares) means captured
     pieces are never reported as "developed".
     """
-    minors = board.pieces(chess.KNIGHT, color) | board.pieces(chess.BISHOP, color)
+    minors = board.pieces(chess.KNIGHT, colour) | board.pieces(chess.BISHOP, colour)
     home = sorted(f"{board.piece_at(sq).symbol().upper()}{chess.square_name(sq)}"
-                  for sq in minors if sq in _HOME_MINORS[color])
+                  for sq in minors if sq in _HOME_MINORS[colour])
     return len(minors), len(minors) - len(home), home
 
 
-def _castled(board: chess.Board, color: chess.Color) -> bool:
+def _castled(board: chess.Board, colour: chess.Color) -> bool:
     """Heuristic: king on a castled square with no castling rights left."""
-    king = board.king(color)
-    castled_squares = {chess.G1, chess.C1} if color == chess.WHITE else {chess.G8, chess.C8}
-    return king in castled_squares and not board.has_castling_rights(color)
+    king = board.king(colour)
+    castled_squares = {chess.G1, chess.C1} if colour == chess.WHITE else {chess.G8, chess.C8}
+    return king in castled_squares and not board.has_castling_rights(colour)
 
 
-def _king_safety(board: chess.Board, color: chess.Color) -> tuple[int, list[str]]:
-    king = board.king(color)
+def _king_safety(board: chess.Board, colour: chess.Color) -> tuple[int, list[str]]:
+    king = board.king(colour)
     if king is None:
         return 0, []
     kf, kr = chess.square_file(king), chess.square_rank(king)
-    forward = 1 if color == chess.WHITE else -1
-    own_pawns = board.pieces(chess.PAWN, color)
+    forward = 1 if colour == chess.WHITE else -1
+    own_pawns = board.pieces(chess.PAWN, colour)
     own_pawn_files = {chess.square_file(sq) for sq in own_pawns}
     shield, open_files = 0, []
     for f in (kf - 1, kf, kf + 1):
@@ -163,9 +163,9 @@ def _king_safety(board: chess.Board, color: chess.Color) -> tuple[int, list[str]
     return shield, open_files
 
 
-def _pawn_structure(board: chess.Board, color: chess.Color) -> tuple[list[str], list[str], list[str]]:
-    pawns = board.pieces(chess.PAWN, color)
-    their_pawns = board.pieces(chess.PAWN, not color)
+def _pawn_structure(board: chess.Board, colour: chess.Color) -> tuple[list[str], list[str], list[str]]:
+    pawns = board.pieces(chess.PAWN, colour)
+    their_pawns = board.pieces(chess.PAWN, not colour)
     files = [chess.square_file(sq) for sq in pawns]
     doubled = sorted({chess.FILE_NAMES[f] for f in files if files.count(f) > 1})
     isolated, passed = [], []
@@ -173,30 +173,30 @@ def _pawn_structure(board: chess.Board, color: chess.Color) -> tuple[list[str], 
         f, r = chess.square_file(sq), chess.square_rank(sq)
         if not any(abs(chess.square_file(p) - f) == 1 for p in pawns):
             isolated.append(chess.square_name(sq))
-        direction = 1 if color == chess.WHITE else -1
+        direction = 1 if colour == chess.WHITE else -1
         if not any(abs(chess.square_file(p) - f) <= 1 and (chess.square_rank(p) - r) * direction > 0
                    for p in their_pawns):
             passed.append(chess.square_name(sq))
     return doubled, sorted(isolated), sorted(passed)
 
 
-def _center(board: chess.Board, color: chess.Color) -> int:
+def _centre(board: chess.Board, colour: chess.Color) -> int:
     score = 0
-    for sq in CENTER:
+    for sq in CENTRE:
         piece = board.piece_at(sq)
-        if piece and piece.color == color and piece.piece_type == chess.PAWN:
+        if piece and piece.color == colour and piece.piece_type == chess.PAWN:
             score += 2
-        score += len(board.attackers(color, sq))
+        score += len(board.attackers(colour, sq))
     return score
 
 
-def _mobility(board: chess.Board, color: chess.Color) -> int:
-    if board.turn == color:
+def _mobility(board: chess.Board, colour: chess.Color) -> int:
+    if board.turn == colour:
         return board.legal_moves.count()
     if board.is_check():
         return 0  # flipping the turn would leave a king in check; not meaningful
     b = board.copy(stack=False)
-    b.turn = color
+    b.turn = colour
     b.ep_square = None
     return b.legal_moves.count()
 
@@ -219,28 +219,28 @@ def game_phase(board: chess.Board) -> str:
 def extract(board: chess.Board) -> PositionFeatures:
     pt = tactics.analyse(board)
     sides = {}
-    for color in (chess.WHITE, chess.BLACK):
-        minors, developed, home = _development(board, color)
-        shield, open_files = _king_safety(board, color)
-        doubled, isolated, passed = _pawn_structure(board, color)
-        king = board.king(color)
-        sides[color] = SideFeatures(
-            material=_material(board, color),
+    for colour in (chess.WHITE, chess.BLACK):
+        minors, developed, home = _development(board, colour)
+        shield, open_files = _king_safety(board, colour)
+        doubled, isolated, passed = _pawn_structure(board, colour)
+        king = board.king(colour)
+        sides[colour] = SideFeatures(
+            material=_material(board, colour),
             minors=minors,
             developed_minors=developed,
             undeveloped_minors=home,
-            castled=_castled(board, color),
-            can_castle=board.has_castling_rights(color),
+            castled=_castled(board, colour),
+            can_castle=board.has_castling_rights(colour),
             king_square=chess.square_name(king) if king is not None else "?",
             king_pawn_shield=shield,
             king_open_files=open_files,
             hanging_pieces=[f"{board.piece_at(t.square).symbol().upper()}{chess.square_name(t.square)}"
-                            for t in pt.en_prise[color]],
+                            for t in pt.en_prise[colour]],
             doubled_pawn_files=doubled,
             isolated_pawns=isolated,
             passed_pawns=passed,
-            center_pawns_and_attacks=_center(board, color),
-            mobility=_mobility(board, color),
+            centre_pawns_and_attacks=_centre(board, colour),
+            mobility=_mobility(board, colour),
         )
     phase = game_phase(board)
     return PositionFeatures(white=sides[chess.WHITE], black=sides[chess.BLACK],
@@ -256,10 +256,10 @@ def piece_placement(board: chess.Board) -> str:
     """
     parts = []
     order = (chess.KING, chess.QUEEN, chess.ROOK, chess.BISHOP, chess.KNIGHT)
-    for color in (chess.WHITE, chess.BLACK):
+    for colour in (chess.WHITE, chess.BLACK):
         pieces = [f"{chess.piece_symbol(pt).upper()}{chess.square_name(sq)}"
-                  for pt in order for sq in board.pieces(pt, color)]
-        pawns = " ".join(chess.square_name(sq) for sq in board.pieces(chess.PAWN, color))
+                  for pt in order for sq in board.pieces(pt, colour)]
+        pawns = " ".join(chess.square_name(sq) for sq in board.pieces(chess.PAWN, colour))
         side = ", ".join(pieces) + (f", pawns {pawns}" if pawns else "")
-        parts.append(f"{'White' if color == chess.WHITE else 'Black'}: {side}")
+        parts.append(f"{'White' if colour == chess.WHITE else 'Black'}: {side}")
     return "; ".join(parts)

@@ -28,7 +28,7 @@ def test_existing_threat_separates_ignored_threats_from_new_problems():
 @needs_engine
 def test_analysis_flags_a_missed_threat():
     pgn = '[White "A"]\n[Black "B"]\n[Result "1-0"]\n\n1. e4 e5 2. Bc4 Nc6 3. Qh5 Nf6 4. Qxf7# 1-0\n'
-    report = pipeline.analyze_game(pgn, fast_config(), side_filter="black")
+    report = pipeline.analyse_game(pgn, fast_config(), side_filter="black")
     nf6 = report.moves[5]
     assert nf6.san == "Nf6" and nf6.classification == "blunder"
     assert nf6.threat.startswith("Qxf7#") and "missed threat" in nf6.tags
@@ -79,12 +79,12 @@ class MastersBook(OpeningExplorer):
             board.push(move)
 
     def lookup(self, fen):
-        return OpeningInfo(name="Philidor Defense", eco="C41", top_moves=self.stats.get(fen, []))
+        return OpeningInfo(name="Philidor Defence", eco="C41", top_moves=self.stats.get(fen, []))
 
 
 @needs_engine
 def test_the_move_that_leaves_theory_is_marked_with_what_masters_play():
-    report = pipeline.analyze_game(SAMPLE_PGN, fast_config(), side_filter="white", explorer=MastersBook(SAMPLE_PGN))
+    report = pipeline.analyse_game(SAMPLE_PGN, fast_config(), side_filter="white", explorer=MastersBook(SAMPLE_PGN))
     left = [m for m in report.moves if m.left_book]
     assert [m.san for m in left] == ["Bg4"]
     assert "masters usually play exd4 (5000 games), Nf6 (2100 games)" in left[0].left_book
