@@ -486,8 +486,11 @@ API key, and never contacts a server. They can:
 
 - browse the games, the commentary, the chapters and the review, and see the Home page's
   statistics and patterns;
-- **practise their mistakes** and **train** with spaced repetition (progress is saved in their
-  browser, and carries over when a newer copy replaces the file, as the shared folder does);
+- **practise their mistakes** and **train** with spaced repetition. Progress is saved in their
+  browser and carries over when a newer copy replaces the file, as the shared folder does.
+  *💾 Save my progress* on the Train page downloads it as a small file (a backup, or to carry
+  it to another computer or browser) and *📂 Load progress* merges it back in; for each puzzle
+  the most recently practised version wins, so an old backup never undoes newer practice;
 - **explore** any position with the built-in engine;
 - draw on the board (also saved in their browser).
 
