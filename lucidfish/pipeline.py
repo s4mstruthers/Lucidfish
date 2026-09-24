@@ -401,7 +401,8 @@ def analyze_game(
     report.coach = coach.describe()
     system = build_system_prompt(side_filter, cfg.user_elo, level, player_context,
                                  players={"White": game.headers.get("White", "White"),
-                                          "Black": game.headers.get("Black", "Black")})
+                                          "Black": game.headers.get("Black", "Black")},
+                                 rating_label=cfg.user_elo_label)
     commentary_mode = detail == "standard" and coach.available
 
     stop_event = threading.Event()
@@ -686,10 +687,18 @@ def analyze_game(
         if progress:
             progress("review", total, total, "Writing the post-game review…")
         facts = review_check.game_facts(report.moves, report.headers,
-                                        side_filter.capitalize() if side_filter else None, report.opening, base_s)
+                                        side_filter.capitalize() if side_filter else None, report.opening, base_s,
+                                        report.accuracy)
         prompt = _review_prompt(report, side_filter, cfg, player_context, facts.lines)
+
+        def write_review(llm: LLMProvider) -> str:
+            # One rewrite if the review gets facts wrong (the result, whose move, a verdict), then clean up.
+            messages = [{"role": "user", "content": prompt}]
+            text = llm.chat(GAME_REVIEW_SYSTEM, messages)
+            return _verified_text(llm, GAME_REVIEW_SYSTEM, messages, text,
+                                  lambda t: review_check.problems(t, facts), max_tokens=None)
         try:
-            text = coach.hard(lambda llm: llm.generate(GAME_REVIEW_SYSTEM, prompt))
+            text = coach.hard(write_review)
             report.review, _removed = review_check.check_review(text, facts)
         except LLMError as e:
             report.warnings.append(f"The post-game review could not be written: {e}")
@@ -951,7 +960,8 @@ def _review_prompt(report: GameReport, side_filter: str | None, cfg: Config, pla
             facts.append(f"{prefix} {m.san} ignored a threat that was already on the board: {m.threat}.")
     return build_game_review_prompt(
         report.headers, records, report.opening, [t for _, t in swings[:5]], side_filter,
-        elo=cfg.user_elo, time_class=report.time_class, player_context=player_context,
+        elo=cfg.user_elo, rating_label=cfg.user_elo_label, time_class=report.time_class,
+        player_context=player_context,
         accuracy=report.accuracy, commentary=flow, chapters=report.chapters, facts=facts)
 
 
@@ -1144,7 +1154,7 @@ def analyze_position(fen: str, cfg: Config, perspective: str | None = None, leve
     coach, warnings = build_coach(cfg)
     result["warnings"] += warnings
     if coach.available and lines:
-        system = build_system_prompt(persp.lower(), cfg.user_elo, level)
+        system = build_system_prompt(persp.lower(), cfg.user_elo, level, rating_label=cfg.user_elo_label)
         prompt = build_position_prompt(board, lines, facts, persp)
         try:
             text = coach.hard(lambda llm: llm.generate(system, prompt, max_tokens=_MAX_TOKENS["full"]))

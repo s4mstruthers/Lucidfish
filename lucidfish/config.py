@@ -211,3 +211,4 @@ class Config:
     lichess_user: str = field(default_factory=lambda: os.environ.get("LUCIDFISH_LICHESS_USER", ""))
     # Player rating — tailors explanation depth and lesson targeting (None = generic).
     user_elo: int | None = None
+    user_elo_label: str = ""        # which rating it is, e.g. "chess.com blitz" (sites' scales differ)

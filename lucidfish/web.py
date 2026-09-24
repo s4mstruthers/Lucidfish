@@ -41,7 +41,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import __version__, credentials, jobs, settings, share, store, training
+from . import __version__, credentials, jobs, ratings, settings, share, store, training
 from .engine import EngineAnalyzer
 from .export import annotated_pgn, markdown_report
 from .llm import PROVIDERS, LLMError, make_provider
@@ -302,8 +302,10 @@ def position(req: PositionReq):
     if board.is_stalemate():
         return _error("This position is stalemate.")
     profile = _active_profile() or {}
+    cfg = settings.load_config()
+    cfg.user_elo, cfg.user_elo_label = ratings.newest(profile.get("ratings") or {}) or (None, "")
     try:
-        result = analyze_position(board.fen(), settings.load_config(), req.perspective,
+        result = analyze_position(board.fen(), cfg, req.perspective,
                                   req.level or profile.get("level"), engine_cache=store.EngineCache())
     except RuntimeError as e:
         return _error(str(e), 500)
@@ -498,9 +500,9 @@ class ProfileReq(BaseModel):
     chesscom_user: str = Field(default="", max_length=40)
     lichess_user: str = Field(default="", max_length=40)
     level: Literal["", "beginner", "casual", "club", "advanced"] = ""
-    elo_bullet: int | None = Field(default=None, ge=100, le=3500)
-    elo_blitz: int | None = Field(default=None, ge=100, le=3500)
-    elo_rapid: int | None = Field(default=None, ge=100, le=3500)
+    # Ratings the page just looked up on the sites: {"chesscom": {"blitz": 1410}, "lichess": {...}}.
+    # (Ratings also update by themselves from every analysed game.)
+    lookup: dict[str, dict[str, int]] | None = None
 
 
 @app.get("/api/profiles")
@@ -511,7 +513,7 @@ def profiles():
 @app.post("/api/profiles")
 def create_profile(req: ProfileReq):
     try:
-        pid = store.create_profile(**req.model_dump())
+        pid = store.create_profile(**req.model_dump(exclude={"lookup"}), ratings=ratings.clean_lookup(req.lookup))
     except Exception:
         return _error("A profile with that name already exists.")
     return {"id": pid}
@@ -530,9 +532,10 @@ def update_profile(pid: int, req: ProfileReq):
     if store.get_profile(pid) is None:
         return _error("unknown profile", 404)
     try:
-        store.update_profile(pid, **req.model_dump())
+        store.update_profile(pid, **req.model_dump(exclude={"lookup"}))
     except Exception:
         return _error("A profile with that name already exists.")
+    store.add_ratings(pid, ratings.clean_lookup(req.lookup))
     share.sync_profile(pid)
     return {"ok": True}
 

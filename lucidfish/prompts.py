@@ -33,6 +33,7 @@ from dataclasses import dataclass, field
 
 import chess
 
+from . import ratings
 from .engine import Line, MoveAnalysis, describe_move
 from .features import PositionFeatures, diff_lines, piece_placement
 from .scoring import describe_eval
@@ -71,10 +72,18 @@ activity, weak squares, forks, pins) and translate evaluations into words.
 - Always answer in exactly the format requested."""
 
 
-def elo_guidance(elo: int | None) -> str:
+def rating_text(elo: int, label: str = "") -> str:
+    """'about 1410 (chess.com blitz)', with a reminder that the sites' scales differ."""
+    text = f"about {elo}" + (f" ({label})" if label else "")
+    if "chess.com" in label or "Lichess" in label:
+        text += "; the same player is usually rated a few hundred points higher on Lichess than on chess.com"
+    return text
+
+
+def elo_guidance(elo: int | None, label: str = "") -> str:
     if not elo:
         return ""
-    return (f"The player is rated about {elo}. At lower ratings favour fundamentals (hanging pieces, "
+    return (f"The player is rated {rating_text(elo, label)}. At lower ratings favour fundamentals (hanging pieces, "
             "one-move threats, development, king safety) and keep lines to 2-3 moves; at higher "
             "ratings be more concrete and positional. Aim each lesson at what would take this "
             "player to the next level.")
@@ -82,7 +91,7 @@ def elo_guidance(elo: int | None) -> str:
 
 def build_system_prompt(coached_side: str | None = None, elo: int | None = None,
                         level: str | None = None, player_context: str = "",
-                        players: dict | None = None) -> str:
+                        players: dict | None = None, rating_label: str = "") -> str:
     """Per-game system prompt: identical for every request of a game, so it can be cached."""
     parts = [COACH_RULES, "\nContext for this game:"]
     if players:
@@ -96,7 +105,7 @@ def build_system_prompt(coached_side: str | None = None, elo: int | None = None,
     if level and level.lower() in LEVEL_NOTES:
         parts.append(f"- The player is {LEVEL_NOTES[level.lower()]}.")
     if elo:
-        parts.append("- " + elo_guidance(elo))
+        parts.append("- " + elo_guidance(elo, rating_label))
     if player_context:
         parts.append("- Coach profile of this player from previous games:\n" + player_context.strip()
                      + "\n  When a move repeats one of their recurring issues, point out the pattern "
@@ -508,24 +517,34 @@ def build_position_prompt(board: chess.Board, lines: list[Line], features: list[
 
 # --------------------------------------------------------------- review
 
-GAME_REVIEW_SYSTEM = """You are a patient chess coach and commentator giving a post-game \
-review. You receive a VERIFIED record: each move with its engine verdict, the evaluation \
-trajectory, accuracy scores, the opening, the biggest swings and, when available, the \
-commentary written for each stretch of the game.
+GAME_REVIEW_SYSTEM = """You are a patient, honest chess coach giving a post-game review. \
+You receive a VERIFIED record: each move with its engine verdict, the evaluation \
+trajectory, accuracy scores, the opening, the biggest swings, verified facts (starting with \
+the RESULT) and, when available, the commentary written for each stretch of the game.
 
-Write the review with exactly these three sections (markdown headers):
-## Summary — 2-4 sentences: the opening (name it) and the overall result of the \
-battle — who stood better when and why.
+Write the review with exactly these sections (markdown headers):
+## Summary — 2-4 sentences: the opening (name it), the result (exactly as the RESULT fact \
+says), and who stood better when and why.
 ## How the game unfolded — 3-6 bullet points, one per phase or turning point, each \
 starting with '- ' and the move range (e.g. "- Moves 8-12: White expands on the queenside \
 with b4 and a3 while Black ..."). Tell the story of the plans each side pursued, how they \
 collided, and where the balance shifted.
+## What went well — 1-2 bullet points on what the player did well in THIS game, taken from \
+the verified highlights (a strong move found at a critical moment, an opponent's error \
+punished, an advantage converted), each naming the move or fact. Specific and brief: no \
+flattery or empty praise. If the highlights give nothing, write one honest point.
 ## Key takeaways — 2-4 concrete, transferable lessons drawn from THIS game, as bullet \
-points each starting with '- '. Each one names the move it comes from (e.g. "Move 31 (Qf5): \
-...") or the verified fact it rests on. These are the things to practise before the next game.
+points each starting with '- '. Each one names the player's own move it comes from (e.g. \
+"Move 31 (Qf5): ...") or the verified fact it rests on. These are the things to practise \
+before the next game, and the most important part of the review.
 
 Hard rules:
-- Cite only moves and verdicts present in the record. Do not invent tactics or lines.
+- Get the result right: say who won exactly as the RESULT fact states. Never say the \
+player lost a game they won, or the reverse.
+- Cite only moves and verdicts present in the record, and credit every move to the side \
+that played it: "your" moves are the coached side's, never the opponent's. Call a move a \
+mistake, blunder or inaccuracy only if the record says so.
+- Do not invent tactics or lines.
 - No generic advice that this game doesn't show (e.g. "study pawn structures", "practise trades").
 - Mention endgames only of the kinds the verified facts say this game reached. If it never \
 reached an endgame, give no endgame advice.
@@ -548,6 +567,7 @@ def build_game_review_prompt(
     commentary: list[str] | None = None,
     chapters: list[dict] | None = None,
     facts: list[str] | None = None,
+    rating_label: str = "",
 ) -> str:
     parts: list[str] = []
     w, b = headers.get("White", "White"), headers.get("Black", "Black")
@@ -567,8 +587,8 @@ def build_game_review_prompt(
         parts.append(f"Time control: {time_class}. Judge decisions accordingly — fast games reward "
                      "practical choices and time management, not perfect play.")
     if elo:
-        parts.append(f"The coached player is rated about {elo}; aim the takeaways at what would take "
-                     "them to the next level. If the record shows big errors played in very few "
+        parts.append(f"The coached player is rated {rating_text(elo, rating_label)}; aim the takeaways at "
+                     "what would take them to the next level. If the record shows big errors played in very few "
                      "seconds, make time discipline one of the takeaways.")
     if player_context:
         parts.append("Coach profile from their previous games: " + player_context +
@@ -621,8 +641,7 @@ sessions as context, so make every sentence carry information."""
 def build_player_summary_prompt(stats: dict, reviews: list, profile: dict | None = None) -> str:
     parts = []
     if profile:
-        elos = ", ".join(f"{k.replace('elo_', '')} {v}" for k, v in profile.items()
-                         if k.startswith("elo_") and v)
+        elos = ratings.summary(profile.get("ratings") or {})
         parts.append(
             f"Player: {profile.get('name', 'the player')}. "
             + (f"Actual ratings: {elos}. " if elos else "")

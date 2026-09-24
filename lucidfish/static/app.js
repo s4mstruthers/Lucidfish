@@ -142,14 +142,6 @@ function fmtClock(ts) {
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : "");
 const DETAIL_NAMES = { key: "Key moments", standard: "Commentary", full: "Every move" };
 
-/** chess.com-style time class from a PGN TimeControl header (matches the backend). */
-function timeClass(pgn) {
-  const m = pgn.match(/\[TimeControl "(\d+)(?:\+(\d+))?"\]/);
-  if (!m) return "";
-  const est = parseInt(m[1], 10) + 40 * parseInt(m[2] || "0", 10);
-  return est < 180 ? "bullet" : est < 600 ? "blitz" : est < 1800 ? "rapid" : "classical";
-}
-
 /* ================================================================ state */
 
 const state = {
@@ -362,9 +354,17 @@ function avatarStyle(name) {
 function avatar(name, cls = "") {
   return `<span class="avatar ${cls}" style="${avatarStyle(name)}" aria-hidden="true">${esc(initials(name))}</span>`;
 }
+const RATING_SITES = { chesscom: "chess.com", lichess: "Lichess", other: "Other" };
+const RATING_CLASSES = ["bullet", "blitz", "rapid", "classical", "daily"];
+
+/** "chess.com rapid 1450 · Lichess blitz 1720": each site's most recently updated rating. */
 function ratingsText(p) {
-  return [["rapid", p.elo_rapid], ["blitz", p.elo_blitz], ["bullet", p.elo_bullet]]
-    .filter(([, v]) => v).map(([k, v]) => `${cap(k)} ${v}`).join(" · ");
+  return Object.entries(RATING_SITES).map(([site, name]) => {
+    const entries = Object.entries(p.ratings?.[site] || {});
+    if (!entries.length) return "";
+    const [cls, e] = entries.sort((a, b) => (b[1].date || "").localeCompare(a[1].date || ""))[0];
+    return `${site === "other" ? "" : `${name} `}${cls} ${e.rating}`;
+  }).filter(Boolean).join(" · ");
 }
 
 let activeProfileId;   // undefined until the first load
@@ -454,6 +454,32 @@ async function switchProfile(id) {
 
 let editingProfile = null;
 let pfLevel = "";
+let pfLookup = {};   // ratings looked up in the open form, saved with it: {site: {class: rating}}
+
+/** The profile's ratings per site and time control, with what "Look up" just found. */
+function renderPfRatings() {
+  const today = new Date().toISOString().slice(0, 10);
+  const rows = {};
+  for (const site of Object.keys(RATING_SITES)) {
+    rows[site] = { ...(editingProfile?.ratings?.[site] || {}) };
+    for (const [cls, rating] of Object.entries(pfLookup[site] || {})) rows[site][cls] = { rating, date: today, source: "new" };
+  }
+  const typed = { chesscom: $("pfChesscom").value.trim(), lichess: $("pfLichess").value.trim() };
+  const sites = Object.keys(RATING_SITES).filter((s) => Object.keys(rows[s]).length || typed[s]);
+  let classes = RATING_CLASSES.filter((c) => sites.some((s) => rows[s][c]));
+  if (!classes.length) classes = ["bullet", "blitz", "rapid"];
+  const when = (d) => (d ? fmtDate(new Date(`${d}T12:00:00`)) : "");
+  const tip = (e, site) => (e.source === "new" ? "Just looked up (saved with the profile)"
+    : e.source === "game" ? `From your analysed game of ${when(e.date)}`
+      : e.source === "lookup" ? `Looked up on ${RATING_SITES[site]} on ${when(e.date)}` : "Typed in earlier");
+  $("pfRatings").innerHTML = sites.length
+    ? `<table class="ratings-table"><thead><tr><th></th>${classes.map((c) => `<th>${cap(c)}</th>`).join("")}</tr></thead><tbody>`
+      + sites.map((s) => `<tr><th>${RATING_SITES[s]}</th>${classes.map((c) => {
+        const e = rows[s][c];
+        return e ? `<td class="${e.source === "new" ? "fresh" : ""}" title="${esc(tip(e, s))}">${e.rating}</td>` : `<td class="none">—</td>`;
+      }).join("")}</tr>`).join("") + `</tbody></table>`
+    : `<p class="small" style="margin:0">No ratings yet. They appear after your first analysed game, or press <b>Look up</b>.</p>`;
+}
 
 function openProfile(existing) {
   editingProfile = existing;
@@ -463,9 +489,8 @@ function openProfile(existing) {
   pfLevel = existing?.level || "";
   $("pfChesscom").value = existing?.chesscom_user || "";
   $("pfLichess").value = existing?.lichess_user || "";
-  $("pfBullet").value = existing?.elo_bullet || "";
-  $("pfBlitz").value = existing?.elo_blitz || "";
-  $("pfRapid").value = existing?.elo_rapid || "";
+  pfLookup = {};
+  renderPfRatings();
   $("pfChesscomStatus").textContent = ""; $("pfLichessStatus").textContent = "";
   $("pfDanger").classList.toggle("hidden", !existing);
   $("pfError").textContent = "";
@@ -484,6 +509,7 @@ function renderProfileForm() {
   });
 }
 $("pfName").addEventListener("input", renderProfileForm);
+["pfChesscom", "pfLichess"].forEach((id) => $(id).addEventListener("input", renderPfRatings));
 $("pfLevel").addEventListener("click", (e) => {
   const b = e.target.closest("[data-level]");
   if (!b) return;
@@ -504,33 +530,35 @@ async function lookupRatings(site) {
       if (r.status === 404) throw new Error(`No chess.com player called "${user}".`);
       if (!r.ok) throw new Error(`chess.com answered HTTP ${r.status}.`);
       const d = await r.json();
-      ratings = { bullet: d.chess_bullet?.last?.rating, blitz: d.chess_blitz?.last?.rating, rapid: d.chess_rapid?.last?.rating };
+      ratings = { bullet: d.chess_bullet?.last?.rating, blitz: d.chess_blitz?.last?.rating,
+        rapid: d.chess_rapid?.last?.rating, daily: d.chess_daily?.last?.rating };
     } else {
       const r = await fetch(`https://lichess.org/api/user/${encodeURIComponent(user)}`);
       if (r.status === 404) throw new Error(`No Lichess player called "${user}".`);
       if (!r.ok) throw new Error(`Lichess answered HTTP ${r.status}.`);
       const d = await r.json();
-      ratings = { bullet: d.perfs?.bullet?.rating, blitz: d.perfs?.blitz?.rating, rapid: d.perfs?.rapid?.rating };
+      const perf = (k) => (d.perfs?.[k] && !d.perfs[k].prov && d.perfs[k].games ? d.perfs[k].rating : null);   // not provisional
+      ratings = { bullet: perf("bullet"), blitz: perf("blitz"), rapid: perf("rapid"), classical: perf("classical"),
+        daily: perf("correspondence") };
     }
-    const found = Object.entries(ratings).filter(([, v]) => v);
-    for (const [k, v] of found) $(`pf${cap(k)}`).value = v;
+    const found = Object.entries(ratings).filter(([, v]) => Number.isInteger(v));
+    pfLookup[site] = Object.fromEntries(found);
+    renderPfRatings();
     out.className = "small lookup ok";
-    out.textContent = found.length ? `✓ Found: ${found.map(([k, v]) => `${k} ${v}`).join(", ")}. Ratings filled in below.`
-      : "✓ Found the player, but they have no rated bullet, blitz or rapid games yet.";
+    out.textContent = found.length ? `✓ Found: ${found.map(([k, v]) => `${k} ${v}`).join(", ")}. Saved with the profile.`
+      : "✓ Found the player, but they have no established ratings there yet.";
   } catch (e) {
     out.className = "small lookup bad";
     out.textContent = e.message.startsWith("No ") || e.message.includes("HTTP") ? e.message
-      : "Couldn't reach the site — check your connection, or type the ratings yourself.";
+      : "Couldn't reach the site — check your connection and try again.";
   }
 }
 document.querySelectorAll("[data-lookup]").forEach((b) => b.addEventListener("click", () => lookupRatings(b.dataset.lookup)));
 
 $("pfSave").addEventListener("click", async () => {
-  const num = (id) => { const v = parseInt($(id).value, 10); return Number.isFinite(v) ? v : null; };
   const body = {
     name: $("pfName").value.trim(), level: pfLevel,
-    chesscom_user: $("pfChesscom").value.trim(), lichess_user: $("pfLichess").value.trim(),
-    elo_bullet: num("pfBullet"), elo_blitz: num("pfBlitz"), elo_rapid: num("pfRapid"),
+    chesscom_user: $("pfChesscom").value.trim(), lichess_user: $("pfLichess").value.trim(), lookup: pfLookup,
   };
   if (!body.name) { $("pfError").textContent = "Please enter a name."; $("pfName").focus(); return; }
   try {
@@ -1100,9 +1128,15 @@ function gameRow(g) {
     : `${esc(g.white)} <span class="g-vs">vs</span> ${esc(g.black)}`;
   const colour = g.user_side ? `<span class="g-colour ${g.user_side}" title="You played ${g.user_side}"></span>` : "";
   const meta = [g.opening, cap(g.time_class), played ? fmtDate(played) : ""].filter(Boolean).join(" · ");
-  const errs = [["blunder", g.blunders], ["mistake", g.mistakes], ["inaccuracy", g.inaccuracies]]
-    .map(([c, n]) => `<span class="g-err${n ? "" : " zero"}" title="${n || 0} ${LABELS[c].toLowerCase()}${n === 1 ? "" : "s"}">`
-      + `${badge(c)}<span>${n || 0}</span></span>`).join("");
+  const count = (b, n, what) => `<span class="g-err${n ? "" : " zero"}" title="${n || 0} ${what}">${b}<span>${n || 0}</span></span>`;
+  const plural = (n, word) => (n === 1 ? word : word.endsWith("y") ? `${word.slice(0, -1)}ies` : `${word}s`);
+  const good = g.best_moves == null ? "" : count(`<span class="badge b-great">⚡</span>`, g.great_moves,
+    `${plural(g.great_moves, "great move")}: the only good move at a critical moment`)
+    + count(badge("best"), g.best_moves, `${plural(g.best_moves, "best move")} (the engine's top choice)`)
+    + count(badge("good"), g.good_moves, `${plural(g.good_moves, "good move")} (close to the best)`)
+    + `<span class="g-sep" aria-hidden="true"></span>`;
+  const errs = good + [["blunder", g.blunders], ["mistake", g.mistakes], ["inaccuracy", g.inaccuracies]]
+    .map(([c, n]) => count(badge(c), n, plural(n, LABELS[c].toLowerCase()))).join("");
   return `<div class="g-row" data-gid="${g.id}" tabindex="0" role="button"
       title="${esc(analysed ? `Analysed ${fmtDate(analysed)}` : "")}">
     <div class="g-result">${resultChip(resultFor(g)) || `<span class="chip">${esc(g.result || "*")}</span>`}</div>
@@ -1562,13 +1596,6 @@ function detectSide(pgn) {
   return null;
 }
 
-function ratingFor(pgn) {
-  const p = state.profile;
-  if (!p) return null;
-  const cls = timeClass(pgn) || "rapid";
-  return p[`elo_${cls}`] || p.elo_rapid || p.elo_blitz || p.elo_bullet || null;
-}
-
 /* ================================================================ analysis jobs */
 
 let pollTimer = null;
@@ -1578,7 +1605,7 @@ async function startAnalysis(pgn, side, rating) {
   if (side === "both") side = null;
   else if (!side) side = detectSide(pgn);
   let d;
-  try { d = await api("/api/analyze", { method: "POST", body: { pgn, side, elo: rating || ratingFor(pgn) } }); }
+  try { d = await api("/api/analyze", { method: "POST", body: { pgn, side, elo: rating || null } }); }
   catch (e) { toast(e.message, true); return; }
   openJob(d.job_id, pgn);
   pollQueue();

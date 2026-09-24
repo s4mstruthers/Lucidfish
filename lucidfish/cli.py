@@ -123,7 +123,11 @@ def main(argv: list[str] | None = None) -> int:
             console.print(f"You played [bold]{args.side.capitalize()}[/bold] — coaching that side.")
 
     from . import store
+    from .jobs import rating_for_game
     from .pipeline import analyze_game
+    if cfg.user_elo is None:   # no --elo: the game's own rating, else the active profile's
+        cfg.user_elo, cfg.user_elo_label = rating_for_game(pgn_text, args.side, None,
+                                                           store.get_profile(store.active_id()))
     columns = (TextColumn("[bold]{task.description:<8}"), BarColumn(), MofNCompleteColumn(),
                TextColumn("{task.fields[label]}"), TimeElapsedColumn())
     try:
