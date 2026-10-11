@@ -45,10 +45,11 @@ from pydantic import BaseModel, Field
 from . import __version__, concepts, config, credentials, engine_setup, jobs, ratings, settings, share, store, training
 from .engine import EngineAnalyser
 from .export import annotated_pgn, markdown_report
-from .llm import PROVIDERS, LLMError, make_provider
+from .llm import PROVIDERS, LLMError, ask, make_provider, run_tools
 from .pipeline import analyse_position, build_coach, check_move
 from .prompts import COACH_CHAT_SYSTEM
 from .review_check import presentable_review
+from .tools import CHECK_LINE, LineChecker
 
 STATIC = Path(__file__).parent / "static"
 DEFAULT_PORT = 8420
@@ -824,7 +825,8 @@ class ChatReq(BaseModel):
 
 @app.post("/api/chat")
 def coach_chat(req: ChatReq):
-    coach, warnings = build_coach(settings.load_config())
+    cfg = settings.load_config()
+    coach, warnings = build_coach(cfg)
     if not coach.available:
         return _error(warnings[0] if warnings else "The AI coach is turned off in Settings.", 503)
     system = COACH_CHAT_SYSTEM
@@ -836,10 +838,27 @@ def coach_chat(req: ChatReq):
     history = [m.model_dump() for m in req.messages[-12:]]
     while history and history[0]["role"] != "user":   # conversations must start with the user
         history.pop(0)
+    # The coach may test a variation with the engine before answering ("what if I had played Nxe5?"),
+    # starting from the FEN in the context; the lines it checked are shown under the answer.
+    use_tools = cfg.llm.verify_lines and "FEN" in req.context
+    if QUEUE.busy:   # share the CPU with the analysis in progress instead of stalling it
+        cfg.engine.threads = max(1, cfg.engine.threads // 2)
+    checker = LineChecker(None, cfg, store.EngineCache()) if use_tools else None
+    if checker is not None:
+        system += ("\n\nYou can call check_line (with the FEN from the context) to test any variation with the "
+                   "engine before you answer; cite what it found rather than guessing what a line leads to.")
     try:
-        return {"reply": coach.hard(lambda llm: llm.chat(system, history, max_tokens=700))}
+        if checker is not None:
+            reply = coach.hard(lambda llm: run_tools(llm, system, history, [CHECK_LINE], checker, max_rounds=3,
+                                                     max_tokens=700, effort="medium"))
+        else:
+            reply = coach.hard(lambda llm: ask(llm, system, history, max_tokens=700, effort="medium"))
+        return {"reply": reply, "checks": list(checker.calls) if checker else []}
     except LLMError as e:
         return _error(str(e), 502)
+    finally:
+        if checker is not None:
+            checker.close()
 
 
 # ================================================================ server

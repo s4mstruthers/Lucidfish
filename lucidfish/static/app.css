@@ -340,6 +340,11 @@ legend { font-weight: 650; margin-bottom: 8px; font-size: .95rem; }
 .chip.imp-2 { background: color-mix(in srgb, var(--c-mistake) 13%, transparent); color: var(--c-mistake); }
 .chip.imp-1 { background: color-mix(in srgb, var(--c-inaccuracy) 16%, transparent); color: var(--c-inaccuracy); }
 
+.checks { margin: 8px 0 4px; padding: 8px 10px; border-radius: 10px; background: var(--surface-3); font-size: .8rem; }
+.checks-label { display: block; font-size: .68rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); margin-bottom: 4px; }
+.check-line { color: var(--muted); line-height: 1.45; }
+.check-line .mono { font-family: var(--mono); color: var(--text); }
+
 .badge {
   display: inline-grid; place-items: center; min-width: 22px; height: 20px; padding: 0 5px;
   border-radius: 6px; font-size: .72rem; font-weight: 800; color: #fff; line-height: 1;

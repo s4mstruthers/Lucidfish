@@ -200,6 +200,7 @@ class LLMConfig:
     enabled: bool = True              # False = engine-only analysis (no LLM at all)
     factcheck: bool = True            # re-ask once when a note names moves/pieces not on the board
     escalate: bool = True             # let the expert model (if any) rewrite text that failed the fact-check
+    verify_lines: bool = True         # let the model check variations with the engine (tool use) before writing
 
 
 @dataclass

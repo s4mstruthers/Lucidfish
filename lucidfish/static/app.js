@@ -2387,7 +2387,7 @@ function renderExplain(m) {
   }
   if (m.expl) {
     html += (opponent ? `<span class="opp-label">What your opponent is up to</span>` : m.flow ? `<div class="section-label">Coach's note</div>` : "")
-      + `<div class="md">${md(m.expl)}</div>`;
+      + `<div class="md">${md(m.expl)}</div>` + engineChecks(m.checks);
   } else if (m.flow) {
     /* the commentary line says it all */
   } else if (g.jobId) {
@@ -3287,6 +3287,15 @@ $("copyFen").addEventListener("click", async () => {
 
 /* ================================================================ chat */
 
+/** Lines the coach tested with the engine while writing (tool calls), shown so the reader can see the proof. */
+function engineChecks(checks) {
+  const ok = (checks || []).filter((c) => c.legal && c.line && c.evaluation);
+  if (!ok.length) return "";
+  return `<div class="checks"><span class="checks-label">Checked with the engine</span>`
+    + ok.map((c) => `<div class="check-line"><span class="mono">${esc(c.line)}</span> → ${esc(c.evaluation)}</div>`).join("")
+    + `</div>`;
+}
+
 function gameContext() {
   const g = state.game;
   if (!g) return "";
@@ -3338,7 +3347,9 @@ function bindChat(logId, inputId, sendId, history, contextFn) {
     try {
       const d = await api("/api/chat", { method: "POST", body: { messages: history.slice(-12), context: contextFn() } });
       history.push({ role: "assistant", content: d.reply });
-      add("coach", d.reply);
+      const bubble = add("coach", d.reply);
+      const proof = engineChecks(d.checks);
+      if (proof) bubble.insertAdjacentHTML("beforeend", proof);
     } catch (e) {
       history.pop();
       add("coach", `⚠ ${e.message}`);
@@ -3368,6 +3379,7 @@ async function openSettings(tab = "coach") {
   draft.models[s.provider] = s.model;
   $("setLlmEnabled").checked = s.llm_enabled;
   $("setFactcheck").checked = s.factcheck;
+  $("setVerifyLines").checked = s.verify_lines !== false;
   $("setEscalate").checked = s.escalate !== false;
   $("setExpertProvider").innerHTML = `<option value="">Off — the main model does everything</option>`
     + s.providers.map((p) => `<option value="${p.id}">${esc(p.label)} · ${p.local ? "on this computer" : "cloud"}</option>`).join("");
@@ -3558,7 +3570,7 @@ $("saveSettings").addEventListener("click", async () => {
     factcheck: $("setFactcheck").checked, prefetch: $("setPrefetch").checked, detail: draft.detail,
     auto_review: $("setAutoReview").checked,
     expert_provider: $("setExpertProvider").value, expert_model: $("setExpertModel").value.trim(),
-    escalate: $("setEscalate").checked,
+    escalate: $("setEscalate").checked, verify_lines: $("setVerifyLines").checked,
     depth: $("setDepth").value, threads: $("setThreads").value, hash_mb: $("setHash").value,
     stockfish_path: $("setStockfish").value.trim(), concurrency: $("setConcurrency").value || null,
   };

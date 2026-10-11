@@ -23,7 +23,7 @@ from collections import deque
 
 from . import ratings, settings, share, store
 from .config import Config
-from .llm import PROVIDERS, LLMError
+from .llm import PROVIDERS, LLMError, ask
 from .pipeline import (
     DETAIL_LEVELS,
     analyse_game,
@@ -33,6 +33,7 @@ from .pipeline import (
 )
 from .prompts import build_player_summary_prompt, player_summary_system
 from .review_check import tidy_profile_review
+from .schemas import profile_markdown, profile_schema
 
 _QUEUE_KEY = "queue"
 _TIMINGS_KEY = "timings"
@@ -662,8 +663,12 @@ def refresh_player_summary(pid: int, time_class: str | None = None) -> tuple[str
     prompt = build_player_summary_prompt(stats, store.recent_reviews(pid, time_class=time_class),
                                          profile=store.get_profile(pid), time_class=time_class)
     try:
-        raw = coach.hard(lambda llm: llm.generate(player_summary_system(time_class), prompt))
-        summary = tidy_profile_review(raw, stats, time_class)   # the fixed structure, whatever the model did
+        raw = coach.hard(lambda llm: ask(llm, player_summary_system(time_class),
+                                         [{"role": "user", "content": prompt}],
+                                         schema=profile_schema(time_class), effort="high"))
+        # The JSON answer becomes the review's sections; tidy_profile_review enforces the structure whatever
+        # the model did (plain text from a provider that refused the schema included).
+        summary = tidy_profile_review(profile_markdown(raw, time_class), stats, time_class)
     except LLMError as e:
         return "", str(e)
     store.set_summary(pid, summary, time_class)

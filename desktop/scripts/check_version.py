@@ -2,7 +2,7 @@
 """Check that every file carrying Lucidfish's version agrees (and matches a release tag, if given).
 
     python desktop/scripts/check_version.py          # the files agree with each other
-    python desktop/scripts/check_version.py v0.3.0   # ... and with this tag
+    python desktop/scripts/check_version.py v0.4.0   # ... and with this tag
 
 The version lives in lucidfish/__init__.py; desktop/src-tauri/tauri.conf.json, desktop/src-tauri/Cargo.toml
 and desktop/package.json must repeat it (Tauri names the installers and the updater manifest after it).
