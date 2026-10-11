@@ -1,0 +1,198 @@
+# Build the Lucidfish desktop app for macOS, Windows and Linux, and publish a release.
+#
+# When it runs: on a pull request, when a version tag is pushed (the release), and with
+# "Run workflow" on the Actions tab (any branch: the result is downloadable from the run's page
+# as artifacts, so a build can be tried before a release). Documentation-only pull requests are
+# not built, and a newer push to a pull request cancels its unfinished run.
+#
+# First the test suite runs (Linux); only if it passes are the apps built. PyInstaller cannot
+# cross-compile, so each app is built on a machine running that system: the backend is frozen
+# into one executable, smoke-tested, bundled with an official Stockfish build and wrapped in the
+# Tauri shell. Every run keeps the installers as artifacts on the run's page.
+#
+# Pushing a version tag (git tag v0.4.0 && git push origin v0.4.0) also publishes a GitHub
+# Release with the installers attached, described by the version's section of CHANGELOG.md, plus
+# `latest.json`, which installed apps read to find and install the update. The tag must match
+# the version in lucidfish/__init__.py (and the desktop files; desktop/scripts/check_version.py
+# checks), and CHANGELOG.md needs a section for it.
+#
+# Secrets (Settings → Secrets and variables → Actions):
+#   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+#       Sign the updater artifacts so installed apps accept them (desktop/README.md says how the
+#       key pair is made). Without them the installers are still built and released, but no
+#       latest.json is published: that release must be installed by hand.
+#   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY, APPLE_ID,
+#   APPLE_PASSWORD, APPLE_TEAM_ID
+#       Optional: signed and notarised macOS builds (otherwise macOS asks the user to allow the app
+#       once, see the README).
+
+name: Build apps
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: write           # the release job attaches the installers
+
+env:
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+jobs:
+  tests:
+    name: Tests
+    runs-on: ubuntu-22.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install Stockfish
+        run: sudo apt-get update && sudo apt-get install -y stockfish
+      - name: Install Lucidfish with the test tools
+        run: python -m pip install -e ".[dev]"
+      - name: Versions agree (and match the tag, when there is one)
+        run: python desktop/scripts/check_version.py ${{ github.ref_type == 'tag' && github.ref_name || '' }}
+      - name: CHANGELOG.md says what is new in this version
+        if: github.ref_type == 'tag'
+        run: python desktop/scripts/release_notes.py "${{ github.ref_name }}" > /dev/null
+      - name: Lint
+        run: ruff check lucidfish tests
+      - name: Test suite
+        run: python -m pytest -q -o faulthandler_timeout=300
+
+  build:
+    name: ${{ matrix.name }}
+    needs: tests
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (Apple silicon)
+            os: macos-14
+            target: aarch64-apple-darwin
+          - name: macOS (Intel)
+            os: macos-13
+            target: x86_64-apple-darwin
+          - name: Windows
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+          - name: Linux
+            # The oldest supported Ubuntu: an app built against an older glibc runs on newer distributions.
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: desktop/src-tauri
+          key: ${{ matrix.target }}
+
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf libssl-dev
+
+      - name: Install Lucidfish and PyInstaller
+        run: python -m pip install --upgrade pip && python -m pip install . pyinstaller
+
+      - name: Build and smoke-test the backend (sidecar)
+        run: python desktop/scripts/build_sidecar.py --target ${{ matrix.target }}
+
+      - name: Bundle Stockfish
+        run: python desktop/scripts/fetch_stockfish.py --target ${{ matrix.target }}
+
+      - name: Install the Tauri CLI
+        working-directory: desktop
+        run: npm ci --no-audit --no-fund
+
+      - name: Build the app
+        working-directory: desktop
+        shell: bash
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+            npm run tauri -- build --target ${{ matrix.target }}
+          else
+            echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set: building without updater artifacts (this release cannot be installed by the in-app updater)."
+            echo '{"bundle":{"createUpdaterArtifacts":false}}' > unsigned.json
+            npm run tauri -- build --target ${{ matrix.target }} --config unsigned.json
+          fi
+
+      - name: Collect the installers
+        run: python desktop/scripts/collect_bundles.py --target ${{ matrix.target }}
+
+      - name: Keep the installers as an artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Lucidfish-${{ matrix.target }}
+          path: dist/*
+          if-no-files-found: error
+
+  release:
+    name: Publish release
+    needs: build
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Release notes from CHANGELOG.md
+        run: python desktop/scripts/release_notes.py "${{ github.ref_name }}" > release-notes.md
+      - name: Updater manifest (latest.json) from the signed installers
+        run: python desktop/scripts/make_latest_json.py "${{ github.ref_name }}" --notes release-notes.md
+      - name: What is being published
+        run: ls -l dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Lucidfish ${{ github.ref_name }}
+          body_path: release-notes.md
+          files: dist/*
+          fail_on_unmatched_files: true

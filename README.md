@@ -1,6 +1,15 @@
 # Lucidfish
 
-[![CI](https://github.com/s4mstruthers/Lucidfish/actions/workflows/ci.yml/badge.svg)](https://github.com/s4mstruthers/Lucidfish/actions/workflows/ci.yml)
+<p align="center">
+  <a href="https://github.com/s4mstruthers/Lucidfish/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/s4mstruthers/Lucidfish?label=download&color=2563EB"></a>
+  <a href="https://github.com/s4mstruthers/Lucidfish/actions/workflows/ci.yml"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/s4mstruthers/Lucidfish/ci.yml?label=tests"></a>
+  <a href="https://github.com/s4mstruthers/Lucidfish/actions/workflows/build-apps.yml"><img alt="App builds" src="https://img.shields.io/github/actions/workflow/status/s4mstruthers/Lucidfish/build-apps.yml?label=app%20builds"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/s4mstruthers/Lucidfish/releases/latest"><b>⬇ Download for macOS, Windows or Linux</b></a>
+  · nothing else to install · or <code>pip install -e .</code> from source · <a href="#download">install guide</a>
+</p>
 
 **Stockfish tells you the best move — Lucidfish tells you _why_.**
 
@@ -17,14 +26,30 @@ The feedback is pitched at your level and linked to the mistakes you keep making
 
 ## Download
 
-**[Get Lucidfish for macOS, Windows or Linux →](https://github.com/s4mstruthers/Lucidfish/releases/latest)**
+Lucidfish runs on **macOS, Windows and Linux**. Take the file for your system from the
+[latest release](https://github.com/s4mstruthers/Lucidfish/releases/latest); it brings its own copy of
+Stockfish, so there is nothing else to install.
 
-One installer, nothing else to set up: the app brings its own copy of Stockfish and **updates itself**
-(a banner appears when a new version is out; *Update and restart* installs it in the background, your
-games and settings stay where they are). Choose the `.dmg` on a Mac (Apple Silicon or Intel), the `.exe`
-on Windows, or the `.AppImage` / `.deb` / `.rpm` on Linux. The optional AI coach is set up inside the
-app (Settings → AI coach), locally with Ollama or with a cloud provider. The macOS build is not yet
-notarised: the first time, right-click the app → *Open*.
+| System | File | Then |
+|---|---|---|
+| macOS | `Lucidfish-…-macOS-arm64.dmg` (Apple silicon, 2020 or later) or `…-macOS-x64.dmg` (Intel) | Open it and drag **Lucidfish** onto **Applications**. |
+| Windows | `Lucidfish-…-Windows-x64-setup.exe` (or the `.msi`) | Run it; Lucidfish appears in the Start menu. |
+| Linux | `Lucidfish-…-Linux-x64.AppImage` (any distribution), `.deb` (Debian, Ubuntu) or `.rpm` (Fedora) | AppImage: `chmod +x` it and run it. Packages: install with your package manager. |
+
+The apps are not signed with a paid developer certificate, so the system asks once, the first time
+you start one:
+
+- **macOS** says Apple could not check it. Click *Done*, open *System Settings ▸ Privacy & Security*
+  and click *Open Anyway* next to Lucidfish (or in Terminal: `xattr -dr com.apple.quarantine
+  /Applications/Lucidfish.app`).
+- **Windows** shows *Windows protected your PC*. Click *More info*, then *Run anyway*.
+
+Later versions install themselves: a banner appears when a new version is out, and *Update and
+restart* installs it in the background (Settings → About & updates checks on demand). Your games and
+settings stay where they are. What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
+
+The optional AI coach is set up inside the app (Settings → AI coach): free and private on your own
+computer with [Ollama](https://ollama.com), or with a cloud provider and an API key.
 
 Prefer to run from source, or want the command line? See [Installation](#installation).
 
