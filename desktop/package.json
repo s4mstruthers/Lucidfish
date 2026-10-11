@@ -1,6 +1,6 @@
 {
   "name": "lucidfish-desktop",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "private": true,
   "description": "Lucidfish desktop app: a Tauri shell around the Lucidfish backend, with in-app updates.",
   "scripts": {
