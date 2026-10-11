@@ -46,6 +46,7 @@ permissions:
 
 env:
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  PYTHONUTF8: "1"           # Windows consoles default to cp1252, which cannot print every character
 
 jobs:
   tests:

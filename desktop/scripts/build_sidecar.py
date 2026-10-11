@@ -67,7 +67,7 @@ def smoke_test(exe: Path) -> None:
     out = subprocess.run([str(exe), "--version"], capture_output=True, text=True, timeout=180)
     if out.returncode != 0 or __version__ not in out.stdout:
         raise SystemExit(f"The built sidecar does not start:\n{out.stdout}\n{out.stderr}")
-    print(f"Smoke test: {exe.name} --version → {out.stdout.strip()}")
+    print(f"Smoke test: {exe.name} --version -> {out.stdout.strip()}")
 
 
 if __name__ == "__main__":
