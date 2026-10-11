@@ -43,10 +43,11 @@ from . import features as feat
 from . import plans, ratings, review_check, tactics
 from .config import Config
 from .engine import EngineAnalyser, Line, MoveAnalysis, build_move_analysis, describe_move
-from .llm import LLMError, LLMProvider, make_provider
+from .llm import LLMError, LLMProvider, ask, make_provider, run_tools
 from .opening import OpeningExplorer, local_book_depth, local_opening_name
 from .prompts import (
     GAME_REVIEW_SYSTEM,
+    AssessmentIndex,
     ChapterContext,
     CommentaryContext,
     CommentaryMove,
@@ -56,6 +57,7 @@ from .prompts import (
     build_game_review_prompt,
     build_ideas_prompt,
     build_move_prompt,
+    build_position_prompt,
     build_system_prompt,
     correction_prompt,
     eval_after_words,
@@ -63,11 +65,15 @@ from .prompts import (
     norm_san,
     parse_chapter,
     parse_commentary,
+    parse_ideas,
+    parse_note,
     side_line,
-    split_sections,
     time_note,
 )
+from .schemas import CHAPTER, IDEAS, NOTE, POSITION, REVIEW, review_markdown
+from .schemas import WINDOW as WINDOW_SCHEMA
 from .scoring import describe_eval, eval_text, game_accuracy, win_percent
+from .tools import CHECK_LINE, LineChecker
 
 ERRORS = ("inaccuracy", "mistake", "blunder")
 VERIFY_EXTRA_DEPTH = 4   # extra plies when double-checking a verdict before reporting it
@@ -76,7 +82,11 @@ WINDOW = 8               # plies per commentary window (4 moves by each side)
 RECENT = 6               # plies of history shown with each note
 HINDSIGHT = 6            # plies of "what actually happened next"
 # Output caps for local models (a safety net against rambling, not a target).
-_MAX_TOKENS = {"full": 900, "brief": 300, "opponent": 250, "ideas": 300, "window": 1000, "chapter": 300}
+_MAX_TOKENS = {"full": 1000, "brief": 300, "opponent": 250, "ideas": 300, "window": 1200, "chapter": 300}
+# How hard a model that supports it (Claude) should think per job: the running commentary narrates facts,
+# the notes on mistakes and the review are where reasoning pays.
+_EFFORT = {"full": "medium", "brief": "low", "opponent": "low", "ideas": "low", "window": "low",
+           "chapter": "medium", "review": "high", "position": "medium"}
 
 Progress = Callable[[str, int, int, str], None]   # (stage, done, total, label)
 
@@ -111,6 +121,7 @@ class AnnotatedMove:
     clock_s: float | None = None    # clock remaining after the move
     chess960: bool = False
     analysis: MoveAnalysis | None = None
+    checks: list[dict] = field(default_factory=list)  # lines the coach verified with the engine while writing
 
     def to_dict(self) -> dict:
         """JSON-safe form used by the web UI, the database and exports."""
@@ -134,6 +145,7 @@ class AnnotatedMove:
             "opening": self.opening, "critical": self.critical, "book": self.book, "phase": self.phase,
             "tags": self.tags, "threat": self.threat, "left_book": self.left_book,
             "mate_event": self.mate_event, "think_s": self.think_s, "clock_s": self.clock_s,
+            "checks": self.checks,
             "candidates": [
                 {"san": ln.move_san, "uci": ln.move_uci, "score": white_pov_score(ln, mover_white),
                  "line": ln.pv_text, "idea": self.line_ideas.get(ln.move_san, ""),
@@ -349,6 +361,7 @@ class _Evidence:
     plan_facts: list[str] = field(default_factory=list)
     threat: str = ""
     left_book: str = ""
+    player_lines: list[str] = field(default_factory=list)   # what players at this rating do here
 
 
 @dataclass
@@ -388,11 +401,7 @@ def analyse_game(
     report.time_class = time_class = ratings.time_class(dict(game.headers))   # the site's own classes
 
     # The whole game is known up front: history and "what happened next" for any move.
-    played: list[plans.PlayedMove] = []
-    b = game.board()
-    for ply, move in enumerate(game.mainline_moves()):
-        played.append(plans.PlayedMove(ply, b.turn, b.san(move), move, b.copy(stack=False)))
-        b.push(move)
+    played = played_moves(game)
     total = len(played)
     book_depth = local_book_depth([m.san for m in played])
 
@@ -478,12 +487,16 @@ def analyse_game(
                         threat = tactics.existing_threat(board, chess.Move.from_uci(lines_after[0].move_uci))
 
                     opening_lines: list[str] = []
+                    player_lines: list[str] = []
                     in_theory = ply < book_depth
                     masters: list[dict] = []
                     if ply < cfg.analysis.opening_book_plies:
                         info = opener.lookup(board.fen())
                         masters = info.top_moves
                         opening_lines = opener.summary_lines(info)
+                        if cfg.user_elo and (coached_colour is None or mover == coached_colour):
+                            peers = opener.lookup_players(board.fen(), cfg.user_elo, time_class)
+                            player_lines = opener.player_lines(peers, cfg.user_elo, time_class, mover)
                         if any(m["san"] == analysis.played_san and m["games"] >= 20 for m in info.top_moves):
                             in_theory = True
                         if info.name:
@@ -510,7 +523,7 @@ def analyse_game(
                         motifs_reply=motifs_reply, reply_line=lines_after[0] if lines_after else None,
                         opening_lines=opening_lines, opening_name=opening_state["name"],
                         previous=previous, think_s=think_s, clock_s=clock, time_class=time_class,
-                        threat=threat, left_book=left_book,
+                        threat=threat, left_book=left_book, player_lines=player_lines,
                     )
                     if note:
                         item.recent = plans.with_gists(played[max(0, ply - RECENT):ply])
@@ -527,22 +540,23 @@ def analyse_game(
             put(e)
 
     # ---------------- narrators ---------------------------------------------------
-    def note_task(ev: _Evidence) -> tuple[str, dict]:
+    def note_task(ev: _Evidence) -> tuple[str, dict, list]:
         if not coach.available:
-            return "", {}
+            return "", {}, []
         try:
             if _is_hard(ev):
                 result = coach.hard(lambda llm: _write_note(llm, system, ev, side_filter, coached_colour, played,
-                                                            cfg, coach))
+                                                            cfg, coach, engine_cache))
             else:
-                result = _write_note(coach.llm, system, ev, side_filter, coached_colour, played, cfg, coach)
+                result = _write_note(coach.llm, system, ev, side_filter, coached_colour, played, cfg, coach,
+                                     engine_cache)
             coach.ok()
             return result
         except LLMError as e:
             coach.failed(e)
         except Exception as e:  # never let one note sink the whole analysis
             coach.failed(LLMError(str(e)))
-        return "", {}
+        return "", {}, []
 
     def window_task(evs: list[_Evidence]) -> dict[int, str]:
         if not coach.available:
@@ -557,7 +571,7 @@ def analyse_game(
             coach.failed(LLMError(str(e)))
         return {}
 
-    def annotate(ev: _Evidence, note: tuple[str, dict], flow: str) -> AnnotatedMove:
+    def annotate(ev: _Evidence, note: tuple, flow: str) -> AnnotatedMove:
         a = ev.analysis
         mover_white = ev.board.turn == chess.WHITE
         after_board = ev.board.copy(stack=False)
@@ -592,6 +606,7 @@ def analyse_game(
             clock_s=ev.clock_s,
             chess960=ev.board.chess960,
             analysis=a,
+            checks=list(note[2]) if len(note) > 2 else [],
         )
 
     producer = threading.Thread(target=produce, name="lucidfish-engine", daemon=True)
@@ -623,7 +638,7 @@ def analyse_game(
                 flows = unit.window.result() if unit.window else {}
                 for ev in unit.evs:
                     fut = unit.notes.get(ev.ply)
-                    move = annotate(ev, fut.result() if fut else ("", {}), flows.get(ev.ply, ""))
+                    move = annotate(ev, fut.result() if fut else ("", {}, []), flows.get(ev.ply, ""))
                     report.moves.append(move)
                     if on_move:
                         on_move(move)
@@ -694,15 +709,51 @@ def analyse_game(
         def write_review(llm: LLMProvider) -> str:
             # One rewrite if the review gets facts wrong (the result, whose move, a verdict), then clean up.
             messages = [{"role": "user", "content": prompt}]
-            text = llm.chat(GAME_REVIEW_SYSTEM, messages)
+            text = ask(llm, GAME_REVIEW_SYSTEM, messages, schema=REVIEW, effort=_EFFORT["review"])
             return _verified_text(llm, GAME_REVIEW_SYSTEM, messages, text,
-                                  lambda t: review_check.problems(t, facts), max_tokens=None)
+                                  lambda t: review_check.problems(review_markdown(t), facts), max_tokens=None,
+                                  schema=REVIEW, effort=_EFFORT["review"])
         try:
             text = coach.hard(write_review)
-            report.review, _removed = review_check.check_review(text, facts)
+            report.review, _removed = review_check.check_review(review_markdown(text), facts)
         except LLMError as e:
             report.warnings.append(f"The post-game review could not be written: {e}")
     return report
+
+
+def evidence_for(report: GameReport, idx: int, played: list[plans.PlayedMove], side_filter: str | None = None,
+                 note: str = "full") -> _Evidence:
+    """The evidence block for one move of a finished (engine) analysis, as the producer would have built it.
+
+    Lets the eval set and the tests write a note for any move without re-running the whole pipeline. The
+    next move's candidate lines are this move's "lines after", exactly as in the producer.
+    """
+    m = report.moves[idx]
+    a = m.analysis
+    board = chess.Board(m.fen_before, chess960=m.chess960)
+    move = chess.Move.from_uci(m.uci)
+    after = board.copy(stack=False)
+    after.push(move)
+    lines_after = report.moves[idx + 1].analysis.candidates if idx + 1 < len(report.moves) else []
+    motifs_best = (tactics.move_motifs(board, chess.Move.from_uci(a.best_uci))
+                   if a.best_uci and a.best_uci != m.uci else [])
+    motifs_reply = (tactics.move_motifs(after, chess.Move.from_uci(lines_after[0].move_uci))
+                    if lines_after and a.refutation_san else [])
+    prev = report.moves[idx - 1] if idx else None
+    ev = _Evidence(
+        ply=m.ply, board=board, move=move, analysis=a, f_before=feat.extract(board), f_after=feat.extract(after),
+        motifs=tactics.move_motifs(board, move), critical=m.critical, book=m.book, note=note,
+        want_ideas=note == "full" and (a.classification in ERRORS or a.cp_loss > 20),
+        motifs_best=motifs_best, motifs_reply=motifs_reply, reply_line=lines_after[0] if lines_after else None,
+        opening_lines=list(m.opening), opening_name=report.opening,
+        previous={"san": prev.san, "cls": prev.classification, "side": prev.side} if prev else None,
+        think_s=m.think_s, clock_s=m.clock_s, time_class=report.time_class, threat=m.threat,
+        left_book=m.left_book,
+    )
+    ev.recent = plans.with_gists(played[max(0, idx - RECENT):idx])
+    ev.hindsight = plans.with_gists(played[idx + 1:idx + 1 + HINDSIGHT])
+    ev.plan_facts = plans.plan_lines(played[:idx], board)
+    return ev
 
 
 # ------------------------------------------------------------------ verification
@@ -756,13 +807,51 @@ def _after(ev: _Evidence) -> chess.Board:
     return b
 
 
+def played_moves(game: chess.pgn.Game) -> list[plans.PlayedMove]:
+    """Every move of the game with the position it was played from."""
+    played: list[plans.PlayedMove] = []
+    b = game.board()
+    for ply, move in enumerate(game.mainline_moves()):
+        played.append(plans.PlayedMove(ply, b.turn, b.san(move), move, b.copy(stack=False)))
+        b.push(move)
+    return played
+
+
+def _white_pov(cp: int | None, mate: int | None, mover_white: bool) -> tuple[int | None, int | None]:
+    if mover_white:
+        return cp, mate
+    return (-cp if cp is not None else None), (-mate if mate is not None else None)
+
+
+def _winner(result: str) -> chess.Color | None:
+    return chess.WHITE if result == "1-0" else chess.BLACK if result == "0-1" else None
+
+
+def _assessments(ev: _Evidence, coached: chess.Color | None, checker: LineChecker | None = None) -> AssessmentIndex:
+    """Every evaluation the model saw for a move, for the assessment check."""
+    a = ev.analysis
+    mover_white = ev.board.turn == chess.WHITE
+    ix = AssessmentIndex(coached)
+    ix.add("with best play before the move", *_white_pov(a.eval_before_cp, a.eval_before_mate, mover_white))
+    if a.game_result:
+        ix.add_result("after the move", _winner(a.game_result))
+    else:
+        ix.add("after the move played", *_white_after(a, mover_white))
+    for ln in a.candidates:
+        ix.add(f"after {ln.move_san}", *_white_pov(ln.score_cp, ln.mate_in, mover_white))
+    for label, cp, mate in (checker.evals if checker else []):
+        ix.add(label, cp, mate)
+    return ix
+
+
 def _is_hard(ev: _Evidence) -> bool:
     """Jobs worth the stronger model: detailed notes on mistakes and critical moments."""
     return ev.note == "full" and (ev.analysis.classification in ERRORS or ev.critical)
 
 
 def _verified_text(llm: LLMProvider, system: str, messages: list[dict], text: str, check,
-                   max_tokens: int, coach: _Coach | None = None, escalate: bool = False) -> str:
+                   max_tokens: int | None, coach: _Coach | None = None, escalate: bool = False, *,
+                   schema: dict | None = None, effort: str | None = None) -> str:
     """Fact-check `text` with `check(text) -> problems`; ask once for a correction,
     keep whichever version has fewer problems. The caller cleans what remains.
 
@@ -779,17 +868,25 @@ def _verified_text(llm: LLMProvider, system: str, messages: list[dict], text: st
     if coach is not None and fixer is not llm:
         with coach._lock:
             coach.escalations += 1
-        retry = coach.hard(lambda m: m.chat(system, convo, max_tokens=max_tokens))
+        retry = coach.hard(lambda m: ask(m, system, convo, max_tokens=max_tokens, schema=schema, effort=effort))
     else:
-        retry = llm.chat(system, convo, max_tokens=max_tokens)
+        retry = ask(llm, system, convo, max_tokens=max_tokens, schema=schema, effort=effort)
     return retry if retry.strip() and len(check(retry)) < len(problems) else text
 
 
 def _write_note(llm: LLMProvider, system: str, ev: _Evidence, side_filter: str | None,
                 coached: chess.Color | None, played: list[plans.PlayedMove], cfg: Config,
-                coach: _Coach | None = None) -> tuple[str, dict]:
-    """One grounded note: prompt → parse → fact-check (one retry) → clean → line ideas."""
+                coach: _Coach | None = None, engine_cache=None, trace: dict | None = None
+                ) -> tuple[str, dict, list[dict]]:
+    """One grounded note: prompt → (engine checks) → parse → fact-check (one retry) → clean → line ideas.
+
+    Returns (explanation, {candidate: idea}, lines checked with the engine). For the notes that matter
+    most (mistakes and critical moments) the model may call ``check_line`` before it writes, when the
+    setting is on and the provider supports tools; every line it checked is admitted by the fact-checker.
+    `trace`, if given, receives the raw answer and what the checks found (for the eval set).
+    """
     a = ev.analysis
+    use_tools = bool(cfg.llm.verify_lines and _is_hard(ev) and getattr(llm, "complete", None))
     prompt = build_move_prompt(
         board=ev.board, move=ev.move, analysis=a, note_type=ev.note,
         f_before=ev.f_before, f_after=ev.f_after, coached_side=side_filter, critical=ev.critical,
@@ -799,35 +896,62 @@ def _write_note(llm: LLMProvider, system: str, ev: _Evidence, side_filter: str |
         left_book=ev.left_book,
         time_note=time_note("White" if ev.board.turn == chess.WHITE else "Black",
                             ev.think_s, ev.clock_s, ev.time_class),
-        previous=ev.previous, want_ideas=ev.want_ideas,
+        previous=ev.previous, want_ideas=ev.want_ideas, players=ev.player_lines, tools=use_tools,
     )
-    max_tokens = _MAX_TOKENS[ev.note]
+    max_tokens, effort = _MAX_TOKENS[ev.note], _EFFORT[ev.note]
     messages = [{"role": "user", "content": prompt}]
-    text = llm.chat(system, messages, max_tokens=max_tokens)
+    checker = LineChecker(ev.board, cfg, engine_cache) if use_tools else None
+    try:
+        if checker is not None:
+            text = run_tools(llm, system, messages, [CHECK_LINE], checker, max_rounds=3, max_tokens=max_tokens,
+                             schema=NOTE, effort=effort)
+        else:
+            text = ask(llm, system, messages, max_tokens=max_tokens, schema=NOTE, effort=effort)
+        if trace is not None:
+            trace["raw"] = text
+            trace["checks"] = list(checker.calls) if checker else []
 
-    if cfg.llm.factcheck:
-        after = _after(ev)
-        lines = [(ev.board, ln.pv_san) for ln in a.candidates]
-        if ev.reply_line is not None:
-            lines.append((after, ev.reply_line.pv_san))
-        lines.append((after, [m.san for m in played[ev.ply + 1:ev.ply + 1 + HINDSIGHT]]))
-        index = EvidenceIndex.for_move(ev.board, ev.move, lines, coached)
+        if cfg.llm.factcheck:
+            after = _after(ev)
+            lines = [(ev.board, ln.pv_san) for ln in a.candidates]
+            if ev.reply_line is not None:
+                lines.append((after, ev.reply_line.pv_san))
+            lines.append((after, [m.san for m in played[ev.ply + 1:ev.ply + 1 + HINDSIGHT]]))
+            if checker is not None:
+                lines += checker.lines
+            index = EvidenceIndex.for_move(ev.board, ev.move, lines, coached)
+            assess = _assessments(ev, coached, checker)
 
-        def check(t: str) -> list[str]:
-            e, i = split_sections(t)
-            missing = [] if e.strip() else ["the EXPLANATION section is missing"]
-            return missing + index.problems(e + "\n" + "\n".join(i.values()))
+            def check(t: str) -> list[str]:
+                e, i = parse_note(t)
+                missing = [] if e.strip() else ["the explanation is missing"]
+                evidence, assessment = index.problems(e + "\n" + "\n".join(i.values())), assess.problems(e)
+                if trace is not None and "evidence_problems" not in trace:   # the first answer, for the eval
+                    trace.update(evidence_problems=evidence, assessment_problems=assessment, missing=missing)
+                return missing + evidence + assessment
 
-        text = _verified_text(llm, system, messages, text, check, max_tokens, coach, cfg.llm.escalate)
-        explanation, ideas = split_sections(text)
-        explanation = index.clean(explanation)[0]
-        ideas = {k: v for k, v in ideas.items() if not index.problems(v)}
-    else:
-        explanation, ideas = split_sections(text)
+            if trace is not None:
+                trace["problems"] = check(text)
+            text = _verified_text(llm, system, messages, text, check, max_tokens, coach, cfg.llm.escalate,
+                                  schema=NOTE, effort=effort)
+            if trace is not None:
+                trace["corrected"] = text != trace["raw"]
+                trace["problems_left"] = check(text)
+            explanation, ideas = parse_note(text)
+            explanation, removed = index.clean(explanation)
+            explanation, removed_assess = assess.clean(explanation)
+            if trace is not None:
+                trace["removed"] = removed + removed_assess
+            ideas = {k: v for k, v in ideas.items() if not index.problems(v)}
+        else:
+            explanation, ideas = parse_note(text)
+    finally:
+        if checker is not None:
+            checker.close()
 
     if ev.want_ideas:
         ideas = _ensure_line_ideas(llm, system, ev, ideas)
-    return explanation, ideas
+    return explanation, ideas, (list(checker.calls) if checker else [])
 
 
 def _write_window(llm: LLMProvider, system: str, evs: list[_Evidence], played: list[plans.PlayedMove],
@@ -869,7 +993,14 @@ def _write_window(llm: LLMProvider, system: str, evs: list[_Evidence], played: l
         plans=plans.plan_lines(played[:first.ply], first.board),
     )
     messages = [{"role": "user", "content": build_commentary_prompt(moves, ctx)}]
-    text = llm.chat(system, messages, max_tokens=_MAX_TOKENS["window"])
+    text = ask(llm, system, messages, max_tokens=_MAX_TOKENS["window"], schema=WINDOW_SCHEMA, effort=_EFFORT["window"])
+    assess = AssessmentIndex(coached).add("before this stretch", *before_white)
+    for ev in evs:
+        if ev.analysis.game_result:
+            assess.add_result(f"after {move_label(ev.board, ev.analysis.played_san)}", _winner(ev.analysis.game_result))
+        else:
+            assess.add(f"after {move_label(ev.board, ev.analysis.played_san)}",
+                       *_white_after(ev.analysis, ev.board.turn == chess.WHITE))
 
     lines: list[tuple[chess.Board, list[str]]] = []
     for ev in evs:
@@ -887,12 +1018,15 @@ def _write_window(llm: LLMProvider, system: str, evs: list[_Evidence], played: l
         # A missing line counts as a problem too, so an answer that lost lines never "wins".
         missing = [f"there is no line for {m.label}; write one line for every move listed"
                    for m in moves if m.label not in parsed]
-        return missing + [f"{label}: {p}" for label, comment in parsed.items() for p in index.problems(comment)]
+        return missing + [f"{label}: {p}" for label, comment in parsed.items()
+                          for p in index.problems(comment) + assess.problems(comment)]
 
     escalate = cfg.llm.escalate if cfg is not None else False
-    text = _verified_text(llm, system, messages, text, check, _MAX_TOKENS["window"], coach, escalate)
+    text = _verified_text(llm, system, messages, text, check, _MAX_TOKENS["window"], coach, escalate,
+                          schema=WINDOW_SCHEMA, effort=_EFFORT["window"])
     parsed = parse_commentary(text, moves)
-    return {ev.ply: index.clean(parsed.get(m.label, ""))[0] for ev, m in zip(evs, moves, strict=True)}
+    return {ev.ply: assess.clean(index.clean(parsed.get(m.label, ""))[0])[0]
+            for ev, m in zip(evs, moves, strict=True)}
 
 
 def _ensure_line_ideas(llm: LLMProvider, system: str, ev: _Evidence, ideas: dict) -> dict:
@@ -912,9 +1046,9 @@ def _ensure_line_ideas(llm: LLMProvider, system: str, ev: _Evidence, ideas: dict
     missing = [ln for ln in wanted if ln.move_san not in out]
     if missing:
         try:
-            resp = llm.generate(system, build_ideas_prompt(missing, ev.board, ev.recent),
-                                max_tokens=_MAX_TOKENS["ideas"])
-            _, extra = split_sections("LINE IDEAS:\n" + resp)
+            resp = ask(llm, system, [{"role": "user", "content": build_ideas_prompt(missing, ev.board, ev.recent)}],
+                       max_tokens=_MAX_TOKENS["ideas"], schema=IDEAS, effort=_EFFORT["ideas"])
+            extra = parse_ideas(resp)
             extra_norm = {norm_san(k): v for k, v in extra.items()}
             for ln in missing:
                 idea = extra.get(ln.move_san) or extra_norm.get(norm_san(ln.move_san))
@@ -1039,21 +1173,33 @@ def _write_chapters(coach: _Coach, system: str, spans: list[tuple[int, int]], re
         messages = [{"role": "user", "content": build_chapter_prompt(ctx)}]
         lines = [(played[start].board, [m.san for m in played[start:end + 1]])]
         index = EvidenceIndex([(pm.board, pm.move) for pm in played[start:end + 1]], lines, coached)
+        assess = AssessmentIndex(coached)
+        if before:
+            assess.add("at the start of the chapter", *_white_after(before.analysis, before.side == "White"))
+        else:
+            assess.add("at the start of the chapter", 0, None)
+        for m in moves:
+            if m.analysis.game_result:
+                assess.add_result(f"after {side_label(m)}", _winner(m.analysis.game_result))
+            else:
+                assess.add(f"after {side_label(m)}", *_white_after(m.analysis, m.side == "White"))
 
         def check(t: str) -> list[str]:
             title, summary = parse_chapter(t)
-            missing = [] if summary else ["the SUMMARY line is missing"]
-            return missing + index.problems(title + ". " + summary)
+            missing = [] if summary else ["the summary is missing"]
+            return missing + index.problems(title + ". " + summary) + assess.problems(summary)
 
         def write(llm: LLMProvider) -> str:
-            text = llm.chat(system, messages, max_tokens=_MAX_TOKENS["chapter"])
-            return _verified_text(llm, system, messages, text, check, _MAX_TOKENS["chapter"])
+            text = ask(llm, system, messages, max_tokens=_MAX_TOKENS["chapter"], schema=CHAPTER,
+                       effort=_EFFORT["chapter"])
+            return _verified_text(llm, system, messages, text, check, _MAX_TOKENS["chapter"],
+                                  schema=CHAPTER, effort=_EFFORT["chapter"])
 
         title, summary = parse_chapter(coach.hard(write))
         title = title if title and not index.problems(title) else ""
         rng = f"{first.move_number}–{last.move_number}"
         return {"start": start, "end": end, "range": rng, "title": title or f"Moves {rng}",
-                "summary": index.clean(summary)[0]}
+                "summary": assess.clean(index.clean(summary)[0])[0]}
 
     expert = coach.smart()
     parallel = expert is not None and not expert.spec.local
@@ -1135,7 +1281,6 @@ def check_move(fen: str, uci: str, cfg: Config, engine_cache=None) -> dict:
 def analyse_position(fen: str, cfg: Config, perspective: str | None = None, level: str | None = None,
                      engine_cache=None) -> dict:
     """One-shot analysis of a set-up position (board editor mode)."""
-    from .prompts import build_position_prompt
     board = chess.Board(fen)
     with EngineAnalyser(cfg.engine, cache=engine_cache) as engine:
         lines = engine.top_lines(board)
@@ -1154,18 +1299,38 @@ def analyse_position(fen: str, cfg: Config, perspective: str | None = None, leve
     coach, warnings = build_coach(cfg)
     result["warnings"] += warnings
     if coach.available and lines:
+        colour = chess.WHITE if persp == "White" else chess.BLACK
         system = build_system_prompt(persp.lower(), cfg.user_elo, level, rating_label=cfg.user_elo_label)
-        prompt = build_position_prompt(board, lines, facts, persp)
+        prompt = build_position_prompt(board, lines, facts, persp, tools=cfg.llm.verify_lines)
+        messages = [{"role": "user", "content": prompt}]
+        checker = LineChecker(board, cfg, engine_cache) if cfg.llm.verify_lines else None
+
+        def write(llm: LLMProvider) -> str:
+            if checker is not None and getattr(llm, "complete", None):
+                return run_tools(llm, system, messages, [CHECK_LINE], checker, max_rounds=3,
+                                 max_tokens=_MAX_TOKENS["full"], schema=POSITION, effort=_EFFORT["position"])
+            return ask(llm, system, messages, max_tokens=_MAX_TOKENS["full"], schema=POSITION,
+                       effort=_EFFORT["position"])
+
         try:
-            text = coach.hard(lambda llm: llm.generate(system, prompt, max_tokens=_MAX_TOKENS["full"]))
-            commentary, ideas = split_sections(text)
-            index = EvidenceIndex([], [(board, ln.pv_san) for ln in lines],
-                                  chess.WHITE if persp == "White" else chess.BLACK)
+            text = coach.hard(write)
+            commentary, ideas = parse_note(text)
+            index = EvidenceIndex([], [(board, ln.pv_san) for ln in lines] + (checker.lines if checker else []),
+                                  colour)
+            assess = AssessmentIndex(colour)
+            for ln in lines:
+                assess.add(f"after {ln.move_san}", *_white_pov(ln.score_cp, ln.mate_in, board.turn == chess.WHITE))
+            for label, cp, mate in (checker.evals if checker else []):
+                assess.add(label, cp, mate)
             by_norm = {norm_san(k): v for k, v in ideas.items()}
-            result["commentary"] = index.clean(commentary)[0]
+            result["commentary"] = assess.clean(index.clean(commentary)[0])[0]
             for entry in result["lines"]:
                 idea = ideas.get(entry["san"]) or by_norm.get(norm_san(entry["san"]), "")
                 entry["idea"] = "" if index.problems(idea) else idea
+            result["checks"] = list(checker.calls) if checker else []
         except LLMError as e:
             result["warnings"].append(f"The AI coach is unavailable ({e}).")
+        finally:
+            if checker is not None:
+                checker.close()
     return result

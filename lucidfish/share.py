@@ -36,7 +36,7 @@ from pathlib import Path
 import chess
 import chess.svg
 
-from . import __version__, store, training
+from . import __version__, concepts, store, training
 from .review_check import presentable_review
 
 STATIC = Path(__file__).parent / "static"
@@ -94,6 +94,7 @@ def export_data(profile_id: int) -> dict:
         "games": games,
         "details": details,
         "train": training.train_items(profile_id),
+        "learn": concepts.overview(profile_id),
         "pieces": _pieces(),
     }
 

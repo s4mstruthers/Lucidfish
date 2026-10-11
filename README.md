@@ -15,14 +15,29 @@ The feedback is pitched at your level and linked to the mistakes you keep making
 ![Lucidfish game view](docs/screenshot.png)
 <sub>Game view, shown here in engine-only mode. With an AI coach enabled, each move also gets a written explanation.</sub>
 
+## Download
+
+**[Get Lucidfish for macOS, Windows or Linux →](https://github.com/s4mstruthers/Lucidfish/releases/latest)**
+
+One installer, nothing else to set up: the app brings its own copy of Stockfish and **updates itself**
+(a banner appears when a new version is out; *Update and restart* installs it in the background, your
+games and settings stay where they are). Choose the `.dmg` on a Mac (Apple Silicon or Intel), the `.exe`
+on Windows, or the `.AppImage` / `.deb` / `.rpm` on Linux. The optional AI coach is set up inside the
+app (Settings → AI coach), locally with Ollama or with a cloud provider. The macOS build is not yet
+notarised: the first time, right-click the app → *Open*.
+
+Prefer to run from source, or want the command line? See [Installation](#installation).
+
 ---
 
 ## Contents
 
+- [Download](#download)
 - [Features](#features)
 - [How it works](#how-it-works)
 - [Before you start: hardware and performance](#before-you-start-hardware-and-performance)
 - [Installation](#installation) — [macOS](#macos) · [Windows](#windows) · [Linux](#linux)
+- [The desktop app](#the-desktop-app)
 - [Choosing an AI coach](#choosing-an-ai-coach)
 - [Using API keys safely](#using-api-keys-safely)
 - [Using the web app](#using-the-web-app)
@@ -30,6 +45,7 @@ The feedback is pitched at your level and linked to the mistakes you keep making
 - [Command line](#command-line)
 - [Configuration](#configuration)
 - [How accurate is the feedback?](#how-accurate-is-the-feedback)
+- [Measuring the coach](#measuring-the-coach)
 - [Troubleshooting](#troubleshooting)
 - [Privacy and your data](#privacy-and-your-data)
 - [Development](#development)
@@ -48,14 +64,25 @@ The feedback is pitched at your level and linked to the mistakes you keep making
   was a mistake, what the better move achieves, and the line that punishes it.
 - **Grounded in verified facts.** The AI never analyses the position itself. It receives
   engine lines plus facts checked directly on the board (hanging pieces, forks, pins,
-  skewers, mate threats, king safety, pawn structure), and its notes are fact-checked
-  against the position afterwards. Specialist checks add the lessons coaches care about
+  skewers, mate threats, king safety, pawn structure), **what every line actually leads to**
+  (material won or lost, checkmate, promotions, the tactics left at the end), and its notes
+  are fact-checked against the position afterwards: the moves it names, the pieces it places,
+  the captures it describes and the assessments it gives ("Black is winning") must all match
+  the evidence. When it writes about your mistakes it can **run the engine itself**: it asks
+  Stockfish to test a variation before stating what it leads to, and the lines it checked are
+  shown under the note. Specialist checks add the lessons coaches care about
   most: **missed threats** (the opponent was already threatening the move that punished
   you), **endgame technique** (active kings, passed pawns, whether a king can catch a pawn,
   the opposition) and **the move where you left opening theory**, with what masters play
-  there instead.
+  there instead and what players at your own rating do (and how it goes for them).
 - **Accuracy you can compare.** Moves are judged by lost *winning chances*, and game
   accuracy uses Lichess's published formula, so the numbers line up with what you see there.
+- **Learn: understand why, not just what.** Every mistake the analysis finds points at a concept
+  (a missed threat, hanging material, a fork you did not see, a king left in the open, leaving opening
+  theory, the clock). The *Learn* page explains each one in plain language: why it decides games, how to
+  recognise it at the board, what to do about it, and the one question to ask yourself before every
+  move, with **your own games as the examples** (each example opens as a puzzle) and a *Train* button
+  for exactly those positions. Home shows the two or three concepts to work on next, with the evidence.
 - **Personal coaching.** Profiles remember your games, ratings and level. After a couple of
   analyses, the coach writes a progress review of your recurring weaknesses and refers
   back to them in later games. The home page shows your accuracy in the opening,
@@ -92,10 +119,11 @@ The feedback is pitched at your level and linked to the mistakes you keep making
 - **Draw on the board.** Right-click to circle a square, right-drag to draw an arrow (Shift
   for red, Alt for blue), or use the ✎ pen on a tablet. Drawings are saved with the game
   and exported in the annotated PGN.
-- **Local or cloud AI.** Run a model privately on your computer with
-  [Ollama](https://ollama.com) or LM Studio, or plug in OpenAI, Anthropic (Claude),
-  Google Gemini, OpenRouter or Groq with an API key. Or switch the AI off for fast,
-  engine-only analysis.
+- **Local or cloud AI.** By default the coach is a free, open-weight model running privately
+  on your computer with [Ollama](https://ollama.com) (`qwen3:8b`) or LM Studio. Or plug in
+  OpenAI, Anthropic (Claude), Google Gemini, OpenRouter or Groq with an API key, or switch
+  the AI off for fast, engine-only analysis. Every answer is requested as structured JSON
+  that the provider enforces where it can, so nothing is lost to formatting drift.
 - **Your games, one click away.** Pick recent games from chess.com or Lichess by username,
   paste or drop a PGN, or set up any position in the board editor.
 - **All your analysed games in one place.** The *Games* page lists every game you've
@@ -106,7 +134,9 @@ The feedback is pitched at your level and linked to the mistakes you keep making
   how far each game and the whole batch are, how much time is left, and roughly when it
   will be done. Reorder, pause, resume or remove games at any time; the queue survives a
   restart. Time estimates learn how fast your computer is.
-- **A modern web app.** Moves appear while the game is analysed, with an interactive board,
+- **A clean, fast workspace.** A sidebar takes you to Home, Learn, Games, Train and the Board; the
+  design is minimal and quick, with light and dark themes, and it works on a phone or tablet too.
+  Moves appear while the game is analysed, with an interactive board,
   arrows and an evaluation bar, a clickable evaluation graph, buttons that jump between
   the key moments, variation previews, coach chat, and light and dark themes. Engine hints
   (best-move arrow, evaluation bar and graph, move highlights) can each be switched off.
@@ -118,7 +148,7 @@ The feedback is pitched at your level and linked to the mistakes you keep making
   and the engine searches the next queued game while the AI is still writing. Engine
   results and opening lookups are cached, so re-analysing a game is nearly instant.
   See [Why it's fast](#why-its-fast).
-- **Runs on macOS, Windows and Linux.**
+- **Runs on macOS, Windows and Linux**, as a desktop app that updates itself or from source.
 
 ## How it works
 
@@ -192,6 +222,9 @@ the thread between moves. Instead, the default **Commentary** level uses three i
 | **Commentary** (default) | A line on every move by both players, plus full notes for your mistakes and critical moments | ~15–20 |
 | **Every move** | A full note on every move by both players | ~80 |
 
+With *check lines with the engine* on (the default), each note on a mistake may add one to
+three short follow-up requests while the coach tests variations with Stockfish.
+
 ## Before you start: hardware and performance
 
 Lucidfish needs two programs besides itself: **Stockfish** (the engine) and, optionally,
@@ -206,9 +239,9 @@ an **AI model** for the written explanations.
 
 | Your computer | Suggested local model (Ollama) | Download size | Notes |
 |---|---|---|---|
-| 8 GB RAM | `llama3.2:3b` | ~2 GB | Shorter, simpler explanations |
-| 16 GB RAM | `llama3.1:8b` (default) or `qwen2.5:7b` | ~5 GB | Good balance |
-| 32 GB RAM or more | `qwen2.5:14b` or `gemma3:12b` | 8–9 GB | Better prose, slower |
+| 8 GB RAM | `qwen3:4b` | ~2.5 GB | Shorter, simpler explanations |
+| 16 GB RAM | `qwen3:8b` (default) or `qwen2.5:7b` | ~5 GB | Good balance; follows the JSON format and can call the engine |
+| 32 GB RAM or more | `qwen3:14b` or `gemma3:12b` | 8–9 GB | Better prose, slower (gemma3 cannot call the engine) |
 
 Approximate speed for a 40-move game at the default settings: the engine takes 1–3 minutes
 on a modern laptop. The AI's time depends on your hardware and model; a cloud model is
@@ -216,8 +249,12 @@ usually fastest.
 
 ## Installation
 
+The easiest way is the [desktop app](#download). The rest of this section is for running Lucidfish
+from its source code (for development, the command line, or a server).
+
 You need **Python 3.10 or newer** ([python.org/downloads](https://www.python.org/downloads/)),
-**Stockfish**, and optionally **Ollama** for a local AI.
+**Stockfish** (or let Lucidfish download it: Settings → Analysis → *Download Stockfish*), and
+optionally **Ollama** for a local AI.
 
 The quickest way to start is the launcher script. It creates a private Python environment
 in `.venv` the first time, installs everything, and opens the app in your browser:
@@ -289,7 +326,24 @@ On Debian and Ubuntu, Stockfish installs to `/usr/games/stockfish`, which Lucidf
 automatically even if it isn't on your `PATH`.
 
 **Check your setup** at any time with `lucidfish --check` (it tests the engine and the AI
-coach), or look at the status pill in the top-right corner of the web app.
+coach), or look at the status pill at the bottom of the sidebar.
+
+## The desktop app
+
+The downloads on the [releases page](https://github.com/s4mstruthers/Lucidfish/releases) are the same
+program in a native window: a small shell (built with [Tauri](https://tauri.app)) starts the Lucidfish
+backend, which is packed into the app together with the web app and an official Stockfish build, and
+shows it. Everything in this README applies to it; the differences:
+
+- **Nothing to install first.** Python, Stockfish and the web app are inside. Ollama or an API key are
+  still needed for the AI coach, as before.
+- **It updates itself.** On start the app looks at the newest release on GitHub. If there is one, a
+  banner offers *Update and restart*; Settings → About & updates has *Check for updates*. Updates are
+  signed and verified before they are installed, and your data folder is untouched.
+- **Same data folder** as the source version, so you can switch between the two.
+- `desktop.log` in the data folder says what the shell did if something goes wrong.
+
+Building it yourself, and how releases are made, is described in [`desktop/README.md`](desktop/README.md).
 
 ## Choosing an AI coach
 
@@ -298,10 +352,10 @@ make sure it works before analysing.
 
 | Provider | Runs | Needs | Default model | Good to know |
 |---|---|---|---|---|
-| **Ollama** | on your computer | [Ollama](https://ollama.com) + a pulled model | `llama3.1:8b` | Private and free; uses your CPU/GPU |
+| **Ollama** | on your computer | [Ollama](https://ollama.com) + a pulled model | `qwen3:8b` | Private and free; uses your CPU/GPU |
 | **Custom OpenAI-compatible** | on your computer (or any server) | a server URL, e.g. LM Studio `http://localhost:1234/v1` | — | Also works with llama.cpp, vLLM, LocalAI |
 | **OpenAI** | cloud | `OPENAI_API_KEY` | `gpt-4.1-mini` | |
-| **Anthropic (Claude)** | cloud | `ANTHROPIC_API_KEY` | `claude-opus-5` | `claude-sonnet-5` and `claude-haiku-4-5` are cheaper options |
+| **Anthropic (Claude)** | cloud | `ANTHROPIC_API_KEY` | `claude-opus-5-5` | `claude-sonnet-5-5` and `claude-haiku-5-5` are cheaper; Haiku is ideal as the main model with Opus or Sonnet as the second |
 | **Google Gemini** | cloud | `GEMINI_API_KEY` | `gemini-2.5-flash` | |
 | **OpenRouter** | cloud | `OPENROUTER_API_KEY` | `openai/gpt-4.1-mini` | One key, hundreds of models |
 | **Groq** | cloud | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | Very fast open-weight models |
@@ -310,8 +364,20 @@ You can type any model name the provider offers; the list only shows suggestions
 catalogues change often, so if a default stops working, choose a current model.
 
 **Cost:** cloud providers charge per use. A 40-move game at the *Commentary* detail level makes
-roughly 15–20 requests. Use *Key moments* or a smaller model to spend less, or use a cloud
-model only as the second model (below). Check your provider's pricing page.
+roughly 15–20 requests of about 2,500 words each, with short answers. As a rough guide at the
+list prices of October 2026 (check your provider's pricing page):
+
+| Model | About per 40-move game | Notes |
+|---|---|---|
+| `claude-haiku-5-5` | around 1 cent | Fast; good for the running commentary |
+| `claude-sonnet-5-5` | 10–20 cents | |
+| `claude-opus-5-5` | 20–40 cents | Best as the second model: a few requests per game |
+| `gpt-4.1-mini`, `gemini-2.5-flash` | a few cents | |
+
+Use *Key moments* or a smaller model to spend less, or use a cloud model only as the second
+model (below): then it handles only the handful of notes on mistakes, the review and chat.
+Lucidfish asks Claude 5.5 models for low reasoning effort on the running commentary and more
+on the notes and review, which keeps the cost down without losing accuracy where it matters.
 
 **Coaching detail** (Settings → Analysis) controls how much the coach writes, and therefore
 how long an analysis takes:
@@ -328,9 +394,14 @@ Pick by how much memory your computer has. Good starting points:
 
 | Memory | Model | Why |
 |---|---|---|
-| 8 GB | `llama3.2:3b` | Small enough to leave room for everything else |
-| 16 GB | `qwen2.5:7b` or `qwen3:8b` | Follow Lucidfish's strict format well; about 5 GB |
-| 24 GB or more | `qwen2.5:14b`, `qwen3:14b` or `gemma3:12b` | Noticeably better explanations, about half the speed |
+| 8 GB | `qwen3:4b` | Small enough to leave room for everything else |
+| 16 GB | `qwen3:8b` (default) or `qwen2.5:7b` | Follow the JSON format well and can call the engine (tool use); about 5 GB |
+| 24 GB or more | `qwen3:14b` or `gemma3:12b` | Noticeably better explanations, about half the speed (gemma3 has no tool use) |
+
+Ollama enforces the answer format for every model (its `format` option), so even small models
+return well-formed JSON. Checking lines with the engine needs a model with *tool use*
+(`qwen3`, `qwen2.5`, `llama3.1` and most recent models; not `gemma3`); if a model cannot, the
+coach simply writes from the evidence it was given.
 
 *Thinking* models such as `qwen3` normally write hidden reasoning before answering, which is
 slow and eats into the answer's length limit. Lucidfish switches that off for Ollama, so they
@@ -348,6 +419,9 @@ Under **Settings → AI coach → Second model for the hard parts** you can add 
   per game.
 - **Escalation:** if a stretch of commentary fails the fact-check, the second model rewrites
   it, instead of the main model trying again.
+- The second model is also the one that **checks lines with the engine** while writing about
+  your mistakes, so a strong cloud model here makes the notes on your errors both deeper and
+  better verified.
 - If the second model stops working (e.g. no internet or an expired key), the main model
   takes over its jobs and the game page shows a warning.
 
@@ -393,9 +467,10 @@ keychain app.
 Start it with `./scripts/start.sh`, `scripts\start.bat`, or `lucidfish web`. It opens
 `http://127.0.0.1:8420`; if that port is busy, it uses the next free one and prints the address.
 
-The app has four sections: **Home** (your progress), **Games** (your analysed games and new
-ones to analyse), **Train** (puzzles from your mistakes) and **Board editor**. Your profile is in the top-right corner; ⚙ **Settings**
-is next to it.
+The sidebar has five sections: **Home** (your progress and what to work on next), **Learn** (the
+concepts behind your mistakes, explained with your own games), **Games** (your analysed games and new
+ones to analyse), **Train** (puzzles from your mistakes) and **Board** (set up any position). Your
+profile, the theme switch and ⚙ **Settings** are at the bottom of the sidebar.
 
 1. **Create a profile** (first launch): your name, level, and chess.com / Lichess usernames.
    Each game is coached at *your rating in that game* (chess.com and Lichess put it in every
@@ -531,6 +606,8 @@ lucidfish game.pgn --detail standard               # commentary on every move (d
 lucidfish game.pgn --provider anthropic --model claude-sonnet-5
 lucidfish game.pgn --pgn-out annotated.pgn --out report.md --json analysis.json
 lucidfish --check                                  # diagnose Stockfish and the AI coach
+lucidfish eval                                     # measure the coach's accuracy on the built-in test set
+lucidfish eval --build my_games/*.pgn              # add cases from your own games (engine-derived, automatic)
 lucidfish web                                      # start the web app
 lucidfish share --profile Ann --out ~/Dropbox      # save a profile as one web page (see above)
 ```
@@ -546,6 +623,7 @@ lucidfish share --profile Ann --out ~/Dropbox      # save a profile as one web p
 | `--provider`, `--model` | AI provider and model (defaults to what you saved in the web app) |
 | `--expert-provider`, `--expert-model` | Second model for notes on mistakes, the review and fact-check rewrites (`none` = off) |
 | `--no-llm` | Engine analysis only |
+| `eval [--build PGN...] [--cases FILE] [--limit N] [--judge PROVIDER:MODEL]` | Measure the coach's accuracy (see [Measuring the coach](#measuring-the-coach)) |
 | `--preset fast\|balanced\|deep`, `--depth N`, `--fast` | Engine strength (depth 14 / 18 / 22, or 0.3 s per position) |
 | `--threads N`, `--no-cache` | CPU threads for Stockfish; ignore stored engine results |
 | `--out FILE.md`, `--pgn-out FILE.pgn`, `--json FILE.json` | Write a report, annotated PGN, or JSON |
@@ -612,17 +690,74 @@ the evidence is checked in several ways:
   takeaway, and each point under *What went well*, must name a move or a verified fact, so
   stock advice and empty praise are dropped. Empty sections are written from the facts: the
   costliest mistakes and what was better, or the verified highlights.
+- **Every line comes with its consequences.** Candidate moves, refutations and expected
+  continuations are played out on the board, and the coach is told what each one actually
+  leads to: material won or lost and which pieces came off, checkmate, promotions, castling,
+  new passed pawns, and the tactics left at the end. That is what lets it explain *why* a
+  line works instead of inventing a reason.
+- **The coach can run the engine.** When it writes about a mistake or a critical moment, the
+  model may call `check_line`: it hands Stockfish a position and a sequence of moves and gets
+  back whether they are legal, what happens, the evaluation at the end and the engine's
+  continuation. Every line it checked is admitted by the fact-checker, and shown under the
+  note as *Checked with the engine*. (Settings → AI coach → Advanced; on by default.)
+- **Assessments are checked too.** "White is winning", "Black has a clear edge", "the position
+  is equal": each such claim is compared with the evaluations the coach was given (before and
+  after the move, each candidate, each checked line). A claim none of them supports is sent
+  back once for correction and otherwise removed.
+- **Structured answers.** Every request asks for JSON of a fixed shape, and Ollama, OpenAI-
+  compatible servers and Claude enforce it while the model writes. Notes, commentary and
+  reviews are parsed, not scraped out of free text, so a model drifting from the format can no
+  longer lose a line of commentary or a whole section of the review.
 - **Accuracy percentages** use the formula Lichess publishes, so they are directly comparable.
+- **It is measured.** `lucidfish eval` runs the coach on a built-in set of positions whose
+  expectations come from the engine (the best move, the refutation, the tactical motif, the
+  evaluation), grades every note automatically — grounded in the evidence, assessment
+  consistent, best move and refutation mentioned, nothing removed by the fact-checker — and
+  reports a score per model, so you can compare models and settings without judging the chess
+  yourself. See [Measuring the coach](#measuring-the-coach).
 
 Limits: at low depth (the *Fast* preset), very deep combinations can still be misjudged, so use
 *Balanced* or *Deep* for important games. Small local models occasionally phrase things
 clumsily even when the facts are right; a larger model or a cloud model writes better prose.
 
+## Measuring the coach
+
+How good is a given model at explaining chess faithfully? You don't need to be able to judge
+the chess yourself: `lucidfish eval` grades every answer against the engine.
+
+```bash
+lucidfish eval                                   # the configured coach on the built-in cases
+lucidfish eval --provider ollama --model qwen3:14b
+lucidfish eval --provider anthropic --model claude-haiku-5-5 --limit 10
+lucidfish eval --build evals/games/*.pgn         # add cases from more games (needs Stockfish only)
+lucidfish eval --judge anthropic:claude-opus-5-5 # also have a strong model rate each note 1-5
+```
+
+Cases are mistakes, blunders and critical moments found by the engine in real games
+(`evals/cases.jsonl`, built from the sample game; add your own with `--build`). For each case
+the coach writes its note exactly as it would in the app, and the run reports, per case and
+overall:
+
+| Measure | What it means |
+|---|---|
+| grounded | the first answer named no move, piece or capture that the evidence does not support |
+| assessment | its claims about who is better matched the engine's evaluations |
+| best move | it named the engine's best move (when the move played wasn't it) |
+| refutation | it named the move that punishes the mistake |
+| motif | it mentioned the verified tactical motif (fork, pin, hanging piece, mate threat, …) |
+| kept | nothing had to be removed by the fact-checker |
+| engine checks | how many variations it tested with the engine, and how many were legal |
+
+Results are written to `evals/results/` as JSON, so two runs (two models, or the same model
+before and after a prompt change) can be compared. The optional `--judge` adds a 1–5 rating of
+faithfulness and helpfulness from a strong model that sees the same evidence.
+
 ## Troubleshooting
 
 | Problem | Fix |
 |---|---|
-| "Stockfish isn't set up yet" | Install Stockfish (see [Installation](#installation)) or set its path in Settings → Analysis. On Windows, point it at the unzipped `stockfish*.exe`. |
+| "Stockfish isn't set up yet" | Press *Download Stockfish* in the banner (or Settings → Analysis): Lucidfish fetches the official build for your computer, about 40 MB. Or install it yourself (see [Installation](#installation)) and set its path in Settings → Analysis. |
+| macOS says the app is damaged or from an unidentified developer | The desktop app is not notarised yet. Right-click (or Control-click) it → *Open*, once. |
 | "Cannot reach Ollama" | Start the Ollama app (or run `ollama serve`). Check the server URL in Settings if Ollama runs on another port or machine. |
 | "Model … is not installed in Ollama" | Run `ollama pull <model>`, or pick one of the installed models shown in Settings. |
 | Analysis is slow | Use the *Key moments* detail level, a smaller model, a cloud provider, or the *Fast* engine preset. Close other heavy apps. |
@@ -677,8 +812,12 @@ folder and the network is disabled. CI runs the suite on Linux, macOS and Window
 | `lucidfish/features.py` | Positional facts and "what changed" diffs |
 | `lucidfish/endgame.py` | Endgame specialist: king activity, passed pawns, rule of the square, opposition |
 | `lucidfish/opening.py` | Lichess opening explorer client and offline opening book |
-| `lucidfish/prompts.py` | Prompt construction, output parsing, fact-checking |
-| `lucidfish/llm.py` | AI providers (Ollama, OpenAI-compatible, Anthropic) |
+| `lucidfish/prompts.py` | Prompt construction, output parsing, fact-checking (moves, pieces, captures, assessments) |
+| `lucidfish/schemas.py` | The JSON shapes of the coach's answers and how they become text |
+| `lucidfish/lines.py` | What a line leads to: material, mate, promotions, the tactics left at the end |
+| `lucidfish/tools.py` | `check_line`: the engine as a tool the coach can call while writing |
+| `lucidfish/llm.py` | AI providers (Ollama, OpenAI-compatible, Anthropic): structured output, tool use, effort |
+| `lucidfish/evalset.py` | `lucidfish eval`: engine-graded accuracy measurement of the coach |
 | `lucidfish/spelling.py` | British spelling for the coach's text and opening names (Lucidfish is written in British English) |
 | `lucidfish/credentials.py` | API key storage (environment, OS keychain, session) |
 | `lucidfish/plans.py` | Plan tracker: wing activity, pawn advances, breaks, open files |
@@ -689,7 +828,10 @@ folder and the network is disabled. CI runs the suite on Linux, macOS and Window
 | `lucidfish/export.py` | Annotated PGN and Markdown reports |
 | `lucidfish/fetch.py` | chess.com / Lichess game download (CLI) |
 | `lucidfish/cli.py` | Command-line interface |
+| `lucidfish/engine_setup.py` | Downloads an official Stockfish build from inside the app |
+| `lucidfish/concepts.py` | The Learn section: concepts, explained and tied to the player's own mistakes |
 | `lucidfish/web.py` + `static/` | FastAPI backend and the browser app (plain JS, no build step) |
+| `desktop/` | The desktop app: Tauri shell, PyInstaller recipe, release scripts (see its README) |
 
 ## Roadmap
 
@@ -709,5 +851,8 @@ folder and the network is disabled. CI runs the suite on Linux, macOS and Window
 - [chessboard.js](https://chessboardjs.com) and [jQuery](https://jquery.com) (both MIT) —
   bundled in `lucidfish/static/vendor/`; see `LICENSES.txt` there.
 - [Lichess](https://lichess.org) — opening explorer and the accuracy/win-probability model.
+
+The desktop app bundles an official Stockfish binary (GPL-3.0); the notices are in
+[`desktop/THIRD_PARTY.md`](desktop/THIRD_PARTY.md), shipped inside the app.
 
 Lucidfish itself has not chosen a licence yet.

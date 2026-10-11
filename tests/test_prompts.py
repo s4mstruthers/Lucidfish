@@ -61,7 +61,9 @@ def test_move_prompt_contains_grounded_evidence():
     assert "had a forced checkmate and missed it" in prompt
     assert "allows" not in prompt.split("Engine verdict")[1].split("\n")[0]
     assert "Pieces before the move — White: Kg1, Rd1" in prompt
-    assert "EXPLANATION:" in prompt
+    assert '{"explanation": "<2-7 sentences' in prompt and '"line_ideas": [{"move"' in prompt
+    assert "1. Rd8# [rook from d1 to d8, no capture, delivers CHECKMATE" in prompt
+    assert "leads to: the line ends in CHECKMATE: White wins" in prompt
 
 
 def test_system_prompt_is_per_game_and_mentions_profile():

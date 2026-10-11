@@ -49,6 +49,8 @@ def load_config(**overrides) -> Config:
         cfg.llm.factcheck = bool(values["factcheck"])
     if values.get("escalate") is not None:
         cfg.llm.escalate = bool(values["escalate"])
+    if values.get("verify_lines") is not None:
+        cfg.llm.verify_lines = bool(values["verify_lines"])
     cfg.expert = _expert_config(cfg, saved, overrides, urls)
 
     if values.get("stockfish_path"):
@@ -116,7 +118,7 @@ def validate(values: dict) -> dict:
         if len(model) > 200:
             raise ValueError("Model name is too long.")
         clean["expert_model"] = model
-    for key in ("llm_enabled", "factcheck", "prefetch", "escalate", "auto_review"):
+    for key in ("llm_enabled", "factcheck", "prefetch", "escalate", "auto_review", "verify_lines"):
         if key in values:
             clean[key] = bool(values[key])
     ranges = {"depth": (6, 30), "threads": (1, max(1, os.cpu_count() or 1)), "hash_mb": (16, 4096),
@@ -168,6 +170,7 @@ def public_settings() -> dict:
         "llm_enabled": cfg.llm.enabled,
         "factcheck": cfg.llm.factcheck,
         "escalate": cfg.llm.escalate,
+        "verify_lines": cfg.llm.verify_lines,
         "expert_provider": saved.get("expert_provider", ""),
         "expert_model": saved.get("expert_model", ""),
         "expert_active": bool(cfg.expert),

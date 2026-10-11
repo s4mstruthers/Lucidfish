@@ -58,6 +58,7 @@ function toast(message, bad = false) {
  * the files were updated (e.g. `git pull`) while Lucidfish was still running. */
 const RESTART_MESSAGE = "Lucidfish needs a restart to finish updating: this page is new, but the program serving it "
   + "is still the old version. Close Lucidfish (Ctrl+C in its window) and start it again, then reload this page.";
+const IS_DESKTOP_SHELL = !!(window.__TAURI__ || window.__TAURI_INTERNALS__);   // running inside the desktop app
 
 /** fetch() wrapper: JSON in/out, the CSRF header, and readable errors. */
 async function api(path, { method = "GET", body, raw = false } = {}) {
@@ -168,6 +169,11 @@ const state = {
   revealed: new Set(),   // your mistakes whose answer you chose to see (practice-first mode)
   draw: { mode: false, colour: "green" },   // board drawing: pen mode for touch / left mouse, colour
   view: { bestArrow: true, highlight: true, evalBar: true, graph: true },   // what the board shows
+  app: null,             // /api/app: version, desktop or browser, platform
+  learn: null,           // /api/learn: concepts with the player's evidence
+  learnTc: null,
+  concept: null,         // the concept open on the Learn page
+  conceptChat: [],
 };
 try { Object.assign(state.view, JSON.parse(localStorage.getItem("lucidfish-view") || "{}")); } catch { /* defaults */ }
 
@@ -193,7 +199,7 @@ function currentTheme() {
 }
 function renderThemeButton() {
   const dark = currentTheme() === "dark";
-  $("themeBtn").textContent = dark ? "☀" : "☾";
+  $("themeBtn").innerHTML = `<svg class="ic"><use href="#${dark ? "i-sun" : "i-moon"}"/></svg>`;
   $("themeBtn").title = dark ? "Switch to light theme" : "Switch to dark theme";
 }
 $("themeBtn").addEventListener("click", () => {
@@ -216,6 +222,8 @@ function showPage(name, fromRoute = false) {
   document.querySelectorAll(".page-tabs [data-page]").forEach((b) => b.classList.toggle("active", b.dataset.page === name));
   if (name === "games" || name === "analyse") renderResume();
   if (name === "dashboard") loadDashboard();
+  else if ((name === "learn" || name === "train") && !state.dashLoaded && state.profile) loadDashboard();
+  if (name === "learn") showLearnPage();
   if (name === "games") loadDashboard().then(renderGames);
   if (name === "analyse" && (!state.recent.length || state.recentTc !== state.tc)) loadRecentGames();
   if (name === "analyse") renderTcBars();
@@ -249,6 +257,7 @@ $("goAnalyse").addEventListener("click", () => showPage("analyse"));
 /* Pages and games have addresses (#/games, #/game/12, …), so the browser's Back button
  * returns to the list you came from and a reload reopens the same game. */
 function routeFor() {
+  if (state.page === "learn") return state.concept ? `#/learn/${state.concept}` : "#/learn";
   if (state.page !== "game") return `#/${state.page}`;
   const g = state.game;
   if (g?.gameId) return `#/game/${g.gameId}`;
@@ -264,6 +273,7 @@ function syncRoute(replace = false) {
 async function route() {
   let [, page, id] = location.hash.match(/^#\/(\w+)(?:\/([\w-]+))?$/) || [];
   if (EXPORT && (page === "analyse" || page === "editor" || page === "job")) page = "games";   // need the server
+  if (page === "learn") { state.concept = id || null; showPage("learn", true); return; }
   if (page === "game" && id) {
     if (state.game?.gameId === Number(id)) showPage("game", true);
     else await openStoredGame(Number(id), true);
@@ -272,7 +282,7 @@ async function route() {
   } else if (page === "game" && state.game) {
     showPage("game", true);
   } else {
-    showPage(["dashboard", "games", "train", "analyse", "editor"].includes(page) ? page : "dashboard", true);
+    showPage(["dashboard", "games", "train", "analyse", "editor", "learn"].includes(page) ? page : "dashboard", true);
   }
 }
 window.addEventListener("popstate", route);
@@ -305,9 +315,27 @@ function renderBanners() {
       body: "Restart it to use the new version: close Lucidfish (Ctrl+C in its window) and start it again, then reload this page.",
       actions: [] });
   }
+  if (Desktop.update && !state.dismissed.has("update")) {
+    const u = Desktop.update;
+    out.push({ id: "update", cls: "info", title: `Lucidfish ${u.version} is available`,
+      body: u.installing ? `Downloading the update… ${u.progress != null ? `${Math.round(100 * u.progress)}%` : ""}`
+        + `<div class="bar"><div style="width:${Math.round(100 * (u.progress || 0))}%"></div></div>`
+        : `${esc(u.notes || "Bug fixes and improvements.")} The update installs in the background and Lucidfish restarts.`,
+      actions: u.installing ? [] : [["Update and restart", () => Desktop.install()]] });
+  }
   if (h && !h.engine.ok && !state.dismissed.has("engine")) {
-    out.push({ id: "engine", cls: "bad", title: "Stockfish isn't set up yet",
-      body: esc(h.engine.error || ""), actions: [["Open settings", () => openSettings("analysis")]] });
+    const dl = engineDl.state;
+    const busy = dl && !["idle", "done", "error"].includes(dl.status);
+    const body = busy
+      ? `${esc(dl.message || "Downloading…")}<div class="bar"><div style="width:${Math.round(100 * (dl.progress || 0))}%"></div></div>`
+      : `${esc(dl?.status === "error" ? dl.error : h.engine.error || "")}`
+        + (state.app?.engine_download ? " Lucidfish can download the engine for you (about 40 MB, from the official Stockfish releases)." : "");
+    const actions = busy ? [] : [
+      ...(state.app?.engine_download ? [["⬇ Download Stockfish", () => engineDl.start()]] : []),
+      ["Open settings", () => openSettings("analysis")],
+    ];
+    out.push({ id: "engine", cls: busy ? "info" : "bad", title: busy ? "Setting up Stockfish" : "Stockfish isn't set up yet",
+      body, actions });
   }
   if (h && h.coach.enabled && !h.coach.ok && !state.dismissed.has("coach")) {
     out.push({ id: "coach", cls: "", title: "The AI coach isn't ready",
@@ -391,6 +419,7 @@ function leaveProfile() {
   state.recent = []; state.selected.clear();
   state.reviewChat.length = 0; $("reviewChatLog").innerHTML = "";
   train.items = null; train.session = null; train.summary = null;
+  state.learn = null; state.concept = null;
   renderTrainBar();
   renderResume();
   if (state.page === "game") showPage("games");
@@ -952,6 +981,8 @@ function exportApi(path, { method = "GET", body } = {}) {
       }
     }
     if (method === "GET" && p === "/api/train") return Promise.resolve({ items: E.train || [] });
+    if (method === "GET" && p === "/api/learn") return Promise.resolve(E.learn || { categories: [], concepts: [], focus: [], games: 0 });
+    if (method === "GET" && p === "/api/app") return Promise.resolve({ version: E.version, desktop: false, shared: true });
     if (method === "POST" && p === "/api/check_move") return offlineCheck(body);
     if (method === "POST" && (m = p.match(/^\/api\/profile\/game\/(\d+)\/annotations$/))) {
       try { localStorage.setItem(drawingsKey(m[1]), JSON.stringify(body.annotations || {})); }
@@ -1011,6 +1042,7 @@ function setTc(tc) {
   else if (state.page === "games") rerenderGames();
   else if (state.page === "analyse") loadRecentGames();
   else if (state.page === "train") renderTrainPage();
+  else if (state.page === "learn") showLearnPage();
 }
 
 /* ================================================================ dashboard */
@@ -1045,6 +1077,7 @@ async function loadDashboard() {
   if (!d.profile) {
     $("dashTitle").textContent = "Welcome to Lucidfish";
     $("stats").innerHTML = "";
+    $("focusCard").classList.add("hidden");
     $("summary").innerHTML = `<div class="empty"><div class="big">♞</div>Create a profile so the coach can learn your style,
       or jump straight into <a href="#" id="emptyAnalyse">analysing a game</a>.<br><br>
       <button id="emptyProfile">Create profile</button></div>`;
@@ -1057,8 +1090,10 @@ async function loadDashboard() {
   }
   state.profile = d.profile;
   state.savedGames = d.games || [];
+  state.dashLoaded = true;
   const s = d.stats || {};
-  $("dashTitle").textContent = `${d.profile.name}'s coach review`;
+  $("dashTitle").textContent = `Welcome back, ${d.profile.name.split(" ")[0]}`;
+  loadLearn().then(() => renderFocus($("focus"), $("focusCard")));
   const tcName = state.tc ? cap(state.tc) : "";
   $("summaryTitle").textContent = tcName ? `Coach review · ${tcName}` : "Coach review";
   const stat = (label, value) => `<div class="stat"><b>${value ?? "—"}</b><span>${label}</span></div>`;
@@ -2329,6 +2364,7 @@ function renderExplain(m) {
   const hidden = isSpoiler(state.cur);
   const tags = (m.tags || []).filter((t) => !hidden || !["missed threat", "left book"].includes(t));
   if (tags.length) html += `<div class="row" style="margin-bottom:10px">${tags.map((t) => `<span class="chip tag">${esc(t)}</span>`).join("")}</div>`;
+  if (!hidden && !opponent && ERRORS.includes(m.cls)) html += learnLinks({ tags: m.tags, threat: m.threat });
   if (hidden) {
     state.previewMap = {};
     $("explain").innerHTML = html + `<div class="spoiler">
@@ -2351,7 +2387,7 @@ function renderExplain(m) {
   }
   if (m.expl) {
     html += (opponent ? `<span class="opp-label">What your opponent is up to</span>` : m.flow ? `<div class="section-label">Coach's note</div>` : "")
-      + `<div class="md">${md(m.expl)}</div>`;
+      + `<div class="md">${md(m.expl)}</div>` + engineChecks(m.checks);
   } else if (m.flow) {
     /* the commentary line says it all */
   } else if (g.jobId) {
@@ -2485,6 +2521,7 @@ function renderPractice() {
   if (puzzle && (p.result?.solved || p.showAnswer) && m.expl) {
     html += `<div class="section-label">Coach's note on ${esc(m.san)}</div><div class="md">${md(m.expl)}</div>`;
   }
+  if (p.result || p.showAnswer) html += learnLinks({ tags: m.tags, threat: m.threat, themes: puzzle?.themes || [] });
   if (p.showAnswer) {
     const best = m.candidates?.[0];
     state.previewMap.pbest = { steps: best?.steps || [], base: p.fen, label: "the engine's line" };
@@ -2931,7 +2968,9 @@ function renderGoTrain(c) {
   const all = train.items || [];
   if (!c) c = trainCounts(trainPool(), trainRecords());
   $("goTrain").classList.toggle("hidden", !all.length);
-  $("goTrain").textContent = c.todo ? `🎯 Train · ${c.todo} to do` : "🎯 Train";
+  $("goTrain").textContent = c.todo ? `Train · ${c.todo} to do` : "Train";
+  $("navTrainCount").classList.toggle("hidden", !c.todo);
+  $("navTrainCount").textContent = c.todo;
 }
 
 function startTraining() {
@@ -3248,6 +3287,15 @@ $("copyFen").addEventListener("click", async () => {
 
 /* ================================================================ chat */
 
+/** Lines the coach tested with the engine while writing (tool calls), shown so the reader can see the proof. */
+function engineChecks(checks) {
+  const ok = (checks || []).filter((c) => c.legal && c.line && c.evaluation);
+  if (!ok.length) return "";
+  return `<div class="checks"><span class="checks-label">Checked with the engine</span>`
+    + ok.map((c) => `<div class="check-line"><span class="mono">${esc(c.line)}</span> → ${esc(c.evaluation)}</div>`).join("")
+    + `</div>`;
+}
+
 function gameContext() {
   const g = state.game;
   if (!g) return "";
@@ -3299,7 +3347,9 @@ function bindChat(logId, inputId, sendId, history, contextFn) {
     try {
       const d = await api("/api/chat", { method: "POST", body: { messages: history.slice(-12), context: contextFn() } });
       history.push({ role: "assistant", content: d.reply });
-      add("coach", d.reply);
+      const bubble = add("coach", d.reply);
+      const proof = engineChecks(d.checks);
+      if (proof) bubble.insertAdjacentHTML("beforeend", proof);
     } catch (e) {
       history.pop();
       add("coach", `⚠ ${e.message}`);
@@ -3329,6 +3379,7 @@ async function openSettings(tab = "coach") {
   draft.models[s.provider] = s.model;
   $("setLlmEnabled").checked = s.llm_enabled;
   $("setFactcheck").checked = s.factcheck;
+  $("setVerifyLines").checked = s.verify_lines !== false;
   $("setEscalate").checked = s.escalate !== false;
   $("setExpertProvider").innerHTML = `<option value="">Off — the main model does everything</option>`
     + s.providers.map((p) => `<option value="${p.id}">${esc(p.label)} · ${p.local ? "on this computer" : "cloud"}</option>`).join("");
@@ -3346,6 +3397,7 @@ async function openSettings(tab = "coach") {
   $("setStockfish").value = s.stockfish_path || "";
   $("stockfishDetected").textContent = s.stockfish_path ? "" : `Auto-detected: ${s.stockfish_detected}`;
   $("aboutData").textContent = s.data_dir;
+  renderEngineDl(); renderUpdateStatus();
   $("settingsError").textContent = "";
   $("testResult").textContent = "";
   $("depthSeg").innerHTML = Object.entries(s.depth_presets)
@@ -3518,7 +3570,7 @@ $("saveSettings").addEventListener("click", async () => {
     factcheck: $("setFactcheck").checked, prefetch: $("setPrefetch").checked, detail: draft.detail,
     auto_review: $("setAutoReview").checked,
     expert_provider: $("setExpertProvider").value, expert_model: $("setExpertModel").value.trim(),
-    escalate: $("setEscalate").checked,
+    escalate: $("setEscalate").checked, verify_lines: $("setVerifyLines").checked,
     depth: $("setDepth").value, threads: $("setThreads").value, hash_mb: $("setHash").value,
     stockfish_path: $("setStockfish").value.trim(), concurrency: $("setConcurrency").value || null,
   };
@@ -3532,6 +3584,251 @@ $("saveSettings").addEventListener("click", async () => {
   toast("Settings saved.");
   loadHealth(true);
 });
+
+
+/* ================================================================ learn: concepts behind your mistakes */
+
+/** Concepts with this profile's evidence (puzzle counts, findings), for the time control in view. */
+async function loadLearn(force = false) {
+  const tc = state.tc || "";
+  if (!force && state.learn && state.learnTc === tc) return state.learn;
+  try { state.learn = await api(`/api/learn${tc ? `?tc=${tc}` : ""}`); state.learnTc = tc; }
+  catch (e) { state.learn = state.learn || { categories: [], concepts: [], focus: [], games: 0 }; }
+  return state.learn;
+}
+const conceptById = (id) => (state.learn?.concepts || []).find((c) => c.id === id);
+
+/** The concepts a move's verified evidence points at (its tags, a missed threat, a puzzle's themes). */
+function conceptsFor({ tags = [], themes = [], threat = "" } = {}) {
+  const all = state.learn?.concepts || [];
+  const want = new Set(themes);
+  if (threat) want.add("missed_threat");
+  const tagSet = new Set(tags);
+  return all.filter((c) => c.themes.some((t) => want.has(t)) || c.tags.some((t) => tagSet.has(t))).slice(0, 3);
+}
+function learnLinks(evidence) {
+  const list = conceptsFor(evidence);
+  return list.length ? `<div class="row" style="gap:6px;margin:6px 0 10px"><span class="small">Understand why:</span>`
+    + list.map((c) => `<button class="learn-link" data-learn="${esc(c.id)}">${esc(c.title)} →</button>`).join("") + `</div>` : "";
+}
+
+function pluralise(n, word) { return `${n} ${word}${n === 1 ? "" : "s"}`; }
+
+/** "What to work on": the two or three concepts with the most evidence, on Home and at the top of Learn. */
+function renderFocus(box, card) {
+  const focus = state.learn?.focus || [];
+  card.classList.toggle("hidden", !focus.length);
+  if (!focus.length) return;
+  box.innerHTML = focus.map((f, k) => `<div class="focus-item">
+      <div class="row"><span class="f-n">${k + 1}</span><h3>${esc(f.title)}</h3></div>
+      <div class="f-q">“${esc(f.question)}”</div>
+      <div class="f-why">${esc(f.reason)}</div>
+      <div class="row">
+        <button class="sm" data-learn="${esc(f.id)}">Learn why</button>
+        ${f.puzzles && f.theme ? `<button class="secondary sm" data-train-theme="${esc(f.theme)}">Train it · ${f.puzzles}</button>` : ""}
+      </div></div>`).join("");
+}
+
+async function showLearnPage() {
+  const first = !state.learn;
+  if (first) $("learnCategories").innerHTML = `<div class="empty small">Loading…</div>`;
+  await loadLearn();
+  if (state.page !== "learn") return;
+  renderLearnPage();
+}
+
+function renderLearnPage() {
+  const open = state.concept && conceptById(state.concept);
+  $("learnIndex").classList.toggle("hidden", !!open);
+  $("learnConcept").classList.toggle("hidden", !open);
+  if (open) { renderConcept(open); return; }
+  state.concept = null;
+  syncRoute(true);
+  renderFocus($("learnFocus"), $("learnFocusCard"));
+  const d = state.learn;
+  const byCat = {};
+  for (const c of d.concepts) (byCat[c.category] ||= []).push(c);
+  $("learnCategories").innerHTML = d.categories.map((cat) => {
+    const list = (byCat[cat.id] || []).sort((a, b) => b.weight - a.weight);
+    if (!list.length) return "";
+    return `<div class="learn-cat"><h2>${esc(cat.title)}</h2><p>${esc(cat.blurb)}</p></div><div class="concept-grid">`
+      + list.map((c) => `<button class="concept-card${c.weight ? " mine" : ""}" data-learn="${esc(c.id)}">
+          <h3>${esc(c.title)}</h3><div class="c-sum">${esc(c.summary)}</div>
+          <div class="c-foot">${c.puzzles ? `<span class="chip accent">${pluralise(c.puzzles, "puzzle")} of yours</span>` : ""}
+            ${c.weakest_phase ? `<span class="chip imp-2">your weakest phase</span>` : ""}
+            ${c.findings.some((f) => f.kind === "weakness") ? `<span class="chip imp-3">seen across your games</span>` : ""}
+            ${c.findings.some((f) => f.kind === "strength") ? `<span class="chip good">a strength</span>` : ""}</div></button>`).join("")
+      + `</div>`;
+  }).join("");
+}
+
+function openConcept(id) {
+  if (!conceptById(id)) { toast("That concept isn't available here."); return; }
+  state.concept = id;
+  state.conceptChat.length = 0; $("conceptChatLog").innerHTML = "";
+  if (state.page !== "learn") showPage("learn"); else { renderLearnPage(); syncRoute(); window.scrollTo({ top: 0 }); }
+}
+
+function renderConcept(c) {
+  const cat = state.learn.categories.find((x) => x.id === c.category);
+  const ex = (e) => `<div class="item static example-row" title="${esc(e.why || "")}">
+      <span class="ex-move">${esc(e.label)} ${esc(e.played)} ${badge(e.cls)}</span>
+      <span><span>vs ${esc(e.opponent)}</span><div class="ex-sub">${esc([e.date && !e.date.includes("?") ? e.date : "", e.why].filter(Boolean).join(" · "))}</div></span>
+      <button class="secondary sm" data-example="${e.game_id}:${e.i}">Try it</button></div>`;
+  const evidence = [
+    ...(c.puzzles ? [`${pluralise(c.puzzles, "puzzle")} from ${pluralise(c.games, "game")} of yours come from this.`] : []),
+    ...c.findings.map((f) => f.text),
+    ...c.patterns.filter((p) => ["rushed", "time_trouble"].includes(p.id)).map((p) => `${p.label}: ${p.count}× in ${pluralise(p.games, "game")}.`),
+    ...(c.weakest_phase ? [`The ${c.phase} is where your accuracy is lowest.`] : []),
+  ];
+  $("conceptBody").innerHTML = `<div class="concept-detail">
+    <div class="crumbs"><button class="ghost sm" id="conceptBack">← Learn</button><span class="crumb-title">${esc(cat?.title || "")}</span></div>
+    <div class="page-head"><div><p class="eyebrow">${esc(cat?.title || "Concept")}</p><h1>${esc(c.title)}</h1><p class="lede">${esc(c.summary)}</p></div></div>
+    <div class="concept-hero">
+      <div>
+        <div class="card">
+          <div class="concept-section"><h3>Why it decides games</h3>${md(c.why)}</div>
+          <div class="concept-section"><h3>How to spot it</h3>${md(c.spot)}</div>
+          <div class="concept-section"><h3>What to do</h3>${md(c.do)}</div>
+        </div>
+        ${c.examples.length ? `<div class="card"><div class="card-head"><h2>From your own games</h2><div class="spacer"></div>
+          <span class="small">${pluralise(c.puzzles, "position")}</span></div>
+          <div class="list">${c.examples.map(ex).join("")}</div>
+          <p class="small" style="margin:10px 0 0">Each one opens as a puzzle: find the better move, then read the coach's note on it.</p></div>` : ""}
+      </div>
+      <div>
+        <div class="card question-card"><div class="card-head"><h2>Ask yourself, every move</h2></div><div class="q">${esc(c.question)}</div>
+          <p class="small" style="margin:12px 0 0">One question is enough to carry to the board. The rest is practice.</p></div>
+        <div class="card"><div class="card-head"><h2>In your games</h2></div>
+          ${evidence.length ? `<ul class="facts" style="padding-left:16px;color:var(--text)">${evidence.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>`
+            : `<p class="small" style="margin:0">Nothing points at this yet${state.learn.games ? ". Good news, or too early to tell." : ": analyse a few games first."}</p>`}
+          <div class="row" style="margin-top:12px">
+            ${c.puzzles && c.themes.length ? `<button class="sm" data-train-theme="${esc(c.themes[0])}">Train these ${c.puzzles}</button>` : ""}
+            ${c.phase && !c.themes.length && c.puzzles ? `<button class="sm" data-train-theme="phase:${esc(c.phase)}">Train the ${esc(c.phase)}</button>` : ""}
+          </div></div>
+        ${c.related.length ? `<div class="card"><div class="card-head"><h2>Related</h2></div><div class="related">${c.related.map((r) =>
+          `<button class="secondary sm" data-learn="${esc(r.id)}">${esc(r.title)}</button>`).join("")}</div></div>` : ""}
+      </div>
+    </div></div>`;
+  $("conceptBack").addEventListener("click", () => { state.concept = null; renderLearnPage(); syncRoute(); });
+}
+
+async function openExample(gameId, i) {
+  train.session = null;
+  await openStoredGame(gameId);
+  if (state.game?.gameId === gameId && state.game.moves[i]) startPractice(i);
+}
+
+document.addEventListener("click", (e) => {
+  const learn = e.target.closest("[data-learn]");
+  if (learn) { e.preventDefault(); openConcept(learn.dataset.learn); return; }
+  const tt = e.target.closest("[data-train-theme]");
+  if (tt) { saveTrainSettings({ theme: tt.dataset.trainTheme }); showPage("train"); return; }
+  const ex = e.target.closest("[data-example]");
+  if (ex) { const [g, i] = ex.dataset.example.split(":"); openExample(Number(g), Number(i)); }
+});
+$("focusLearn").addEventListener("click", () => showPage("learn"));
+
+function conceptContext() {
+  const c = conceptById(state.concept);
+  if (!c) return "The player is reading the Learn section.";
+  let ctx = `The player is reading about the concept "${c.title}".\nSummary: ${c.summary}\nWhy it matters: ${c.why}\n`
+    + `How to spot it: ${c.spot}\nWhat to do: ${c.do}\nThe question to ask at the board: ${c.question}\n`;
+  if (c.puzzles) ctx += `Verified: ${c.puzzles} of the player's own puzzles (${c.games} games) come from this concept.\n`;
+  for (const f of c.findings) ctx += `Verified finding across their games: ${f.text}\n`;
+  for (const e of c.examples) ctx += `Example from their games: move ${e.label} ${e.played} (${e.cls}) vs ${e.opponent}; better was ${e.best}. ${e.why}\n`;
+  return ctx + "Answer as their coach: concrete, about this concept, with one or two things to practise.";
+}
+bindChat("conceptChatLog", "conceptChatInput", "conceptChatSend", state.conceptChat, conceptContext);
+
+/* ================================================================ engine download (Settings and the setup banner) */
+
+const engineDl = {
+  state: null, timer: null,
+  async start() {
+    try { this.state = await api("/api/engine/download", { method: "POST" }); }
+    catch (e) { toast(e.message, true); return; }
+    renderBanners(); renderEngineDl(); this.poll();
+  },
+  async poll() {
+    clearTimeout(this.timer);
+    try { this.state = await api("/api/engine/download"); } catch { return; }
+    renderBanners(); renderEngineDl();
+    if (!["idle", "done", "error"].includes(this.state.status)) { this.timer = setTimeout(() => this.poll(), 700); return; }
+    if (this.state.status === "done") { toast(this.state.message); loadHealth(true); if (!$("settingsModal").classList.contains("hidden")) openSettings("analysis"); }
+    else if (this.state.status === "error") toast(this.state.error, true);
+  },
+};
+function renderEngineDl() {
+  const btn = $("engineDownloadBtn"), out = $("engineDownloadStatus"), d = engineDl.state;
+  btn.classList.toggle("hidden", !state.app?.engine_download);
+  const busy = d && !["idle", "done", "error"].includes(d.status);
+  btn.disabled = !!busy;
+  out.textContent = busy ? `${d.message} ${d.progress ? `${Math.round(100 * d.progress)}%` : ""}`
+    : d?.status === "done" ? `✓ ${d.message}` : d?.status === "error" ? `✗ ${d.error}`
+      : state.app?.engine_download ? `Official Stockfish ${state.app.engine_release || ""} build for ${state.app.platform === "darwin" ? "macOS" : state.app.platform === "win32" ? "Windows" : "Linux"} (${state.app.arch}), about 40 MB.` : "";
+}
+$("engineDownloadBtn").addEventListener("click", () => engineDl.start());
+
+/* ================================================================ desktop app: updates */
+
+/* Inside the desktop app (desktop/, a Tauri shell) the page can ask the shell to check for a new release,
+ * download it and restart. In a browser or a shared copy this does nothing. */
+const Desktop = (() => {
+  const T = window.__TAURI__;
+  const invoke = T?.core?.invoke;
+  const self = { available: !!invoke, update: null, checking: false };
+  self.check = async (manual = false) => {
+    if (!invoke || self.checking) return;
+    self.checking = true;
+    renderUpdateStatus(manual ? "Checking…" : "");
+    try {
+      const u = await invoke("check_update");
+      self.update = u ? { ...u, installing: false, progress: null } : null;
+      renderUpdateStatus(u ? `Lucidfish ${u.version} is available.` : `You have the latest version (${state.app?.version || ""}).`);
+      renderBanners();
+    } catch (e) {
+      renderUpdateStatus(`Couldn't check for updates: ${e}`);
+    } finally { self.checking = false; }
+  };
+  self.install = async () => {
+    if (!invoke || !self.update || self.update.installing) return;
+    self.update.installing = true; self.update.progress = 0;
+    renderBanners(); renderUpdateStatus("Downloading the update…");
+    try {
+      await invoke("install_update");   // the app restarts by itself when it's done
+      renderUpdateStatus("Installed. Restarting…");
+    } catch (e) {
+      self.update.installing = false;
+      renderBanners(); renderUpdateStatus(`The update failed: ${e}`); toast(`The update failed: ${e}`, true);
+    }
+  };
+  if (T?.event?.listen) {
+    T.event.listen("update-progress", (ev) => {
+      if (!self.update) return;
+      const { downloaded, total } = ev.payload || {};
+      self.update.progress = total ? downloaded / total : null;
+      renderBanners(); renderUpdateStatus(`Downloading the update… ${total ? `${Math.round(100 * downloaded / total)}%` : ""}`);
+    }).catch(() => {});
+  }
+  return self;
+})();
+
+function renderUpdateStatus(text) {
+  const out = $("updateStatus"), box = $("updateBox");
+  if (!box) return;
+  $("checkUpdateBtn").classList.toggle("hidden", !Desktop.available);
+  if (text) { out.textContent = text; return; }
+  if (Desktop.available) out.textContent = Desktop.update ? `Lucidfish ${Desktop.update.version} is available.` : "Lucidfish checks for updates when it starts and installs them with one click.";
+  else if (EXPORT) out.textContent = "This is a shared copy: a new copy comes from the person who made it.";
+  else out.innerHTML = `You're running Lucidfish from its source code, so updates come from <span class="mono">git pull</span>. `
+    + `The desktop app, which updates itself, is at <a href="${esc(state.app?.releases_url || "#")}" target="_blank" rel="noopener noreferrer">the releases page ↗</a>.`;
+}
+$("checkUpdateBtn").addEventListener("click", () => Desktop.check(true));
+
+async function loadApp() {
+  try { state.app = await api("/api/app"); } catch { state.app = null; }
+}
 
 /* ================================================================ keyboard + resize */
 
@@ -3569,12 +3866,14 @@ window.addEventListener("resize", debounce(() => {
 
 (async function boot() {
   loadHealth();
+  loadApp();
   try {
     const d = await loadProfiles();
     await route();
     if (!d.profiles.length) openProfile(null);
   } catch (e) { toast(e.message, true); }
   if (EXPORT) return;   // a shared copy has no queue
+  if (Desktop.available) setTimeout(() => Desktop.check(), 4000);
   // Live queue progress (also picks up games restored from the last session).
   await pollQueue();
   if (queue.data?.restored && queue.data.paused) openQueue();

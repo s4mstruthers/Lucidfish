@@ -21,6 +21,11 @@ from . import __version__
 from .spelling import british
 
 EXPLORER_URL = "https://explorer.lichess.ovh/masters"
+PLAYERS_URL = "https://explorer.lichess.ovh/lichess"      # games of ordinary players, by rating and speed
+# The explorer's rating groups (each value is the lower bound of a band).
+RATING_BANDS = (0, 1000, 1200, 1400, 1600, 1800, 2000, 2200, 2500)
+_SPEEDS = {"bullet": "bullet", "blitz": "blitz", "rapid": "rapid", "classical": "classical",
+           "daily": "correspondence"}
 # After a network failure, stop asking for a while instead of paying a timeout
 # on every early move of every game (some networks silently drop these requests).
 _BACKOFF_S = 600
@@ -208,6 +213,104 @@ class OpeningExplorer:
             from . import store
             store.explorer_put(fen, asdict(info))
         return info
+
+    # ---------------------------------------------------------------- players at the user's level
+
+    @staticmethod
+    def rating_bands(elo: int) -> list[int]:
+        """The explorer's rating band containing `elo` and its neighbours: "players around your level"."""
+        idx = max(i for i, lo in enumerate(RATING_BANDS) if elo >= lo) if elo >= RATING_BANDS[0] else 0
+        return [RATING_BANDS[i] for i in (idx - 1, idx, idx + 1) if 0 <= i < len(RATING_BANDS)]
+
+    @staticmethod
+    def speeds(time_class: str) -> str:
+        return _SPEEDS.get(time_class, "") or "blitz,rapid,classical"
+
+    def lookup_players(self, fen: str, elo: int, time_class: str = "") -> OpeningInfo:
+        """What ordinary players around `elo` play here (the Lichess games database), with results.
+
+        Masters show the right plan; peers show what actually goes wrong at this level — the natural
+        mistake, the trap that keeps working — which is what a coach wants to warn about. Same cache
+        and circuit breaker as the masters lookup; results are cached per rating range and speed.
+        """
+        bands, speeds = self.rating_bands(elo), self.speeds(time_class)
+        key = f"players|{','.join(map(str, bands))}|{speeds}|{fen}"
+        if key in self._cache:
+            return self._cache[key]
+        if self.persistent:
+            from . import store
+            cached = store.explorer_get(key)
+            if cached is not None:
+                info = OpeningInfo(**cached)
+                self._cache[key] = info
+                return info
+        if not self.available():
+            return OpeningInfo()
+        info = OpeningInfo()
+        try:
+            r = self._session.get(PLAYERS_URL, params={"variant": "standard", "fen": fen, "moves": 5,
+                                                       "topGames": 0, "recentGames": 0,
+                                                       "ratings": ",".join(map(str, bands)), "speeds": speeds},
+                                  timeout=self.timeout_s)
+            r.raise_for_status()
+            data = r.json()
+        except (requests.RequestException, ValueError):
+            with self._state_lock:
+                OpeningExplorer._disabled_until = time.monotonic() + _BACKOFF_S
+            return info
+        opening = data.get("opening") or {}
+        info.name = british(opening.get("name", ""))
+        info.eco = opening.get("eco", "")
+        for m in data.get("moves", []):
+            total = m.get("white", 0) + m.get("draws", 0) + m.get("black", 0)
+            if total == 0:
+                continue
+            info.top_moves.append({
+                "san": m["san"], "games": total,
+                "white_pct": round(100 * m["white"] / total),
+                "draw_pct": round(100 * m["draws"] / total),
+                "black_pct": round(100 * m["black"] / total),
+            })
+        self._cache[key] = info
+        if self.persistent:
+            from . import store
+            store.explorer_put(key, asdict(info))
+        return info
+
+    @staticmethod
+    def player_lines(info: OpeningInfo, elo: int, time_class: str = "", turn: bool | None = None) -> list[str]:
+        """Prompt-ready facts about what players around `elo` do here and how it goes for them.
+
+        `turn` (chess.WHITE / chess.BLACK) is the side to move; with it, a popular move that scores badly
+        for its own side is named as the typical mistake of this level, and the best-scoring one as the
+        better choice.
+        """
+        moves = [m for m in info.top_moves if m["games"] >= 10]
+        if not moves:
+            return []
+        total = sum(m["games"] for m in moves)
+        where = f"{time_class} games" if time_class in _SPEEDS else "games"
+        out = [f"Players rated around {elo} ({total} {where} in the Lichess database) play here: "
+               + ", ".join(f"{m['san']} ({round(100 * m['games'] / total)}% of games, "
+                           f"{m['white_pct']}% W / {m['draw_pct']}% D / {m['black_pct']}% B)"
+                           for m in moves[:4]) + "."]
+        if turn is None:
+            return out
+        side, key = ("White", "white_pct") if turn else ("Black", "black_pct")
+        score = lambda m: m[key] + m["draw_pct"] / 2  # noqa: E731  (points per game, in %)
+        popular = moves[0]
+        common = [m for m in moves if m["games"] >= 0.2 * total and m["games"] >= 30]
+        best = max(common or moves, key=score)
+        if popular["games"] >= 30 and score(popular) <= 42:
+            text = (f"At this level {popular['san']} is the most common choice but scores only "
+                    f"{round(score(popular))}% for {side}: the typical mistake here")
+            if best is not popular and score(best) - score(popular) >= 8:
+                text += f"; {best['san']} scores {round(score(best))}%"
+            out.append(text + ".")
+        elif best is not popular and score(best) - score(popular) >= 10:
+            out.append(f"{best['san']} scores best for {side} at this level ({round(score(best))}% against "
+                       f"{round(score(popular))}% for the more popular {popular['san']}).")
+        return out
 
     @staticmethod
     def summary_lines(info: OpeningInfo) -> list[str]:

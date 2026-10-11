@@ -15,12 +15,19 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
 APP_NAME = "Lucidfish"
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
+IS_FROZEN = bool(getattr(sys, "frozen", False))   # packaged by PyInstaller (the desktop app's sidecar)
+
+
+def is_desktop() -> bool:
+    """True when the desktop app (desktop/, a Tauri shell) is running this server."""
+    return os.environ.get("LUCIDFISH_DESKTOP") == "1"
 
 
 # --------------------------------------------------------------------- .env
@@ -62,6 +69,18 @@ def _env_int(name: str, default: int | None) -> int | None:
 
 # -------------------------------------------------------------------- paths
 
+def _home() -> Path | None:
+    """The user's home directory, or None when the environment gives no way to find it.
+
+    On Windows, Python needs USERPROFILE (or HOMEDRIVE and HOMEPATH) and raises otherwise; a backend
+    started by a launcher with a trimmed environment must not crash over a missing home folder.
+    """
+    try:
+        return Path.home()
+    except (RuntimeError, KeyError, OSError):
+        return None
+
+
 def data_dir() -> Path:
     """Per-user directory for the database and optional .env file.
 
@@ -77,31 +96,42 @@ def data_dir() -> Path:
     if override:
         return Path(override).expanduser()
     legacy = Path(__file__).resolve().parent.parent / "data"
-    if (legacy / "lucidfish.db").exists():
+    if not IS_FROZEN and (legacy / "lucidfish.db").exists():
         return legacy
+    home = _home() or Path(tempfile.gettempdir())   # no home directory at all: keep working, in temp
     if IS_WINDOWS:
-        return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / APP_NAME
+        return Path(os.environ.get("APPDATA") or home / "AppData" / "Roaming") / APP_NAME
     if IS_MACOS:
-        return Path.home() / "Library" / "Application Support" / APP_NAME
-    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "lucidfish"
+        return home / "Library" / "Application Support" / APP_NAME
+    return Path(os.environ.get("XDG_DATA_HOME") or home / ".local" / "share") / "lucidfish"
 
 
 # ---------------------------------------------------------------- stockfish
 
+def engine_dir() -> Path:
+    """Where Lucidfish keeps a Stockfish it downloaded itself (Settings → Download Stockfish)."""
+    return data_dir() / "engine"
+
+
+def bundled_stockfish() -> str | None:
+    """The Stockfish shipped inside the desktop app, if the launcher told us where it is."""
+    path = os.environ.get("LUCIDFISH_BUNDLED_STOCKFISH")
+    return path if path and Path(path).is_file() else None
+
+
 def _stockfish_candidates() -> list[Path]:
     """Well-known install locations, checked after PATH."""
     if IS_WINDOWS:
+        home = _home()
         roots = [
             Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Links",
             Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
             Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")),
             Path(os.environ.get("ChocolateyInstall", r"C:\ProgramData\chocolatey")) / "bin",
-            Path.home() / "scoop" / "shims",
-            Path.home() / "Downloads",
-            Path.home() / "Desktop",
-            Path.home(),
+            *([home / "scoop" / "shims", home / "Downloads", home / "Desktop", home] if home else []),
             Path(os.environ.get("SystemDrive", "C:") + "\\"),   # e.g. C:\Stockfish\stockfish*.exe
             data_dir(),
+            engine_dir(),
         ]
         found: list[Path] = []
         for root in roots:
@@ -118,12 +148,14 @@ def _stockfish_candidates() -> list[Path]:
         "/usr/bin/stockfish",            # Fedora / Arch
         "/snap/bin/stockfish",
         str(data_dir() / "stockfish"),
+        str(engine_dir() / "stockfish"),
     ]
     return [Path(p) for p in paths]
 
 
 def find_stockfish() -> str:
-    """Locate a Stockfish binary: env var, then PATH, then common install paths.
+    """Locate a Stockfish binary: env var, the one bundled with the desktop app,
+    then PATH, then common install paths (including one Lucidfish downloaded).
 
     Returns ``"stockfish"`` when nothing is found, so the engine layer can raise
     a clear, platform-specific installation hint.
@@ -131,6 +163,9 @@ def find_stockfish() -> str:
     override = os.environ.get("LUCIDFISH_STOCKFISH")
     if override:
         return override
+    bundled = bundled_stockfish()
+    if bundled:
+        return bundled
     for name in ("stockfish", "stockfish.exe") if IS_WINDOWS else ("stockfish",):
         hit = shutil.which(name)
         if hit:
@@ -177,6 +212,7 @@ class LLMConfig:
     enabled: bool = True              # False = engine-only analysis (no LLM at all)
     factcheck: bool = True            # re-ask once when a note names moves/pieces not on the board
     escalate: bool = True             # let the expert model (if any) rewrite text that failed the fact-check
+    verify_lines: bool = True         # let the model check variations with the engine (tool use) before writing
 
 
 @dataclass

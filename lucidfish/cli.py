@@ -4,6 +4,7 @@
     lucidfish --chesscom USER               your latest chess.com game
     lucidfish --lichess USER --recent 2     your second-latest Lichess game
     lucidfish --check                       verify Stockfish and the AI coach are set up
+    lucidfish eval                          measure the AI coach's accuracy (engine-graded)
     lucidfish web                           start the web app
 """
 
@@ -38,8 +39,8 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="lucidfish",
         description="Stockfish tells you the best move; Lucidfish tells you why.",
-        epilog="Run `lucidfish web` for the browser app. Settings saved in the web app "
-               "(AI provider, model, depth) are used here too; flags override them.")
+        epilog="Run `lucidfish web` for the browser app and `lucidfish eval` to measure the coach's accuracy. "
+               "Settings saved in the web app (AI provider, model, depth) are used here too; flags override them.")
     p.add_argument("pgn", nargs="?", default=None, help="PGN file to analyse ('-' reads stdin)")
     src = p.add_argument_group("game source")
     src.add_argument("--chesscom", metavar="USER", help="fetch a recent chess.com game")
@@ -83,6 +84,9 @@ def main(argv: list[str] | None = None) -> int:
     if argv[:1] == ["web"]:
         from .web import main as web_main
         return web_main(argv[1:])
+    if argv[:1] == ["eval"]:
+        from .evalset import main as eval_main
+        return eval_main(argv[1:])
 
     args = build_parser().parse_args(argv)
     console = Console()
