@@ -1,6 +1,6 @@
 """The coach's progress review always has the same structure."""
 from lucidfish.prompts import player_summary_system
-from lucidfish.review_check import tidy_profile_review
+from lucidfish.review_check import presentable_review, tidy_profile_review
 
 STATS = {
     "patterns": [{"id": "missed_threat", "label": "Missed the opponent's threat", "count": 5, "games": 2},
@@ -22,8 +22,8 @@ def _headings(text):
 
 def test_each_review_type_asks_for_its_fixed_structure():
     overall, rapid = player_summary_system(), player_summary_system("rapid")
-    assert "### ⏱ By time control" in overall and "### ⏱ By time control" not in rapid
-    for title in ("### ⚠ Holding you back", "### ✓ Working well", "### ♟ Openings", "### 🎯 Train next"):
+    assert '"⏱ By time control"' in overall and '"⏱ By time control"' not in rapid
+    for title in ('"⚠ Holding you back"', '"✓ Working well"', '"♟ Openings"', '"🎯 Train next"'):
         assert title in overall and title in rapid
     assert "in your rapid games" in rapid and "Never mention centipawns" in rapid
 
@@ -80,3 +80,22 @@ def test_counts_read_naturally():
     out = tidy_profile_review("Fine.", stats, "blitz")
     assert "- **Left material hanging**: once." in out
     assert "- **Missed the opponent's threat**: twice in one game." in out
+
+
+def test_headings_echoed_into_bullets_are_removed():
+    raw = """You show promise.
+
+### ⚠ Holding you back
+- ### ⚠ Holding you back: Missed the opponent's threat 15 times.
+
+### ✓ Working well
+- ### ✓ Working well: You won 5 of 5 winning positions.
+
+### 🎯 Train next
+- ### 🎯 Train next: Ask what your opponent threatens.
+"""
+    out = presentable_review(raw, STATS, "rapid")
+    assert "- Missed the opponent's threat 15 times." in out
+    assert "- You won 5 of 5 winning positions." in out
+    assert "- Ask what your opponent threatens." in out
+    assert "- #" not in out

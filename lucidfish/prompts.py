@@ -700,7 +700,7 @@ def profile_sections(time_class: str | None = None) -> list[tuple[str, str, str]
 def player_summary_system(time_class: str | None = None) -> str:
     """The coach's progress review: overall, or of one time control. Same fixed structure for both."""
     scope = f"in your {time_class} games" if time_class else "across your games"
-    layout = "\n".join(f'"{key}" (shown as "### {title}"): a list of bullets — {what}'
+    layout = "\n".join(f'"{key}" (shown under the heading "{title}"): a list of bullets — {what}'
                        for key, title, what in profile_sections(time_class))
     return f"""You are a chess coach writing a progress review FOR your student, addressed directly TO \
 them: always "you" and "your", never their name or "the player".
@@ -712,6 +712,7 @@ above the review (games, record, accuracy, centipawn loss, blunders and mistakes
 
 Rules:
 - Bullets are one sentence, two at most. No filler, no repeating yourself.
+- The app adds the headings: never put a heading, "###" or the section's name in a bullet.
 - Never mention centipawns. Don't label the player's level ("beginner-level"); quote a rating only \
 exactly as listed, if at all.
 - Percentages from one or two games mean nothing: say "your one game in the Italian", not "won 100%".
