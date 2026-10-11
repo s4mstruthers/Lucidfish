@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import shutil
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -68,6 +69,18 @@ def _env_int(name: str, default: int | None) -> int | None:
 
 # -------------------------------------------------------------------- paths
 
+def _home() -> Path | None:
+    """The user's home directory, or None when the environment gives no way to find it.
+
+    On Windows, Python needs USERPROFILE (or HOMEDRIVE and HOMEPATH) and raises otherwise; a backend
+    started by a launcher with a trimmed environment must not crash over a missing home folder.
+    """
+    try:
+        return Path.home()
+    except (RuntimeError, KeyError, OSError):
+        return None
+
+
 def data_dir() -> Path:
     """Per-user directory for the database and optional .env file.
 
@@ -85,11 +98,12 @@ def data_dir() -> Path:
     legacy = Path(__file__).resolve().parent.parent / "data"
     if not IS_FROZEN and (legacy / "lucidfish.db").exists():
         return legacy
+    home = _home() or Path(tempfile.gettempdir())   # no home directory at all: keep working, in temp
     if IS_WINDOWS:
-        return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming") / APP_NAME
+        return Path(os.environ.get("APPDATA") or home / "AppData" / "Roaming") / APP_NAME
     if IS_MACOS:
-        return Path.home() / "Library" / "Application Support" / APP_NAME
-    return Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "lucidfish"
+        return home / "Library" / "Application Support" / APP_NAME
+    return Path(os.environ.get("XDG_DATA_HOME") or home / ".local" / "share") / "lucidfish"
 
 
 # ---------------------------------------------------------------- stockfish
@@ -108,15 +122,13 @@ def bundled_stockfish() -> str | None:
 def _stockfish_candidates() -> list[Path]:
     """Well-known install locations, checked after PATH."""
     if IS_WINDOWS:
+        home = _home()
         roots = [
             Path(os.environ.get("LOCALAPPDATA", "")) / "Microsoft" / "WinGet" / "Links",
             Path(os.environ.get("ProgramFiles", r"C:\Program Files")),
             Path(os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)")),
             Path(os.environ.get("ChocolateyInstall", r"C:\ProgramData\chocolatey")) / "bin",
-            Path.home() / "scoop" / "shims",
-            Path.home() / "Downloads",
-            Path.home() / "Desktop",
-            Path.home(),
+            *([home / "scoop" / "shims", home / "Downloads", home / "Desktop", home] if home else []),
             Path(os.environ.get("SystemDrive", "C:") + "\\"),   # e.g. C:\Stockfish\stockfish*.exe
             data_dir(),
             engine_dir(),

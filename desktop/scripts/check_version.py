@@ -5,7 +5,9 @@
     python desktop/scripts/check_version.py v0.4.0   # ... and with this tag
 
 The version lives in lucidfish/__init__.py; desktop/src-tauri/tauri.conf.json, desktop/src-tauri/Cargo.toml
-and desktop/package.json must repeat it (Tauri names the installers and the updater manifest after it).
+and desktop/package.json must repeat it (Tauri names the installers and the updater manifest after it), and
+desktop/src-tauri/Cargo.lock must record it for the shell's own crate, or `cargo check --locked` refuses to
+build (run `cargo update -w --offline` in desktop/src-tauri after bumping the version).
 """
 from __future__ import annotations
 
@@ -22,10 +24,14 @@ def versions() -> dict[str, str]:
     conf = json.loads((ROOT / "desktop" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
     pkg = json.loads((ROOT / "desktop" / "package.json").read_text(encoding="utf-8"))
     cargo = (ROOT / "desktop" / "src-tauri" / "Cargo.toml").read_text(encoding="utf-8")
+    lock = (ROOT / "desktop" / "src-tauri" / "Cargo.lock").read_text(encoding="utf-8")
+    crate = re.search(r'^name\s*=\s*"([^"]+)"', cargo, re.M).group(1)
+    locked = re.search(rf'\[\[package\]\]\s*\nname = "{re.escape(crate)}"\nversion = "([^"]+)"', lock)
     return {
         "lucidfish/__init__.py": re.search(r'__version__\s*=\s*"([^"]+)"', init).group(1),
         "desktop/src-tauri/tauri.conf.json": conf["version"],
         "desktop/src-tauri/Cargo.toml": re.search(r'^version\s*=\s*"([^"]+)"', cargo, re.M).group(1),
+        "desktop/src-tauri/Cargo.lock": locked.group(1) if locked else "(missing)",
         "desktop/package.json": pkg["version"],
     }
 

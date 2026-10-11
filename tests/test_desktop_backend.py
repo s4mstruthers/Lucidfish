@@ -1,6 +1,7 @@
 """The desktop app's backend contract: desktop mode, the in-app Stockfish download, Learn and focus."""
 import io
 import json
+import os
 import re
 import subprocess
 import sys
@@ -56,27 +57,43 @@ def test_bundled_engine_is_preferred_over_path_but_not_over_the_setting(tmp_path
 
 
 def test_desktop_mode_prints_the_address_and_stops_with_its_parent(tmp_path):
-    env = {"LUCIDFISH_DATA_DIR": str(tmp_path / "data"), "PATH": "/usr/bin:/bin", "PYTHONPATH": str(ROOT),
-           "SYSTEMROOT": "C:\\Windows"}
+    # The launcher's environment, without anything of this machine's Lucidfish set-up (a saved provider,
+    # API keys, a data folder): the backend must start from the operating system's variables alone.
+    env = {k: v for k, v in os.environ.items()
+           if not k.startswith(("LUCIDFISH_", "OLLAMA_")) and not k.endswith("_API_KEY")}
+    env.update(LUCIDFISH_DATA_DIR=str(tmp_path / "data"), PYTHONPATH=str(ROOT))
     proc = subprocess.Popen([sys.executable, "-m", "lucidfish", "web", "--desktop", "--port", "8477"],
                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                            env={k: v for k, v in env.items() if v}, cwd=str(ROOT))
+                            env=env, cwd=str(ROOT))
+    output: list[str] = []
     try:
         url, deadline = None, time.time() + 60
         while time.time() < deadline:
             line = proc.stdout.readline()
             if not line:
                 break
+            output.append(line)
             if line.startswith("LUCIDFISH_URL "):
                 url = line.split(" ", 1)[1].strip()
                 break
-        assert url and re.match(r"^http://127\.0\.0\.1:\d+$", url), url
+        assert url and re.match(r"^http://127\.0\.0\.1:\d+$", url), "".join(output)
         proc.stdin.close()            # the launcher went away: the server must stop by itself
         proc.wait(timeout=30)
         assert proc.returncode == 0
     finally:
         if proc.poll() is None:
             proc.kill()
+
+
+def test_backend_starts_without_a_home_directory(monkeypatch):
+    """A launcher may hand the backend a trimmed environment (on Windows, Python then cannot find a home
+    folder at all); the configuration must still build."""
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: (_ for _ in ()).throw(RuntimeError("no home"))))
+    monkeypatch.delenv("LUCIDFISH_DATA_DIR", raising=False)
+    monkeypatch.delenv("LUCIDFISH_STOCKFISH", raising=False)
+    assert config._home() is None
+    assert config.data_dir().name in ("lucidfish", "Lucidfish")
+    assert config.Config().engine.path                                   # find_stockfish() did not raise
 
 
 # ---------------------------------------------------------------- Stockfish download
