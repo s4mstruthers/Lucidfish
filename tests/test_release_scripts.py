@@ -29,6 +29,24 @@ Old.
 """
 
 
+def test_release_page_starts_with_which_file_to_download(capsys, monkeypatch):
+    monkeypatch.setattr(release_notes, "CHANGELOG", ROOT / "CHANGELOG.md")
+    assert release_notes.main(["v0.4.1", "--with-downloads"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("## Which file do I need?")
+    link = "[`Lucidfish-0.4.1-macOS-arm64.dmg`](https://github.com/s4mstruthers/Lucidfish/releases/download/v0.4.1/"
+    assert link in out
+    assert out.count("| ") >= 8 and "## What's new" in out and "shorter download page" in out
+    assert "msi" not in out and "deb" not in out
+    assert release_notes.main(["v0.4.1"]) == 0 and not capsys.readouterr().out.startswith("## Which")
+
+
+def test_only_four_installer_formats_are_built():
+    conf = json.loads((ROOT / "desktop" / "src-tauri" / "tauri.conf.json").read_text(encoding="utf-8"))
+    assert conf["bundle"]["targets"] == ["app", "dmg", "nsis", "appimage"]
+    assert [k[0] for k in collect_bundles.KINDS] == ["macos", "dmg", "nsis", "appimage"]
+
+
 def test_release_notes_are_the_versions_section():
     assert release_notes.section("v0.4.0", CHANGELOG) == "- **Desktop app.** One installer.\n- More.\n"
     assert release_notes.section("0.3.0", CHANGELOG) == "Old.\n"
@@ -57,10 +75,9 @@ def test_installers_are_collected_with_unambiguous_names(tmp_path, monkeypatch):
     assert entry["signature"] == "SIG"
     assert entry["url"].endswith("/releases/download/v0.4.0/Lucidfish-0.4.0-macOS-arm64.app.tar.gz")
     assert manifest["version"] == "0.4.0" and manifest["notes"] == "Notes."
-    # Windows: the NSIS installer is what the updater downloads; the MSI is for people.
+    # Windows: the NSIS installer is what people and the updater download alike.
     (out / "Lucidfish-0.4.0-Windows-x64-setup.exe").write_bytes(b"exe")
     (out / "Lucidfish-0.4.0-Windows-x64-setup.exe.sig").write_text("WSIG")
-    (out / "Lucidfish-0.4.0-Windows-x64.msi").write_bytes(b"msi")
     assert set(make_latest_json.manifest("v0.4.0", out)["platforms"]) == {"darwin-aarch64", "windows-x86_64"}
     # Unsigned builds give no manifest at all.
     for sig in out.glob("*.sig"):

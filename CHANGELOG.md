@@ -4,6 +4,11 @@ Newest first. Each [release on GitHub](https://github.com/s4mstruthers/Lucidfish
 version's section here as its description, and the desktop app shows it when it offers the update.
 Write for the people using the app: what they will notice, not how it was done.
 
+## 0.4.1
+
+- **A shorter download page.** One file per system: the `.dmg` for each kind of Mac, the Windows
+  installer and the Linux AppImage. Every release now starts with a "which file do I need?" table.
+
 ## 0.4.0
 
 The first downloadable desktop app, and a coach that is held to its evidence.

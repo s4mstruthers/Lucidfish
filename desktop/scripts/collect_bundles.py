@@ -9,8 +9,11 @@ copies them to `dist/` as
 
     Lucidfish-<version>-macOS-arm64.dmg            Lucidfish-<version>-macOS-arm64.app.tar.gz (+ .sig)
     Lucidfish-<version>-macOS-x64.dmg              Lucidfish-<version>-macOS-x64.app.tar.gz   (+ .sig)
-    Lucidfish-<version>-Windows-x64-setup.exe (+ .sig)   Lucidfish-<version>-Windows-x64.msi
-    Lucidfish-<version>-Linux-x64.AppImage (+ .sig)      Lucidfish-<version>-Linux-x64.deb / .rpm
+    Lucidfish-<version>-Windows-x64-setup.exe (+ .sig)
+    Lucidfish-<version>-Linux-x64.AppImage (+ .sig)
+
+Only these four installers are built (tauri.conf.json `bundle.targets`): one file per system keeps
+the release page short. The `.app.tar.gz` and `.sig` files are what the in-app updater downloads.
 
 The `.sig` files exist only when the build was signed (TAURI_SIGNING_PRIVATE_KEY); they are what
 `make_latest_json.py` turns into the updater manifest.
@@ -35,16 +38,13 @@ TARGETS = {
     "x86_64-unknown-linux-gnu": ("Linux-x64", "linux-x86_64"),
 }
 
-# (bundle folder, glob, suffix of the file in dist/). The updater artifact of each platform is
-# listed first; its `.sig` is copied alongside when present.
+# (bundle folder, glob, suffix of the file in dist/). One installer per system, plus the macOS
+# app archive the updater downloads; the updater's `.sig` is copied alongside when present.
 KINDS = [
     ("macos", "*.app.tar.gz", ".app.tar.gz"),
     ("dmg", "*.dmg", ".dmg"),
     ("nsis", "*-setup.exe", "-setup.exe"),
-    ("msi", "*.msi", ".msi"),
     ("appimage", "*.AppImage", ".AppImage"),
-    ("deb", "*.deb", ".deb"),
-    ("rpm", "*.rpm", ".rpm"),
 ]
 
 

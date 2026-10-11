@@ -33,8 +33,8 @@ Stockfish, so there is nothing else to install.
 | System | File | Then |
 |---|---|---|
 | macOS | `Lucidfish-…-macOS-arm64.dmg` (Apple silicon, 2020 or later) or `…-macOS-x64.dmg` (Intel) | Open it and drag **Lucidfish** onto **Applications**. |
-| Windows | `Lucidfish-…-Windows-x64-setup.exe` (or the `.msi`) | Run it; Lucidfish appears in the Start menu. |
-| Linux | `Lucidfish-…-Linux-x64.AppImage` (any distribution), `.deb` (Debian, Ubuntu) or `.rpm` (Fedora) | AppImage: `chmod +x` it and run it. Packages: install with your package manager. |
+| Windows | `Lucidfish-…-Windows-x64-setup.exe` | Run it; Lucidfish appears in the Start menu. |
+| Linux | `Lucidfish-…-Linux-x64.AppImage` | `chmod +x` it and run it (works on any distribution). |
 
 The apps are not signed with a paid developer certificate, so the system asks once, the first time
 you start one:
@@ -44,7 +44,8 @@ you start one:
   /Applications/Lucidfish.app`).
 - **Windows** shows *Windows protected your PC*. Click *More info*, then *Run anyway*.
 
-Later versions install themselves: a banner appears when a new version is out, and *Update and
+The `.app.tar.gz`, `.sig` and `latest.json` files on the release page are what installed apps use
+to update themselves; you never need them. Later versions install themselves: a banner appears when a new version is out, and *Update and
 restart* installs it in the background (Settings → About & updates checks on demand). Your games and
 settings stay where they are. What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 
