@@ -26,6 +26,7 @@ import mimetypes
 import os
 import re
 import socket
+import sys
 import threading
 import time
 import webbrowser
@@ -41,7 +42,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import __version__, credentials, jobs, ratings, settings, share, store, training
+from . import __version__, concepts, config, credentials, engine_setup, jobs, ratings, settings, share, store, training
 from .engine import EngineAnalyser
 from .export import annotated_pgn, markdown_report
 from .llm import PROVIDERS, LLMError, make_provider
@@ -103,8 +104,13 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 # 'wasm-unsafe-eval' lets the page compile Stockfish's WebAssembly (Explore mode, Train); it doesn't allow eval().
 _CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; "
         "script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; "
-        "connect-src 'self' https://api.chess.com https://lichess.org; frame-ancestors 'none'; "
+        "connect-src 'self' https://api.chess.com https://lichess.org{ipc}; frame-ancestors 'none'; "
         "base-uri 'none'; form-action 'self'")
+
+
+def _csp() -> str:
+    # Inside the desktop app the page talks to its shell (update checks) over Tauri's IPC scheme.
+    return _CSP.format(ipc=" ipc: http://ipc.localhost" if config.is_desktop() else "")
 
 
 @app.middleware("http")
@@ -123,7 +129,7 @@ async def _security(request: Request, call_next):
     response.headers.setdefault("X-Content-Type-Options", "nosniff")
     response.headers.setdefault("Referrer-Policy", "no-referrer")
     response.headers.setdefault("X-Frame-Options", "DENY")
-    response.headers.setdefault("Content-Security-Policy", _CSP)
+    response.headers.setdefault("Content-Security-Policy", _csp())
     if request.url.path.startswith("/static/"):
         # Revalidate the app's own scripts and styles on every load (cheap on localhost),
         # so the page always matches the running server after an update.
@@ -489,9 +495,45 @@ def health(refresh: bool = False):
         "coach": _cached("coach", 20, _coach_health),
         "busy": QUEUE.busy,
         "build": _BUILD,
+        "desktop": config.is_desktop(),
         # The files changed after this server started: it needs a restart to run the new code.
-        "stale": _code_fingerprint() != _BUILD,
+        "stale": not config.IS_FROZEN and _code_fingerprint() != _BUILD,
     }
+
+
+@app.get("/api/app")
+def app_info():
+    """What the page needs to know about the program running it (version, desktop or browser, platform)."""
+    system, arch = engine_setup.platform_key()
+    return {
+        "version": __version__, "desktop": config.is_desktop(), "frozen": config.IS_FROZEN,
+        "platform": system, "arch": arch, "data_dir": str(config.data_dir()),
+        "bundled_engine": bool(config.bundled_stockfish()),
+        "engine_download": engine_setup.available(),
+        "engine_release": engine_setup.STOCKFISH_RELEASE,
+        "releases_url": "https://github.com/s4mstruthers/Lucidfish/releases",
+    }
+
+
+# ---------------------------------------------------------------- engine download
+
+@app.get("/api/engine/download")
+def engine_download_status():
+    st = engine_setup.status()
+    if st["status"] == "done":
+        _HEALTH.pop("engine", None)   # the next health check sees the new engine straight away
+    return st
+
+
+@app.post("/api/engine/download")
+def engine_download_start():
+    """Fetch an official Stockfish build for this computer into the data folder and select it."""
+    if not engine_setup.available():
+        system, arch = engine_setup.platform_key()
+        return _error(f"There is no official Stockfish download for {system} / {arch}. Install it with your "
+                      "package manager and set its path in Settings → Analysis.")
+    _HEALTH.clear()
+    return engine_setup.start()
 
 
 # ================================================================ profiles
@@ -604,6 +646,12 @@ def train():
     """Puzzles from the active profile's own mistakes (the page schedules them with spaced repetition)."""
     pid = store.active_id()
     return {"items": training.train_items(pid) if pid else []}
+
+
+@app.get("/api/learn")
+def learn(tc: TimeClass = ""):
+    """The Learn section: every concept with this player's own evidence, and what to focus on next."""
+    return concepts.overview(store.active_id(), tc or None)
 
 
 @app.delete("/api/profile/game/{game_id}")
@@ -812,19 +860,55 @@ def _free_port(host: str, start: int) -> int:
     raise SystemExit(f"No free port found between {start} and {start + 19}.")
 
 
+def _watch_parent() -> None:
+    """Desktop mode: the launcher holds our stdin open. When it closes (the app quit or crashed),
+    stop too, so no server is left running invisibly."""
+    try:
+        while sys.stdin.readline():
+            pass
+    except (OSError, ValueError):
+        pass
+    try:
+        QUEUE.shutdown()
+    finally:
+        os._exit(0)
+
+
+def _announce_when_listening(host: str, port: int, url: str) -> None:
+    """Desktop mode: print the address only once the server accepts connections, so the shell
+    never opens the page before it exists."""
+    probe = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    for _ in range(600):
+        try:
+            with socket.create_connection((probe, port), timeout=0.5):
+                break
+        except OSError:
+            time.sleep(0.05)
+    print(f"LUCIDFISH_URL {url}", flush=True)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="lucidfish web", description="Start the Lucidfish web app.")
     parser.add_argument("--host", default=os.environ.get("LUCIDFISH_HOST", "127.0.0.1"),
                         help="interface to listen on (default 127.0.0.1 = this computer only)")
     parser.add_argument("--port", type=int, default=int(os.environ.get("LUCIDFISH_PORT", DEFAULT_PORT)))
     parser.add_argument("--no-browser", action="store_true", help="don't open a browser tab")
+    parser.add_argument("--desktop", action="store_true",
+                        help="run as the desktop app's backend: print the address on a line starting with "
+                             "LUCIDFISH_URL, never open a browser, and exit when standard input closes")
     args = parser.parse_args(argv)
+    if args.desktop:
+        os.environ["LUCIDFISH_DESKTOP"] = "1"
+        args.no_browser = True
 
     import uvicorn
     port = _free_port(args.host, args.port)
     shown = "127.0.0.1" if args.host in ("0.0.0.0", "::") else args.host
     url = f"http://{shown}:{port}"
-    print(f"Lucidfish {__version__} is running at {url}  (press Ctrl+C to stop)")
+    print(f"Lucidfish {__version__} is running at {url}  (press Ctrl+C to stop)", flush=True)
+    if args.desktop:
+        threading.Thread(target=_announce_when_listening, args=(args.host, port, url), daemon=True).start()
+        threading.Thread(target=_watch_parent, name="lucidfish-parent-watch", daemon=True).start()
     if args.host not in _LOOPBACK:
         print("Warning: listening on a network interface. Other devices can reach Lucidfish; add the "
               "host name they use to LUCIDFISH_ALLOWED_HOSTS. Only do this on a network you trust.")

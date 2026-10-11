@@ -15,14 +15,29 @@ The feedback is pitched at your level and linked to the mistakes you keep making
 ![Lucidfish game view](docs/screenshot.png)
 <sub>Game view, shown here in engine-only mode. With an AI coach enabled, each move also gets a written explanation.</sub>
 
+## Download
+
+**[Get Lucidfish for macOS, Windows or Linux →](https://github.com/s4mstruthers/Lucidfish/releases/latest)**
+
+One installer, nothing else to set up: the app brings its own copy of Stockfish and **updates itself**
+(a banner appears when a new version is out; *Update and restart* installs it in the background, your
+games and settings stay where they are). Choose the `.dmg` on a Mac (Apple Silicon or Intel), the `.exe`
+on Windows, or the `.AppImage` / `.deb` / `.rpm` on Linux. The optional AI coach is set up inside the
+app (Settings → AI coach), locally with Ollama or with a cloud provider. The macOS build is not yet
+notarised: the first time, right-click the app → *Open*.
+
+Prefer to run from source, or want the command line? See [Installation](#installation).
+
 ---
 
 ## Contents
 
+- [Download](#download)
 - [Features](#features)
 - [How it works](#how-it-works)
 - [Before you start: hardware and performance](#before-you-start-hardware-and-performance)
 - [Installation](#installation) — [macOS](#macos) · [Windows](#windows) · [Linux](#linux)
+- [The desktop app](#the-desktop-app)
 - [Choosing an AI coach](#choosing-an-ai-coach)
 - [Using API keys safely](#using-api-keys-safely)
 - [Using the web app](#using-the-web-app)
@@ -56,6 +71,12 @@ The feedback is pitched at your level and linked to the mistakes you keep making
   there instead.
 - **Accuracy you can compare.** Moves are judged by lost *winning chances*, and game
   accuracy uses Lichess's published formula, so the numbers line up with what you see there.
+- **Learn: understand why, not just what.** Every mistake the analysis finds points at a concept
+  (a missed threat, hanging material, a fork you did not see, a king left in the open, leaving opening
+  theory, the clock). The *Learn* page explains each one in plain language: why it decides games, how to
+  recognise it at the board, what to do about it, and the one question to ask yourself before every
+  move, with **your own games as the examples** (each example opens as a puzzle) and a *Train* button
+  for exactly those positions. Home shows the two or three concepts to work on next, with the evidence.
 - **Personal coaching.** Profiles remember your games, ratings and level. After a couple of
   analyses, the coach writes a progress review of your recurring weaknesses and refers
   back to them in later games. The home page shows your accuracy in the opening,
@@ -106,7 +127,9 @@ The feedback is pitched at your level and linked to the mistakes you keep making
   how far each game and the whole batch are, how much time is left, and roughly when it
   will be done. Reorder, pause, resume or remove games at any time; the queue survives a
   restart. Time estimates learn how fast your computer is.
-- **A modern web app.** Moves appear while the game is analysed, with an interactive board,
+- **A clean, fast workspace.** A sidebar takes you to Home, Learn, Games, Train and the Board; the
+  design is minimal and quick, with light and dark themes, and it works on a phone or tablet too.
+  Moves appear while the game is analysed, with an interactive board,
   arrows and an evaluation bar, a clickable evaluation graph, buttons that jump between
   the key moments, variation previews, coach chat, and light and dark themes. Engine hints
   (best-move arrow, evaluation bar and graph, move highlights) can each be switched off.
@@ -118,7 +141,7 @@ The feedback is pitched at your level and linked to the mistakes you keep making
   and the engine searches the next queued game while the AI is still writing. Engine
   results and opening lookups are cached, so re-analysing a game is nearly instant.
   See [Why it's fast](#why-its-fast).
-- **Runs on macOS, Windows and Linux.**
+- **Runs on macOS, Windows and Linux**, as a desktop app that updates itself or from source.
 
 ## How it works
 
@@ -216,8 +239,12 @@ usually fastest.
 
 ## Installation
 
+The easiest way is the [desktop app](#download). The rest of this section is for running Lucidfish
+from its source code (for development, the command line, or a server).
+
 You need **Python 3.10 or newer** ([python.org/downloads](https://www.python.org/downloads/)),
-**Stockfish**, and optionally **Ollama** for a local AI.
+**Stockfish** (or let Lucidfish download it: Settings → Analysis → *Download Stockfish*), and
+optionally **Ollama** for a local AI.
 
 The quickest way to start is the launcher script. It creates a private Python environment
 in `.venv` the first time, installs everything, and opens the app in your browser:
@@ -289,7 +316,24 @@ On Debian and Ubuntu, Stockfish installs to `/usr/games/stockfish`, which Lucidf
 automatically even if it isn't on your `PATH`.
 
 **Check your setup** at any time with `lucidfish --check` (it tests the engine and the AI
-coach), or look at the status pill in the top-right corner of the web app.
+coach), or look at the status pill at the bottom of the sidebar.
+
+## The desktop app
+
+The downloads on the [releases page](https://github.com/s4mstruthers/Lucidfish/releases) are the same
+program in a native window: a small shell (built with [Tauri](https://tauri.app)) starts the Lucidfish
+backend, which is packed into the app together with the web app and an official Stockfish build, and
+shows it. Everything in this README applies to it; the differences:
+
+- **Nothing to install first.** Python, Stockfish and the web app are inside. Ollama or an API key are
+  still needed for the AI coach, as before.
+- **It updates itself.** On start the app looks at the newest release on GitHub. If there is one, a
+  banner offers *Update and restart*; Settings → About & updates has *Check for updates*. Updates are
+  signed and verified before they are installed, and your data folder is untouched.
+- **Same data folder** as the source version, so you can switch between the two.
+- `desktop.log` in the data folder says what the shell did if something goes wrong.
+
+Building it yourself, and how releases are made, is described in [`desktop/README.md`](desktop/README.md).
 
 ## Choosing an AI coach
 
@@ -393,9 +437,10 @@ keychain app.
 Start it with `./scripts/start.sh`, `scripts\start.bat`, or `lucidfish web`. It opens
 `http://127.0.0.1:8420`; if that port is busy, it uses the next free one and prints the address.
 
-The app has four sections: **Home** (your progress), **Games** (your analysed games and new
-ones to analyse), **Train** (puzzles from your mistakes) and **Board editor**. Your profile is in the top-right corner; ⚙ **Settings**
-is next to it.
+The sidebar has five sections: **Home** (your progress and what to work on next), **Learn** (the
+concepts behind your mistakes, explained with your own games), **Games** (your analysed games and new
+ones to analyse), **Train** (puzzles from your mistakes) and **Board** (set up any position). Your
+profile, the theme switch and ⚙ **Settings** are at the bottom of the sidebar.
 
 1. **Create a profile** (first launch): your name, level, and chess.com / Lichess usernames.
    Each game is coached at *your rating in that game* (chess.com and Lichess put it in every
@@ -622,7 +667,8 @@ clumsily even when the facts are right; a larger model or a cloud model writes b
 
 | Problem | Fix |
 |---|---|
-| "Stockfish isn't set up yet" | Install Stockfish (see [Installation](#installation)) or set its path in Settings → Analysis. On Windows, point it at the unzipped `stockfish*.exe`. |
+| "Stockfish isn't set up yet" | Press *Download Stockfish* in the banner (or Settings → Analysis): Lucidfish fetches the official build for your computer, about 40 MB. Or install it yourself (see [Installation](#installation)) and set its path in Settings → Analysis. |
+| macOS says the app is damaged or from an unidentified developer | The desktop app is not notarised yet. Right-click (or Control-click) it → *Open*, once. |
 | "Cannot reach Ollama" | Start the Ollama app (or run `ollama serve`). Check the server URL in Settings if Ollama runs on another port or machine. |
 | "Model … is not installed in Ollama" | Run `ollama pull <model>`, or pick one of the installed models shown in Settings. |
 | Analysis is slow | Use the *Key moments* detail level, a smaller model, a cloud provider, or the *Fast* engine preset. Close other heavy apps. |
@@ -689,7 +735,10 @@ folder and the network is disabled. CI runs the suite on Linux, macOS and Window
 | `lucidfish/export.py` | Annotated PGN and Markdown reports |
 | `lucidfish/fetch.py` | chess.com / Lichess game download (CLI) |
 | `lucidfish/cli.py` | Command-line interface |
+| `lucidfish/engine_setup.py` | Downloads an official Stockfish build from inside the app |
+| `lucidfish/concepts.py` | The Learn section: concepts, explained and tied to the player's own mistakes |
 | `lucidfish/web.py` + `static/` | FastAPI backend and the browser app (plain JS, no build step) |
+| `desktop/` | The desktop app: Tauri shell, PyInstaller recipe, release scripts (see its README) |
 
 ## Roadmap
 
@@ -709,5 +758,8 @@ folder and the network is disabled. CI runs the suite on Linux, macOS and Window
 - [chessboard.js](https://chessboardjs.com) and [jQuery](https://jquery.com) (both MIT) —
   bundled in `lucidfish/static/vendor/`; see `LICENSES.txt` there.
 - [Lichess](https://lichess.org) — opening explorer and the accuracy/win-probability model.
+
+The desktop app bundles an official Stockfish binary (GPL-3.0); the notices are in
+[`desktop/THIRD_PARTY.md`](desktop/THIRD_PARTY.md), shipped inside the app.
 
 Lucidfish itself has not chosen a licence yet.

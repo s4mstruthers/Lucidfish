@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en-GB">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lucidfish</title>
+<style>
+  :root { color-scheme: light dark; --bg: #f5f6f8; --text: #171a22; --muted: #6b7384; --accent: #3b6cf6; --bad: #e04a4f; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #0c0e13; --text: #e8eaf0; --muted: #8d95a7; --accent: #6b8dff; } }
+  html, body { height: 100%; margin: 0; }
+  body {
+    display: grid; place-items: center; background: var(--bg); color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI Variable", "Segoe UI", Roboto, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased; user-select: none; -webkit-user-select: none;
+  }
+  .splash { display: flex; flex-direction: column; align-items: center; gap: 18px; animation: in .5s cubic-bezier(.2,.8,.2,1); }
+  @keyframes in { from { opacity: 0; transform: translateY(6px); } }
+  .mark {
+    width: 72px; height: 72px; border-radius: 22px; display: grid; place-items: center; font-size: 42px; color: #fff;
+    background: linear-gradient(140deg, var(--accent), #7a5af5); box-shadow: 0 12px 32px rgba(59,108,246,.35);
+  }
+  h1 { margin: 0; font-size: 1.4rem; font-weight: 700; letter-spacing: -.02em; }
+  h1 span { color: var(--accent); }
+  p { margin: 0; color: var(--muted); font-size: .92rem; max-width: 42ch; text-align: center; line-height: 1.5; }
+  .pulse { width: 120px; height: 3px; border-radius: 3px; background: rgba(127,127,127,.2); overflow: hidden; }
+  .pulse::after { content: ""; display: block; width: 40%; height: 100%; background: var(--accent); border-radius: 3px; animation: slide 1.1s ease-in-out infinite alternate; }
+  @keyframes slide { to { transform: translateX(150%); } }
+  .error { color: var(--bad); }
+  pre { font-size: .75rem; color: var(--muted); max-width: 60ch; white-space: pre-wrap; text-align: left; }
+  button { font: inherit; padding: 8px 16px; border-radius: 10px; border: 1px solid rgba(127,127,127,.3); background: transparent; color: var(--text); cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="splash">
+  <div class="mark" aria-hidden="true">♞</div>
+  <h1>Lucid<span>fish</span></h1>
+  <p id="msg">Starting the engine room…</p>
+  <div class="pulse" id="pulse"></div>
+  <pre id="log" hidden></pre>
+  <button id="retry" hidden>Try again</button>
+</div>
+<script>
+  // The Rust shell starts the Python backend and tells this page its address; the page then becomes the app.
+  const T = window.__TAURI__;
+  const msg = document.getElementById("msg"), log = document.getElementById("log");
+  const retry = document.getElementById("retry"), pulse = document.getElementById("pulse");
+  let navigated = false;
+  function go(url) {
+    if (navigated || !url) return;
+    navigated = true;
+    msg.textContent = "Opening your workspace…";
+    location.replace(url);
+  }
+  function fail(text, detail) {
+    pulse.hidden = true; msg.className = "error"; msg.textContent = text;
+    if (detail) { log.hidden = false; log.textContent = detail; }
+    retry.hidden = false;
+  }
+  retry.addEventListener("click", () => { T?.core?.invoke("restart_backend"); location.reload(); });
+  if (!T?.core?.invoke) {
+    fail("This page only works inside the Lucidfish desktop app.");
+  } else {
+    T.event.listen("backend-ready", (e) => go(e.payload));
+    T.event.listen("backend-failed", (e) => fail("Lucidfish's backend could not start.", e.payload));
+    T.core.invoke("backend_url").then(go).catch(() => {});
+    setTimeout(() => { if (!navigated) msg.textContent = "Still starting… the first launch can take a little longer."; }, 6000);
+    setTimeout(() => { if (!navigated) fail("The backend is taking too long to start.", "Try again, or check the log in Lucidfish's data folder."); }, 60000);
+  }
+</script>
+</body>
+</html>
