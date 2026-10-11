@@ -152,7 +152,14 @@ jobs:
           APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
-          if [ -n "$TAURI_SIGNING_PRIVATE_KEY" ]; then
+          # A secret that is not set arrives as an empty variable, which Tauri would take for a
+          # certificate or key and fail on. Drop the empty ones: no Apple secrets means an unsigned
+          # app, no signing key means no updater artifacts.
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID \
+                      APPLE_PASSWORD APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then unset "$name"; fi
+          done
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
             npm run tauri -- build --target ${{ matrix.target }}
           else
             echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set: building without updater artifacts (this release cannot be installed by the in-app updater)."
