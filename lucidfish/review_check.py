@@ -612,9 +612,8 @@ def _stats_fallback(kind: str, stats: dict) -> list[str]:
 
 _BULLET_LIMIT = {"time_controls": 5, "weaknesses": 3, "strengths": 2, "openings": 2, "train": 3}
 # A section heading the model copied into its bullets: '- ### ⚠ Holding you back: Missed threats ...'.
-_ECHOED_HEADING = re.compile(
-    r"^#{1,6}\s*(?:[^\w\s*]+\s*)?(?:(?:%s)\s*[:—–-]\s*)?" % "|".join(
-        re.escape(t.split(" ", 1)[1]) for _, t, _ in profile_sections()), re.I)
+_SECTION_NAMES = "|".join(re.escape(t.split(" ", 1)[1]) for _, t, _ in profile_sections())
+_ECHOED_HEADING = re.compile(r"^#{1,6}\s*(?:[^\w\s*]+\s*)?(?:(?:" + _SECTION_NAMES + r")\s*[:—–-]\s*)?", re.I)
 
 
 def presentable_review(text: str, stats: dict, time_class: str | None = None) -> str:
