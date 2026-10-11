@@ -82,7 +82,7 @@
   },
   "plugins": {
     "updater": {
-      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDc1QjE3OTMyRjQ5NURFODQKUldTRTNwWDBNbm14ZFFNZ3JjL1QxSGRhbFA4Y01nZlpZRE02TjVUOU00a3lYeVZLQmg5elBqQjYK",
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDczQ0QzN0ZGRTUyMzA2RDgKUldUWUJpUGwvemZOYzVHNjdzKytCMGc4a08zQ1l1clZUdFlCblZSUW5iN1AxNlplSnZucC9KS1MK",
       "endpoints": [
         "https://github.com/s4mstruthers/Lucidfish/releases/latest/download/latest.json"
       ],

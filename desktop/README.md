@@ -53,17 +53,30 @@ can generate a throwaway key pair (below) or set `bundle.createUpdaterArtifacts`
 
 ## Releasing
 
-Releases are built by `.github/workflows/release.yml` on every tag `v<version>`:
+Releases are built by `.github/workflows/build-apps.yml`, which mirrors a simple rule: every pull
+request and every "Run workflow" builds the apps and keeps them as downloadable artifacts on the run's
+page; a version tag publishes them as a GitHub release.
 
 1. Set the version in `lucidfish/__init__.py`, `desktop/src-tauri/tauri.conf.json`,
-   `desktop/src-tauri/Cargo.toml` and `desktop/package.json` (`python desktop/scripts/check_version.py`
-   checks they agree; the test suite does too).
-2. Commit, then `git tag v0.4.0 && git push origin v0.4.0`.
-3. The workflow builds on macOS (Apple Silicon and Intel), Windows and Linux, bundles Stockfish for
-   each, signs the updater artifacts and creates a **draft** release with the installers and
-   `latest.json`. Review the draft on GitHub, edit the notes, and publish it. Installed apps pick the
-   update up from `https://github.com/s4mstruthers/Lucidfish/releases/latest/download/latest.json`
-   the next time they start.
+   `desktop/src-tauri/Cargo.toml` and `desktop/package.json`, then `cargo update -w --offline` in
+   `desktop/src-tauri` so `Cargo.lock` follows (`python desktop/scripts/check_version.py` checks that
+   all of them agree; the test suite does too).
+2. Add a `## <version>` section to `CHANGELOG.md`, written for the people using the app. It becomes
+   the release's description and the text the app shows before it installs the update
+   (`python desktop/scripts/release_notes.py <version>` prints it; the workflow refuses to release
+   without it).
+3. Commit, then `git tag v0.4.0 && git push origin v0.4.0`.
+4. The workflow runs the tests, builds on macOS (Apple silicon and Intel), Windows and Linux, bundles
+   Stockfish for each, smoke-tests the frozen backend, signs the updater artifacts and publishes the
+   release with the installers and `latest.json`. Installed apps pick the update up from
+   `https://github.com/s4mstruthers/Lucidfish/releases/latest/download/latest.json` the next time
+   they start.
+
+To try a build without releasing, open the Actions tab → *Build apps* → *Run workflow* on any branch:
+the installers are attached to the run as artifacts.
+
+Without the signing secrets (below) the installers are still built and released, but no `latest.json`
+is published, so that release has to be installed by hand and installed apps cannot update to it.
 
 ### One-time setup: the update signing key
 

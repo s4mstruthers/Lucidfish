@@ -55,8 +55,19 @@ def main() -> int:
     shutil.copy2(built, target)
     if ext == "":
         target.chmod(0o755)
+    smoke_test(target)
     print(f"Sidecar ready: {target} ({target.stat().st_size / 1e6:.1f} MB)")
     return 0
+
+
+def smoke_test(exe: Path) -> None:
+    """Start the frozen backend once: a missing hidden import or data file shows up here, not on
+    a user's computer. `--version` imports the whole command line, the web app and its static files."""
+    from lucidfish import __version__
+    out = subprocess.run([str(exe), "--version"], capture_output=True, text=True, timeout=180)
+    if out.returncode != 0 or __version__ not in out.stdout:
+        raise SystemExit(f"The built sidecar does not start:\n{out.stdout}\n{out.stderr}")
+    print(f"Smoke test: {exe.name} --version -> {out.stdout.strip()}")
 
 
 if __name__ == "__main__":
