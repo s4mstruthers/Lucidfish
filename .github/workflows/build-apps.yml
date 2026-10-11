@@ -193,9 +193,11 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Release notes from CHANGELOG.md
-        run: python desktop/scripts/release_notes.py "${{ github.ref_name }}" > release-notes.md
+        run: |
+          python desktop/scripts/release_notes.py "${{ github.ref_name }}" > update-notes.md
+          python desktop/scripts/release_notes.py "${{ github.ref_name }}" --with-downloads > release-notes.md
       - name: Updater manifest (latest.json) from the signed installers
-        run: python desktop/scripts/make_latest_json.py "${{ github.ref_name }}" --notes release-notes.md
+        run: python desktop/scripts/make_latest_json.py "${{ github.ref_name }}" --notes update-notes.md
       - name: What is being published
         run: ls -l dist
       - uses: softprops/action-gh-release@v2

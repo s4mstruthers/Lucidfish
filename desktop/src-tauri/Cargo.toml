@@ -1,6 +1,6 @@
 [package]
 name = "lucidfish-desktop"
-version = "0.4.0"
+version = "0.4.1"
 description = "Lucidfish: Stockfish tells you the best move, Lucidfish tells you why."
 authors = ["Lucidfish contributors"]
 edition = "2021"
