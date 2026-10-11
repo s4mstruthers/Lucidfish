@@ -611,11 +611,14 @@ def _stats_fallback(kind: str, stats: dict) -> list[str]:
 
 
 _BULLET_LIMIT = {"time_controls": 5, "weaknesses": 3, "strengths": 2, "openings": 2, "train": 3}
+# A section heading the model copied into its bullets: '- ### ⚠ Holding you back: Missed threats ...'.
+_SECTION_NAMES = "|".join(re.escape(t.split(" ", 1)[1]) for _, t, _ in profile_sections())
+_ECHOED_HEADING = re.compile(r"^#{1,6}\s*(?:[^\w\s*]+\s*)?(?:(?:" + _SECTION_NAMES + r")\s*[:—–-]\s*)?", re.I)
 
 
 def presentable_review(text: str, stats: dict, time_class: str | None = None) -> str:
     """A stored progress review as shown: reviews written before the fixed structure are tidied into it."""
-    if not text or "\n### " in f"\n{text}":
+    if not text or ("\n### " in f"\n{text}" and not re.search(r"^- #", text, re.M)):
         return text
     return tidy_profile_review(text, stats, time_class)
 
@@ -645,7 +648,8 @@ def tidy_profile_review(text: str, stats: dict, time_class: str | None = None) -
             if kind:
                 current = kind
             continue
-        sentences = [x for x in re.split(r"(?<=[.!?])\s+", re.sub(r"^\s*(?:[-*•]|\d+[.)])\s+", "", line))
+        content = _ECHOED_HEADING.sub("", re.sub(r"^\s*(?:[-*•]|\d+[.)])\s+", "", line))
+        sentences = [x for x in re.split(r"(?<=[.!?])\s+", content)
                      if x.strip() and not _CENTIPAWN.search(x) and not _LEVEL_LABEL.search(x)]
         if not sentences:
             continue
