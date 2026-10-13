@@ -4,6 +4,10 @@ Newest first. Each [release on GitHub](https://github.com/s4mstruthers/Lucidfish
 version's section here as its description, and the desktop app shows it when it offers the update.
 Write for the people using the app: what they will notice, not how it was done.
 
+## 0.5.2
+
+- **macOS no longer says the app is damaged.** A downloaded Lucidfish now gets macOS's usual "Apple could not verify" message the first time, and *System Settings → Privacy & Security → Open Anyway* opens it. No Terminal command needed.
+
 ## 0.5.1
 
 - **Check for updates works again in the desktop app.** Settings → About & updates said "Command check_update not allowed by ACL" instead of checking. Versions before this one cannot update themselves to it: download this release once by hand, and later updates install from inside the app again.

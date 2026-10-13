@@ -7,7 +7,7 @@ authors:
     given-names: Sam
 repository-code: "https://github.com/s4mstruthers/Lucidfish"
 license: AGPL-3.0-or-later
-version: 0.5.1
+version: 0.5.2
 date-released: 2026-10-13
 keywords:
   - chess
