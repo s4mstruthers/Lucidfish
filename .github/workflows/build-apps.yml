@@ -23,8 +23,8 @@
 #       latest.json is published: that release must be installed by hand.
 #   APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY, APPLE_ID,
 #   APPLE_PASSWORD, APPLE_TEAM_ID
-#       Optional: signed and notarised macOS builds (otherwise macOS asks the user to allow the app
-#       once, see the README).
+#       Optional: signed and notarised macOS builds (otherwise the bundle is signed ad hoc and macOS
+#       asks the user to allow the app once, see the README).
 
 name: Build apps
 
@@ -159,6 +159,13 @@ jobs:
                       APPLE_PASSWORD APPLE_TEAM_ID TAURI_SIGNING_PRIVATE_KEY TAURI_SIGNING_PRIVATE_KEY_PASSWORD; do
             if [ -z "${!name}" ]; then unset "$name"; fi
           done
+          # Without a certificate, sign the macOS bundle ad hoc (Tauri's pseudo-identity "-"). Left
+          # unsigned, the bundle has no resource seal while its main binary claims one, and Gatekeeper
+          # reports a downloaded copy as "damaged" with no way to open it. Ad-hoc signed, it gets the
+          # ordinary "Apple could not verify" dialog with Open Anyway, like the README describes.
+          if [ "$RUNNER_OS" = "macOS" ] && [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
+            export APPLE_SIGNING_IDENTITY="-"
+          fi
           if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
             npm run tauri -- build --target ${{ matrix.target }}
           else
