@@ -35,7 +35,7 @@ plans, the plans meet, at some moment one of them breaks, and everything afterwa
 that. You improve when you can tell that story about your own games, and most of us cannot,
 because nobody tells it to us.
 
-A language model can tell the story. On its own it cannot be trusted to: models misplace pieces,
+A language model can tell the story. On its own it cannot be trusted to: model misplaced pieces,
 describe captures that never happened and praise moves that lose. Lucidfish's answer is a strict
 division of labour. **The engine and the code decide what is true; the model only puts it into
 words; and every sentence is checked against the board before you read it.** The model never looks
