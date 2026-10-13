@@ -163,16 +163,31 @@ jobs:
           # unsigned, the bundle has no resource seal while its main binary claims one, and Gatekeeper
           # reports a downloaded copy as "damaged" with no way to open it. Ad-hoc signed, it gets the
           # ordinary "Apple could not verify" dialog with Open Anyway, like the README describes.
+          # No hardened runtime with an ad-hoc signature: it turns on library validation, and the
+          # backend could no longer load the Python library PyInstaller unpacks at start (signed by
+          # another team), so it failed with "mapping process and mapped file have different Team IDs".
+          config=()
           if [ "$RUNNER_OS" = "macOS" ] && [ -z "${APPLE_SIGNING_IDENTITY:-}" ]; then
             export APPLE_SIGNING_IDENTITY="-"
+            echo '{"bundle":{"macOS":{"hardenedRuntime":false}}}' > adhoc.json
+            config+=(--config adhoc.json)
           fi
-          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
-            npm run tauri -- build --target ${{ matrix.target }}
-          else
+          if [ -z "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
             echo "::warning::TAURI_SIGNING_PRIVATE_KEY is not set: building without updater artifacts (this release cannot be installed by the in-app updater)."
             echo '{"bundle":{"createUpdaterArtifacts":false}}' > unsigned.json
-            npm run tauri -- build --target ${{ matrix.target }} --config unsigned.json
+            config+=(--config unsigned.json)
           fi
+          npm run tauri -- build --target ${{ matrix.target }} "${config[@]}"
+
+      - name: The backend starts inside the signed macOS app
+        if: runner.os == 'macOS'
+        shell: bash
+        # The smoke test above runs the backend before Tauri signs it; signing can still break it
+        # (0.5.2 shipped a backend that could not load Python), so run the copy inside the bundle.
+        run: |
+          app=$(ls -d desktop/src-tauri/target/${{ matrix.target }}/release/bundle/macos/*.app | head -1)
+          codesign -dvv "$app/Contents/MacOS/lucidfish-server" 2>&1 | grep -E "flags|Signature"
+          "$app/Contents/MacOS/lucidfish-server" --help > /dev/null
 
       - name: Collect the installers
         run: python desktop/scripts/collect_bundles.py --target ${{ matrix.target }}

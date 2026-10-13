@@ -4,6 +4,10 @@ Newest first. Each [release on GitHub](https://github.com/s4mstruthers/Lucidfish
 version's section here as its description, and the desktop app shows it when it offers the update.
 Write for the people using the app: what they will notice, not how it was done.
 
+## 0.5.3
+
+- **The macOS app starts again.** In 0.5.2 it stopped at "Lucidfish's backend could not start" with a "Failed to load Python shared library" message. Windows and Linux were not affected. If you installed 0.5.2 on a Mac, download this version by hand.
+
 ## 0.5.2
 
 - **macOS no longer says the app is damaged.** A downloaded Lucidfish now gets macOS's usual "Apple could not verify" message the first time, and *System Settings → Privacy & Security → Open Anyway* opens it. No Terminal command needed.

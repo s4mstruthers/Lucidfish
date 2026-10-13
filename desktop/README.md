@@ -95,7 +95,9 @@ Keep the key somewhere safe: if it is lost, a new pair means one release that us
 
 Without an Apple Developer ID the workflow signs the macOS app ad hoc. macOS then says it could not
 verify the app, and the user clicks *Open Anyway* in *System Settings → Privacy & Security* once. (A
-completely unsigned bundle is worse: macOS calls the download "damaged" and offers no way to open it.) To sign and notarise in CI, add the
+completely unsigned bundle is worse: macOS calls the download "damaged" and offers no way to open it.)
+The ad-hoc build leaves out the hardened runtime: with it, macOS refuses to let the backend load the
+Python library PyInstaller unpacks at start, because that library is signed by another team. To sign and notarise in CI, add the
 secrets `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`,
 `APPLE_PASSWORD` and `APPLE_TEAM_ID` as described in the
 [Tauri documentation](https://tauri.app/distribute/sign/macos/). Windows builds can be signed the same
