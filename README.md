@@ -78,9 +78,10 @@ Stockfish, so there is nothing else to install.
 The apps are not signed with a paid developer certificate, so the system asks once, the first time
 you start one:
 
-- **macOS** says Apple could not check it. Click *Done*, open *System Settings → Privacy & Security*
-  and click *Open Anyway* next to Lucidfish (or in Terminal: `xattr -dr com.apple.quarantine
-  /Applications/Lucidfish.app`).
+- **macOS** says Apple could not check it, or that *"Lucidfish" is damaged*. It is not damaged. Click
+  *Cancel* or *Done* (never *Move to Bin*), then run this once in Terminal:
+  `xattr -dr com.apple.quarantine /Applications/Lucidfish.app`. For the "could not check" message,
+  *System Settings → Privacy & Security → Open Anyway* also works.
 - **Windows** shows *Windows protected your PC*. Click *More info*, then *Run anyway*.
 
 The `.app.tar.gz`, `.sig` and `latest.json` files on the release page are what installed apps use
@@ -818,7 +819,8 @@ faithfulness and helpfulness from a strong model that sees the same evidence.
 | Problem | Fix |
 |---|---|
 | "Stockfish isn't set up yet" | Press *Download Stockfish* in the banner (or Settings → Analysis): Lucidfish fetches the official build for your computer, about 40 MB. Or install it yourself (see [Installation](#installation)) and set its path in Settings → Analysis. |
-| macOS says the app is damaged, or that Apple could not check it | The desktop app is not notarised yet. Open *System Settings → Privacy & Security* and click *Open Anyway* next to Lucidfish, once (see [Download](#download)). |
+| macOS says *"Lucidfish" is damaged and can't be opened* | It is not damaged: the app is not notarised yet, and macOS blocks unsigned downloads this way. Click *Cancel* (not *Move to Bin*), then run `xattr -dr com.apple.quarantine /Applications/Lucidfish.app` in Terminal, once. |
+| macOS says Apple could not check the app | Open *System Settings → Privacy & Security* and click *Open Anyway* next to Lucidfish, once, or use the `xattr` command above. |
 | "Cannot reach Ollama" | Start the Ollama app (or run `ollama serve`). Check the server URL in Settings if Ollama runs on another port or machine. |
 | "Model … is not installed in Ollama" | Run `ollama pull <model>`, or pick one of the installed models shown in Settings. |
 | Analysis is slow | Use the *Key moments* detail level, a smaller model, a cloud provider, or the *Fast* engine preset. Close other heavy apps. |
