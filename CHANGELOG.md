@@ -4,6 +4,10 @@ Newest first. Each [release on GitHub](https://github.com/s4mstruthers/Lucidfish
 version's section here as its description, and the desktop app shows it when it offers the update.
 Write for the people using the app: what they will notice, not how it was done.
 
+## Unreleased
+
+- **Analysis no longer stalls on forced mates.** A depth-limited search could run for an hour in a position with a forced mate (the demo's Opera game sat on move 14 for that long). Every search now also has a time cap, 30 seconds per position by default (`LUCIDFISH_MAX_SECONDS`).
+
 ## 0.5.0
 
 - **See yourself improve.** A new *Stats* page charts your accuracy, results, blunders and mistakes, and missed threats game by game, with a then-and-now comparison of your most recent games against the ones before them. Home shows the changes that matter, and the coach's review gains a *Progress* section that says what has improved and what has not, from those verified numbers only.

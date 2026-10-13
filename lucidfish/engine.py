@@ -149,7 +149,8 @@ class EngineAnalyser:
             secs = self.cfg.movetime_s * (1 + extra_depth / 2)
             return chess.engine.Limit(time=secs), "time", int(secs * 1000)
         depth = self.cfg.depth + extra_depth
-        return chess.engine.Limit(depth=depth), "depth", depth
+        cap = self.cfg.max_seconds * (1 + extra_depth / 2) if self.cfg.max_seconds else None
+        return chess.engine.Limit(depth=depth, time=cap), "depth", depth
 
     def top_lines(self, board: chess.Board, multipv: int | None = None, extra_depth: int = 0) -> list[Line]:
         """Top-N candidate lines for the side to move ([] if the game is over).

@@ -697,6 +697,7 @@ and `.env` → settings saved in the web app → command-line flags.
 |---|---|---|
 | `LUCIDFISH_STOCKFISH` | auto-detected | Path to the Stockfish program |
 | `LUCIDFISH_DEPTH` | `18` | Engine search depth per position |
+| `LUCIDFISH_MAX_SECONDS` | `30` | Longest the engine may spend on one position, whatever the depth (`0` = no limit) |
 | `LUCIDFISH_THREADS` | most of your cores, leaving some free (max 8) | Engine CPU threads |
 | `LUCIDFISH_HASH_MB` | `256` | Engine hash table size |
 | `LUCIDFISH_PROVIDER` | `ollama` | `ollama`, `openai`, `anthropic`, `gemini`, `openrouter`, `groq`, `custom` |

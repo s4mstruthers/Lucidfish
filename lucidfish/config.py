@@ -197,6 +197,9 @@ class EngineConfig:
     path: str = field(default_factory=find_stockfish)
     depth: int = field(default_factory=lambda: _env_int("LUCIDFISH_DEPTH", 18))
     movetime_s: float | None = None   # if set, fixed seconds per position instead of depth
+    # A depth-limited search can run for an hour in a position with a forced mate (Stockfish keeps
+    # extending the mating lines, and MultiPV makes it search each of them); this caps it. 0 = no cap.
+    max_seconds: int = field(default_factory=lambda: _env_int("LUCIDFISH_MAX_SECONDS", 30))
     multipv: int = 3                  # candidate lines per position (3 covers every UI view)
     threads: int = field(default_factory=lambda: _env_int("LUCIDFISH_THREADS", default_threads()))
     hash_mb: int = field(default_factory=lambda: _env_int("LUCIDFISH_HASH_MB", 256))
