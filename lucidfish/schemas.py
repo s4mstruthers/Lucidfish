@@ -73,7 +73,8 @@ IDEAS = _obj("ideas", line_ideas=_IDEAS)
 
 NOTE = _obj(
     "note",
-    explanation=_str("the note itself: flowing prose, no headings or bullet points"),
+    explanation=_str("the note itself: two or three short paragraphs separated by a blank line, each one to "
+                     "three sentences; no headings or bullet points"),
     line_ideas=_IDEAS,
 )
 
@@ -96,7 +97,7 @@ CHAPTER = _obj(
 POSITION = _obj(
     "position",
     assessment=_str("the assessment and main plans from the coached side's perspective, then why the "
-                    "engine's top move makes sense"),
+                    "engine's top move makes sense; two or three short paragraphs separated by a blank line"),
     line_ideas=_IDEAS,
 )
 
@@ -121,6 +122,8 @@ def profile_schema(time_class: str | None = None) -> dict:
         weaknesses=_strings("2-3 bullets, the most persistent first: the weakness in a few words, then the "
                             "evidence (how often, in which games)"),
         strengths=_strings("1-2 bullets, only what the statistics or reviews show"),
+        progress=_strings("1-2 bullets on what has improved and what has not between the earlier games and "
+                          "the recent ones, only from the 'Progress over time' statistics; empty if absent"),
         openings=_strings("1-2 bullets: the opening that goes best and the one that goes worst, with how "
                           "many games"),
         train=_strings("2-3 concrete things to practise, one line each"),
@@ -130,8 +133,15 @@ def profile_schema(time_class: str | None = None) -> dict:
 
 # ------------------------------------------------------------------ from JSON to the texts the app uses
 
+_PARAGRAPH_BREAK = re.compile(r"\n\s*\n")
+
+
 def _text(value: Any) -> str:
-    return " ".join(str(value).split()) if isinstance(value, str | int | float) else ""
+    """Tidy model text: whitespace collapsed within a paragraph, blank lines between paragraphs kept."""
+    if not isinstance(value, str | int | float):
+        return ""
+    paragraphs = (" ".join(part.split()) for part in _PARAGRAPH_BREAK.split(str(value)))
+    return "\n\n".join(part for part in paragraphs if part)
 
 
 def _bullets(values: Any) -> list[str]:

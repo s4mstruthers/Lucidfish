@@ -219,3 +219,74 @@ def test_claude_requests_carry_effort_and_schema_and_drop_rejected_options():
     assert "temperature" not in str(sent[0].get("extra_body", ""))       # 5.x models reject sampling parameters
     provider.complete("sys", [{"role": "user", "content": "q"}], schema=NOTE, effort="low")
     assert sent[-1]["output_config"] == {"effort": "low"} and len(sent) == 3
+
+
+def test_claude_client_names_the_workspace_when_the_key_needs_one(monkeypatch):
+    pytest.importorskip("anthropic")
+    monkeypatch.delenv("ANTHROPIC_WORKSPACE_ID", raising=False)
+    plain = make_provider(LLMConfig(provider="anthropic", model="claude-opus-5-5", api_key="sk-ant-abcdef123456"))
+    assert "anthropic-workspace-id" not in {k.lower() for k in plain._client.default_headers}
+    monkeypatch.setenv("ANTHROPIC_WORKSPACE_ID", " wrkspc_01abc ")
+    scoped = make_provider(LLMConfig(provider="anthropic", model="claude-opus-5-5", api_key="sk-ant-abcdef123456"))
+    assert scoped._client.default_headers["anthropic-workspace-id"] == "wrkspc_01abc"
+
+
+def test_claude_workspace_error_explains_the_fix():
+    anthropic = pytest.importorskip("anthropic")
+    provider = make_provider(LLMConfig(provider="anthropic", model="claude-opus-5-5", api_key="sk-ant-abcdef123456"))
+    llm.AnthropicProvider._rejected.clear()
+
+    def create(**kwargs):
+        raise anthropic.BadRequestError(
+            message="This API key is not scoped to a workspace, so this request must include the "
+                    "anthropic-workspace-id header with the ID of the workspace to use.",
+            response=mock.Mock(status_code=400, headers={}), body=None)
+
+    provider._client.beta.messages.create = create
+    provider._client.messages.create = create
+    with pytest.raises(llm.LLMError) as info:
+        provider.complete("sys", [{"role": "user", "content": "q"}])
+    assert info.value.fatal and "ANTHROPIC_WORKSPACE_ID" in str(info.value)
+    assert provider._rejected == {}                       # nothing was mistaken for an unsupported option
+
+
+def test_note_paragraphs_survive_parsing_and_fact_cleaning():
+    from lucidfish.prompts import _drop_sentences
+    from lucidfish.schemas import note_from
+    text, _ = note_from({"explanation": "Verdict first.  It hangs a rook.\n\n  Then the line.\nStill the same "
+                                        "paragraph.\n\n\nThe lesson.", "line_ideas": []})
+    assert text == "Verdict first. It hangs a rook.\n\nThen the line. Still the same paragraph.\n\nThe lesson."
+    cleaned, removed = _drop_sentences(text, lambda s: ["bad"] if "line" in s else [])
+    assert (cleaned, removed) == ("Verdict first. It hangs a rook.\n\nStill the same paragraph.\n\nThe lesson.", 1)
+    assert _drop_sentences("Only this. Gone.", lambda s: ["x"] if "Gone" in s else []) == ("Only this.", 1)
+
+
+def test_run_tools_keeps_tools_defined_and_replays_full_assistant_turns():
+    """A history with tool calls is only valid alongside the tools it called, and the assistant turn that
+    gets replayed must be the provider's complete message, not a text-only copy of it."""
+    pytest.importorskip("anthropic")
+    provider = make_provider(LLMConfig(provider="anthropic", model="claude-opus-5-5", api_key="sk-ant-abcdef123456"))
+    llm.AnthropicProvider._rejected.clear()
+    thinking = SimpleNamespace(type="thinking", thinking="", signature="sig")
+    sent = []
+
+    def create(**kwargs):
+        sent.append(copy.deepcopy(kwargs))
+        n = len(sent)
+        if n == 1:   # a tool call
+            return SimpleNamespace(stop_reason="tool_use", content=[
+                thinking, SimpleNamespace(type="tool_use", id="t1", name="check_line", input={"moves": ["Nf3"]})])
+        if n == 2:   # prose instead of JSON
+            return SimpleNamespace(stop_reason="end_turn",
+                                   content=[thinking, SimpleNamespace(type="text", text="prose")])
+        return SimpleNamespace(stop_reason="end_turn", content=[
+            SimpleNamespace(type="text", text='{"explanation": "done", "line_ideas": []}')])
+
+    provider._client.beta.messages.create = create
+    provider._client.messages.create = create
+    text = run_tools(provider, "sys", [{"role": "user", "content": "q"}], [TOOL], lambda c: "{}", schema=NOTE)
+    assert parse_json(text)["explanation"] == "done"
+    assert all("tools" in req for req in sent)                                   # never dropped
+    assert sent[-1]["output_config"]["format"]["schema"] == NOTE
+    replayed = [m for m in sent[-1]["messages"] if m["role"] == "assistant"]
+    assert replayed and all(m["content"][0].type == "thinking" for m in replayed)   # complete turns, reasoning included

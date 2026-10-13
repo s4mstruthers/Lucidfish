@@ -22,6 +22,7 @@
   <symbol id="i-learn" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H20v15H6.5A2.5 2.5 0 0 0 4 20.5z"/><path d="M4 18.5A2.5 2.5 0 0 1 6.5 16H20"/><path d="M9 8h7M9 11.5h5"/></symbol>
   <symbol id="i-games" viewBox="0 0 24 24"><rect x="3.5" y="4" width="17" height="16" rx="2.5"/><path d="M3.5 9.5h17M9 9.5V20"/></symbol>
   <symbol id="i-train" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.5"/><circle cx="12" cy="12" r="1"/></symbol>
+  <symbol id="i-stats" viewBox="0 0 24 24"><path d="M4 19.5h16"/><path d="M6.5 16V11M11.5 16V6.5M16.5 16v-3"/></symbol>
   <symbol id="i-board" viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M3.5 9.2h17M3.5 14.8h17M9.2 3.5v17M14.8 3.5v17"/></symbol>
   <symbol id="i-settings" viewBox="0 0 24 24"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7z"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.5-2-3.5-2.4 1a7.7 7.7 0 0 0-1.7-1L15 3.5h-4l-.4 2.5a7.7 7.7 0 0 0-1.7 1l-2.4-1-2 3.5 2 1.5a7.6 7.6 0 0 0 0 2l-2 1.5 2 3.5 2.4-1a7.7 7.7 0 0 0 1.7 1l.4 2.5h4l.4-2.5a7.7 7.7 0 0 0 1.7-1l2.4 1 2-3.5z"/></symbol>
   <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8"/></symbol>
@@ -42,6 +43,7 @@
     <button data-page="learn"><svg class="ic"><use href="#i-learn"/></svg><span>Learn</span></button>
     <button data-page="games" data-also="analyse game"><svg class="ic"><use href="#i-games"/></svg><span>Games</span></button>
     <button data-page="train"><svg class="ic"><use href="#i-train"/></svg><span>Train</span><span class="nav-count hidden" id="navTrainCount"></span></button>
+    <button data-page="stats"><svg class="ic"><use href="#i-stats"/></svg><span>Stats</span></button>
     <button data-page="editor" class="server-only"><svg class="ic"><use href="#i-board"/></svg><span>Board</span></button>
   </nav>
   <div class="side-bottom">
@@ -103,6 +105,11 @@
         <div class="card-head"><h2>Patterns across your games</h2></div>
         <div class="findings" id="findings"></div>
       </div>
+      <div class="card hidden" id="progressCard">
+        <div class="card-head"><h2>Progress</h2><div class="spacer"></div>
+          <button class="ghost sm" id="seeStats">All stats →</button></div>
+        <div class="findings" id="progress"></div>
+      </div>
     </div>
     <div class="grid-2 hidden" id="insightsRow">
       <div class="card">
@@ -133,6 +140,15 @@
         <button id="reviewChatSend">Send</button>
       </div>
     </div>
+  </section>
+
+  <!-- ============================================================ STATS -->
+  <section id="page-stats" class="hidden" data-page-section>
+    <div class="page-head"><h1>Your stats over time</h1>
+      <p class="small">Every analysed game, in the order you played them, so you can see whether the work is paying off.
+        Switch time control to compare like with like.</p></div>
+    <div class="tc-bar" data-tc-bar="analysed" role="group" aria-label="Time control"></div>
+    <div id="statsBody"></div>
   </section>
 
   <!-- ============================================================ LEARN -->
@@ -561,13 +577,18 @@
           </div>
           <div id="keyBlock" style="margin-top:14px">
             <label class="field">API key
-              <div class="row">
+              <div class="row" id="keyEntry">
                 <input type="password" id="setKey" autocomplete="off" spellcheck="false" style="flex:1" placeholder="Paste your API key">
                 <button class="secondary" id="saveKey">Save key</button>
-                <button class="danger" id="removeKey">Remove</button>
+                <button class="ghost" id="cancelKey">Cancel</button>
+              </div>
+              <div class="row" id="keySaved">
+                <span class="small" id="keyStatus" style="font-weight:400"></span>
+                <button class="ghost sm" id="replaceKey">Replace key</button>
+                <button class="danger sm" id="removeKey">Remove</button>
               </div>
             </label>
-            <div class="small" id="keyStatus" style="margin-top:6px"></div>
+            <div class="small" id="keyNote" style="margin-top:6px"></div>
           </div>
           <div class="row" style="margin-top:14px">
             <button class="secondary" id="testLlm">Test connection</button>
@@ -591,12 +612,16 @@
           </div>
           <div id="expertKeyBlock" class="hidden" style="margin-top:12px">
             <label class="field">API key for the second model
-              <div class="row">
+              <div class="row" id="expertKeyEntry">
                 <input type="password" id="setExpertKey" autocomplete="off" spellcheck="false" style="flex:1" placeholder="Paste your API key">
                 <button class="secondary" id="saveExpertKey">Save key</button>
+                <button class="ghost" id="cancelExpertKey">Cancel</button>
+              </div>
+              <div class="row" id="expertKeySaved">
+                <span class="small" id="expertKeyStatus" style="font-weight:400"></span>
+                <button class="ghost sm" id="replaceExpertKey">Replace key</button>
               </div>
             </label>
-            <div class="small" id="expertKeyStatus" style="margin-top:6px"></div>
           </div>
           <div id="expertMore" class="stack" style="margin-top:12px">
             <label class="check"><input type="checkbox" id="setEscalate"> If commentary fails the fact-check, let the second model rewrite it</label>

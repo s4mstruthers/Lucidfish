@@ -6,6 +6,10 @@ Write for the people using the app: what they will notice, not how it was done.
 
 ## Unreleased
 
+- **See yourself improve.** A new *Stats* page charts your accuracy, results, blunders and mistakes, and missed threats game by game, with a then-and-now comparison of your most recent games against the ones before them. Home shows the changes that matter, and the coach's review gains a *Progress* section that says what has improved and what has not, from those verified numbers only.
+- **Coach's notes in paragraphs.** The coach now writes each note as two or three short paragraphs (verdict, what the line shows, the lesson) instead of one block of text, and notes from earlier analyses are split at sentence boundaries when shown.
+- **A saved API key no longer looks unsaved.** Once a key is stored, Settings shows where it lives and offers *Replace key* and *Remove* instead of an empty paste box.
+- **Anthropic keys that belong to an organisation rather than a workspace now work.** Set `ANTHROPIC_WORKSPACE_ID` (in the environment or `.env`) to the workspace the coach should use. Without it, the error now says what to do instead of showing Anthropic's raw reply.
 - **Lucidfish now has a licence: AGPL-3.0-or-later.** The `LICENSE` file is in the repository; you are free to use, change and share Lucidfish under its terms.
 - **A clearer front page and a way in for contributors.** The README now opens with why Lucidfish exists and where it is going; `CONTRIBUTING.md`, a code of conduct, a security policy, issue and pull-request templates and a citation file are in the repository.
 - **Diagrams of how it works.** The README now shows the analysis pipeline and the layers of a review as drawings, in light and dark.

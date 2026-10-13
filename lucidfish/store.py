@@ -33,7 +33,7 @@ from . import ratings
 from .config import data_dir
 from .insights import VERSION as INSIGHTS_VERSION
 from .insights import aggregate as aggregate_insights
-from .insights import game_insights
+from .insights import game_insights, progress
 from .spelling import british
 
 _lock = threading.Lock()
@@ -464,8 +464,10 @@ def aggregate_stats(profile_id: int, games: list[dict] | None = None, time_class
         o["acpl"] = round(sum(o["acpl"]) / len(o["acpl"]), 1) if o["acpl"] else None
     by_class = {} if time_class else {
         tc: _record([g for g in games if g.get("time_class") == tc]) for tc in time_class_counts(games)}
+    per_game = _insights(profile_id, time_class)
     return {
-        **aggregate_insights(_insights(profile_id, time_class)),
+        **aggregate_insights(per_game),
+        "progress": progress(games, per_game),
         "time_class": time_class or "",
         "by_time_class": by_class,
         "games": len(games),
@@ -490,11 +492,11 @@ def _insights(profile_id: int, time_class: str | None = None) -> list[dict]:
     for r in rows:
         stored = json.loads(r["insights"]) if r["insights"] else None
         if stored and stored.get("v", 1) >= INSIGHTS_VERSION:
-            out.append(stored)
+            out.append({**stored, "game_id": r["id"]})
             continue
         game = get_game(r["id"]) or {}
         data = game_insights(game.get("moves", []), r["user_side"], r["result"] or "", r["time_class"] or "")
-        out.append(data)
+        out.append({**data, "game_id": r["id"]})
         backfill.append((json.dumps(data, separators=(",", ":")), r["id"]))
     if backfill:
         with _db(write=True) as c:

@@ -415,7 +415,7 @@ make sure it works before analysing.
 | **Ollama** | on your computer | [Ollama](https://ollama.com) + a pulled model | `qwen3:8b` | Private and free; uses your CPU/GPU |
 | **Custom OpenAI-compatible** | on your computer (or any server) | a server URL, e.g. LM Studio `http://localhost:1234/v1` | — | Also works with llama.cpp, vLLM, LocalAI |
 | **OpenAI** | cloud | `OPENAI_API_KEY` | `gpt-4.1-mini` | |
-| **Anthropic (Claude)** | cloud | `ANTHROPIC_API_KEY` | `claude-opus-5-5` | `claude-sonnet-5-5` and `claude-haiku-5-5` are cheaper; Haiku is ideal as the main model with Opus or Sonnet as the second |
+| **Anthropic (Claude)** | cloud | `ANTHROPIC_API_KEY` | `claude-opus-5-5` | `claude-sonnet-5-5` and `claude-haiku-5-5` are cheaper; Haiku is ideal as the main model with Opus or Sonnet as the second. A key created outside a workspace also needs `ANTHROPIC_WORKSPACE_ID` |
 | **Google Gemini** | cloud | `GEMINI_API_KEY` | `gemini-2.5-flash` | |
 | **OpenRouter** | cloud | `OPENROUTER_API_KEY` | `openai/gpt-4.1-mini` | One key, hundreds of models |
 | **Groq** | cloud | `GROQ_API_KEY` | `llama-3.3-70b-versatile` | Very fast open-weight models |

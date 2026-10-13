@@ -14,6 +14,7 @@ support them; the AI coach turns them into advice, it never invents them.
 
 from __future__ import annotations
 
+import re
 from collections import Counter
 
 import chess
@@ -222,6 +223,83 @@ def findings(per_game: list[dict]) -> list[dict]:
                             "move, ask: what does my opponent threaten?"})
     order = {"weakness": 0, "strength": 1, "info": 2}
     return sorted(out, key=lambda f: order[f["kind"]])
+
+
+# ------------------------------------------------------------------ over time
+
+RECENT_MAX = 10       # "recent" is the last games, at most this many
+_DATE = re.compile(r"^\d{4}\.\d{2}\.\d{2}$")
+
+# (key, label, higher is better, smallest change worth calling a change)
+PROGRESS_METRICS = (
+    ("accuracy", "Accuracy", True, 3.0),
+    ("score", "Score", True, 10.0),
+    ("blunders", "Blunders per game", False, 0.3),
+    ("mistakes", "Mistakes per game", False, 0.3),
+    ("missed_threats", "Missed threats per game", False, 0.3),
+)
+
+
+def timeline(games: list[dict], per_game: list[dict]) -> list[dict]:
+    """One row per game in the order they were played (undated games first, in analysis order)."""
+    facts = {g.get("game_id"): (g.get("facts") or {}) for g in per_game}
+    patterns = {g.get("game_id"): (g.get("patterns") or {}) for g in per_game}
+    rows = []
+    for g in games:
+        date = g.get("date") or ""
+        rows.append({"id": g["id"], "date": date if _DATE.match(date) else "", "accuracy": g.get("accuracy"),
+                     "acpl": g.get("acpl"), "blunders": g.get("blunders") or 0, "mistakes": g.get("mistakes") or 0,
+                     "result": _user_result(g.get("result") or "", (g.get("user_side") or "").lower()),
+                     "time_class": g.get("time_class") or "", "opening": g.get("opening") or "",
+                     "opponent": g.get("black") if (g.get("user_side") or "").lower() == "white" else g.get("white"),
+                     "missed_threats": facts.get(g["id"], {}).get("missed_threats", 0),
+                     "patterns": patterns.get(g["id"], {})})
+    rows.sort(key=lambda r: (r["date"], r["id"]))
+    return rows
+
+
+def _measures(rows: list[dict]) -> dict:
+    accs = [r["accuracy"] for r in rows if r["accuracy"] is not None]
+    scored = [r for r in rows if r["result"]]
+    n = max(1, len(rows))
+    return {"games": len(rows),
+            "accuracy": round(sum(accs) / len(accs), 1) if accs else None,
+            "score": round(_score(scored)) if scored else None,
+            "blunders": round(sum(r["blunders"] for r in rows) / n, 2),
+            "mistakes": round(sum(r["mistakes"] for r in rows) / n, 2),
+            "missed_threats": round(sum(r["missed_threats"] for r in rows) / n, 2),
+            "patterns": {pid: round(sum(r["patterns"].get(pid, 0) for r in rows) / n, 2)
+                         for pid in {k for r in rows for k in r["patterns"]}}}
+
+
+def progress(games: list[dict], per_game: list[dict]) -> dict:
+    """How the most recent games compare with the ones before them: the per-game timeline, both groups'
+    measures and the differences that are big enough to mean something (`changes`, verified). Needs at
+    least MIN_GROUP games in each group; until then only the timeline is filled in."""
+    rows = timeline(games, per_game)
+    out: dict = {"series": rows, "recent": None, "earlier": None, "changes": []}
+    if len(rows) < 2 * MIN_GROUP:
+        return out
+    n_recent = min(RECENT_MAX, len(rows) // 2)
+    earlier, recent = rows[:-n_recent], rows[-n_recent:]
+    out["earlier"], out["recent"] = _measures(earlier), _measures(recent)
+    for key, label, higher_better, step in PROGRESS_METRICS:
+        a, b = out["earlier"][key], out["recent"][key]
+        if a is None or b is None:
+            continue
+        delta = round(b - a, 2)
+        unit = "%" if key in ("accuracy", "score") else ""
+        verdict = "same" if abs(delta) < step else "better" if (delta > 0) == higher_better else "worse"
+        out["changes"].append({"id": key, "label": label, "earlier": a, "recent": b, "delta": delta,
+                               "unit": unit, "verdict": verdict})
+    for pid in sorted({*out["earlier"]["patterns"], *out["recent"]["patterns"]} - {"missed_threat"}):  # counted above
+        a, b = out["earlier"]["patterns"].get(pid, 0.0), out["recent"]["patterns"].get(pid, 0.0)
+        delta = round(b - a, 2)
+        if abs(delta) >= 0.3 and max(a, b) >= 0.5:
+            out["changes"].append({"id": f"pattern:{pid}", "label": f"{PATTERNS.get(pid, pid)} per game",
+                                   "earlier": a, "recent": b, "delta": delta, "unit": "",
+                                   "verdict": "better" if delta < 0 else "worse"})
+    return out
 
 
 def aggregate(per_game: list[dict]) -> dict:

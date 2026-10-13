@@ -66,7 +66,8 @@ def test_review_and_profile_json_become_the_texts_the_checkers_expect():
     assert profile.startswith("You stand well.\n\n### ⏱ By time control\n- Blitz: ok")
     assert "- **Hanging pieces** — twice" in profile and "### ✓ Working well" not in profile
     assert "### ⏱" not in schemas.profile_markdown(json.dumps({"intro": "x", "weaknesses": ["y"]}), "rapid")
-    assert schemas.profile_schema("blitz")["required"] == ["intro", "weaknesses", "strengths", "openings", "train"]
+    assert schemas.profile_schema("blitz")["required"] == ["intro", "weaknesses", "strengths", "progress", "openings",
+                                                           "train"]
     for schema in (schemas.NOTE, schemas.WINDOW, schemas.CHAPTER, schemas.REVIEW, schemas.POSITION):
         assert schema["additionalProperties"] is False and set(schema["required"]) == set(schema["properties"])
 

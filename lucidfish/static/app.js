@@ -50,6 +50,18 @@ function md(text) {
   return out;
 }
 
+/** A coach's note as paragraphs. Notes written before the coach was asked for paragraphs are one long
+ *  line; those are split at sentence boundaries into paragraphs of two or three sentences. */
+function noteHtml(text) {
+  const t = String(text || "").trim();
+  if (!t || t.includes("\n")) return md(t);
+  const sentences = t.split(/(?<=[.!?])\s+(?=[A-Z0-9"'(“])/);
+  if (sentences.length <= 3) return md(t);
+  const per = sentences.length <= 6 ? 2 : 3, paras = [];
+  for (let i = 0; i < sentences.length; i += per) paras.push(sentences.slice(i, i + per).join(" "));
+  return md(paras.join("\n\n"));
+}
+
 function toast(message, bad = false) {
   const el = document.createElement("div");
   el.className = "toast" + (bad ? " bad" : "");
@@ -233,6 +245,7 @@ function showPage(name, fromRoute = false) {
   if (name === "analyse") renderTcBars();
   if (name === "editor") ensureEditor();
   if (name === "train") showTrainPage();
+  if (name === "stats") loadDashboard().then(renderStatsPage);
   if (name !== "game" && state.explore) Engine.stop();   // don't keep analysing a board nobody sees
   if (name === "game") {
     ensureBoard();
@@ -286,7 +299,7 @@ async function route() {
   } else if (page === "game" && state.game) {
     showPage("game", true);
   } else {
-    showPage(["dashboard", "games", "train", "analyse", "editor", "learn"].includes(page) ? page : "dashboard", true);
+    showPage(["dashboard", "games", "train", "analyse", "editor", "learn", "stats"].includes(page) ? page : "dashboard", true);
   }
 }
 window.addEventListener("popstate", route);
@@ -1047,6 +1060,7 @@ function setTc(tc) {
   else if (state.page === "analyse") loadRecentGames();
   else if (state.page === "train") renderTrainPage();
   else if (state.page === "learn") showLearnPage();
+  else if (state.page === "stats") loadDashboard().then(renderStatsPage);
 }
 
 /* ================================================================ dashboard */
@@ -1096,6 +1110,7 @@ async function loadDashboard() {
   state.savedGames = d.games || [];
   state.dashLoaded = true;
   const s = d.stats || {};
+  state.stats = s;
   $("dashTitle").textContent = `Welcome back, ${d.profile.name.split(" ")[0]}`;
   loadLearn().then(() => renderFocus($("focus"), $("focusCard")));
   const tcName = state.tc ? cap(state.tc) : "";
@@ -1108,6 +1123,7 @@ async function loadDashboard() {
       + stat("mistakes / game", s.mistakes_per_game)
     : state.tc ? `<div class="empty small">No ${esc(state.tc)} games analysed yet.</div>` : "";
   renderInsights(s);
+  renderProgressCard(s.progress);
   const review = state.tc ? d.profile.summaries?.[state.tc] : d.profile.summary;
   const waiting = !state.tc
     ? (s.games ? "Analyse one more game and your coach will write a review of your play." : "Analyse a couple of your games and your coach will write a review of your play here.")
@@ -1152,6 +1168,140 @@ function renderInsights(s) {
       + `<span class="meta">${p.count}× in ${p.games} game${p.games === 1 ? "" : "s"}</span></div>`).join("")
       + `<p class="small" style="margin:8px 0 0">Found in the moves the engine marked as inaccuracies, mistakes or blunders.</p>`
     : `<div class="empty small">No recurring mistake types yet.</div>`;
+}
+
+/* ---------------------------------------------------------------- progress over time */
+
+const VERDICT_ICONS = { better: "▲", worse: "▼", same: "=" };
+const VERDICT_WORDS = { better: "better", worse: "worse", same: "no change" };
+const fmtVal = (c, v) => `${c.unit === "%" ? Math.round(v) : v}${c.unit}`;
+const fmtDelta = (c) => `${c.delta > 0 ? "+" : ""}${c.unit === "%" ? Math.round(c.delta) : c.delta}${c.unit}`;
+
+/** The Home card: the changes that matter, then and now. */
+function renderProgressCard(prog) {
+  const card = $("progressCard");
+  const changed = (prog?.changes || []).filter((c) => c.verdict !== "same");
+  card.classList.toggle("hidden", !prog?.recent);
+  if (!prog?.recent) return;
+  const head = `<p class="small" style="margin:0 0 8px">Your last ${prog.recent.games} games against the ${prog.earlier.games} before them.</p>`;
+  $("progress").innerHTML = head + (changed.length
+    ? changed.slice(0, 4).map((c) => `<div class="finding ${c.verdict}"><span class="f-icon">${VERDICT_ICONS[c.verdict]}</span>`
+      + `<span><b>${esc(c.label)}</b>: ${fmtVal(c, c.earlier)} then, ${fmtVal(c, c.recent)} now (${VERDICT_WORDS[c.verdict]})</span></div>`).join("")
+    : `<div class="finding"><span class="f-icon">=</span><span>No clear change yet: your recent games look much like the earlier ones.</span></div>`);
+}
+$("seeStats").addEventListener("click", () => showPage("stats"));
+
+const CHART = { w: 680, h: 230, l: 40, r: 12, t: 12, b: 30 };
+
+function rolling(values, win) {
+  const out = [];
+  for (let i = 0; i < values.length; i++) {
+    const slice = values.slice(Math.max(0, i - win + 1), i + 1).filter((v) => v != null);
+    out.push(slice.length ? slice.reduce((a, b) => a + b, 0) / slice.length : null);
+  }
+  return out;
+}
+
+function gameLabel(r) {
+  return `${r.date || "undated"} · vs ${r.opponent || "?"}${r.result ? ` · ${{ W: "win", L: "loss", D: "draw" }[r.result]}` : ""}`;
+}
+
+function chartScaffold(n, yMin, yMax, fmt) {
+  const { w, h, l, r, t, b } = CHART;
+  const x = (i) => l + (n > 1 ? (i * (w - l - r)) / (n - 1) : (w - l - r) / 2);
+  const y = (v) => t + (h - t - b) * (1 - (v - yMin) / (yMax - yMin || 1));
+  let grid = "";
+  for (let k = 0; k <= 4; k++) {
+    const v = yMin + ((yMax - yMin) * k) / 4;
+    grid += `<line class="grid" x1="${l}" x2="${w - r}" y1="${y(v)}" y2="${y(v)}"/>`
+      + `<text x="${l - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`;
+  }
+  return { x, y, grid, w, h, l, r, t, b };
+}
+
+function xLabels(rows, sc) {
+  const n = rows.length, picks = n <= 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, a) => a.indexOf(v) === i);
+  return picks.map((i) => `<text x="${sc.x(i)}" y="${sc.h - 8}" text-anchor="${i === 0 ? "start" : i === n - 1 ? "end" : "middle"}">`
+    + `${esc(rows[i].date || `game ${i + 1}`)}</text>`).join("");
+}
+
+/** A single measure per game, with its rolling average over `win` games as the headline line. */
+function lineChart(rows, key, { yMin = 0, yMax = 100, fmt = (v) => `${Math.round(v)}`, win = 5, label = "", raw = true } = {}) {
+  const values = rows.map((r) => r[key]), avg = rolling(values, win), n = rows.length;
+  const sc = chartScaffold(n, yMin, yMax, fmt);
+  const pts = (vals) => vals.map((v, i) => (v == null ? null : `${sc.x(i)},${sc.y(v)}`));
+  const path = (vals) => pts(vals).filter(Boolean).join(" ");
+  const slot = (sc.w - sc.l - sc.r) / Math.max(1, n);
+  const hits = rows.map((r, i) => `<g><rect class="hit" x="${sc.x(i) - slot / 2}" y="${sc.t}" width="${slot}" height="${sc.h - sc.t - sc.b}">`
+    + `<title>${esc(gameLabel(r))}
+${esc(label)}: ${values[i] == null ? "—" : fmt(values[i])}${avg[i] != null ? ` · ${win}-game average ${fmt(avg[i])}` : ""}</title></rect>`
+    + (raw && values[i] != null && n <= 40 ? `<circle class="dot" cx="${sc.x(i)}" cy="${sc.y(values[i])}" r="4"/>` : "") + `</g>`).join("");
+  return `<svg class="chart" viewBox="0 0 ${sc.w} ${sc.h}" role="img" aria-label="${esc(label)} per game">${sc.grid}
+    ${raw ? `<polyline class="raw" points="${path(values)}"/>` : ""}<polyline class="avg" points="${path(avg)}"/>${hits}${xLabels(rows, sc)}</svg>
+    <div class="chart-legend"><span><span class="sw sw-line" style="background:var(--accent)"></span>${esc(label)}, ${win}-game average</span>
+    ${raw ? `<span><span class="sw sw-line" style="background:var(--accent);opacity:.35"></span>each game</span>` : ""}</div>`;
+}
+
+/** Stacked counts per game (blunders on mistakes), with a 2px gap between segments and bars. */
+function stackedBars(rows, series) {
+  const n = rows.length, totals = rows.map((r) => series.reduce((a, s) => a + (r[s.key] || 0), 0));
+  const yMax = Math.max(3, ...totals);
+  const sc = chartScaffold(n, 0, yMax, (v) => `${Math.round(v)}`);
+  const slot = (sc.w - sc.l - sc.r) / Math.max(1, n), bw = Math.max(2, Math.min(18, slot - 2));
+  const bars = rows.map((r, i) => {
+    let top = 0, parts = "";
+    for (const s of series) {
+      const v = r[s.key] || 0;
+      if (!v) continue;
+      const y1 = sc.y(top + v), y0 = sc.y(top);
+      parts += `<rect x="${sc.x(i) - bw / 2}" y="${y1 + (top ? 1 : 0)}" width="${bw}" height="${Math.max(0, y0 - y1 - (top ? 1 : 0))}" rx="2" fill="${s.color}"/>`;
+      top += v;
+    }
+    const title = `${gameLabel(r)}
+${series.map((s) => `${s.label}: ${r[s.key] || 0}`).join(" · ")}`;
+    return `<g><rect class="hit" x="${sc.x(i) - slot / 2}" y="${sc.t}" width="${slot}" height="${sc.h - sc.t - sc.b}"><title>${esc(title)}</title></rect>${parts}</g>`;
+  }).join("");
+  return `<svg class="chart" viewBox="0 0 ${sc.w} ${sc.h}" role="img" aria-label="Blunders and mistakes per game">${sc.grid}${bars}${xLabels(rows, sc)}</svg>
+    <div class="chart-legend">${series.map((s) => `<span><span class="sw" style="background:${s.color}"></span>${esc(s.label)}</span>`).join("")}</div>`;
+}
+
+function renderStatsPage() {
+  const s = state.stats || {}, prog = s.progress || {}, rows = prog.series || [];
+  const body = $("statsBody");
+  if (!state.profile) { body.innerHTML = `<div class="empty"><div class="big">♞</div>Create a profile and analyse some games first.</div>`; return; }
+  if (!rows.length) {
+    body.innerHTML = `<div class="empty small">No ${state.tc ? `${esc(state.tc)} ` : ""}games analysed yet.</div>`;
+    return;
+  }
+  const scored = rows.map((r) => (r.result === "W" ? 100 : r.result === "D" ? 50 : r.result === "L" ? 0 : null));
+  const withScore = rows.map((r, i) => ({ ...r, score: scored[i] }));
+  const card = (title, note, inner) => `<div class="card"><div class="card-head"><h2>${title}</h2></div>${note ? `<p class="small" style="margin:0 0 10px">${note}</p>` : ""}${inner}</div>`;
+  let html = "";
+  if (prog.recent) {
+    html += card("Then and now", `Your last ${prog.recent.games} games against the ${prog.earlier.games} before them. A change is only called one when it is big enough to mean something.`,
+      `<div class="progress-grid">${(prog.changes || []).map((c) => `<div class="progress-metric"><div class="lbl">${esc(c.label)}</div>`
+        + `<div class="vals"><span class="then">${fmtVal(c, c.earlier)}</span><span aria-hidden="true">→</span><span>${fmtVal(c, c.recent)}</span>`
+        + `<span class="delta ${c.verdict}">${VERDICT_ICONS[c.verdict]} ${c.verdict === "same" ? "no change" : fmtDelta(c)}</span></div></div>`).join("")}</div>`);
+  } else {
+    html += `<p class="small">The then-and-now comparison appears after 6 analysed games; the charts fill in from the first.</p>`;
+  }
+  const n = rows.length, win = n >= 20 ? 10 : 5;
+  html += `<div class="grid-2">`
+    + card("Accuracy", "Lichess method; higher is better.", lineChart(rows, "accuracy", { yMin: 0, yMax: 100, fmt: (v) => `${Math.round(v)}%`, win, label: "Accuracy" }))
+    + card("Results", `Your score over the last ${win} games: a win counts 100, a draw 50. Hover a point for that game's result.`,
+      lineChart(withScore, "score", { yMin: 0, yMax: 100, fmt: (v) => `${Math.round(v)}%`, win, label: "Score", raw: false }))
+    + card("Blunders and mistakes", "Per game, as the engine classified your moves.",
+      stackedBars(rows, [{ key: "mistakes", label: "Mistakes", color: "var(--c-mistake)" }, { key: "blunders", label: "Blunders", color: "var(--c-blunder)" }]))
+    + card("Missed threats", "Times a move ignored a threat that was already on the board.",
+      lineChart(rows, "missed_threats", { yMin: 0, yMax: Math.max(4, Math.ceil(Math.max(...rows.map((r) => r.missed_threats || 0)) / 4) * 4),
+        fmt: (v) => `${Math.round(v)}`, win, label: "Missed threats" }))
+    + `</div>`;
+  html += `<div class="card"><details class="stats-details"><summary>Every game as a table</summary><div style="overflow:auto"><table class="stats-table"><thead><tr>
+      <th>Date</th><th>Opponent</th><th>Result</th><th>Time control</th><th class="num">Accuracy</th><th class="num">Blunders</th><th class="num">Mistakes</th><th class="num">Missed threats</th></tr></thead><tbody>`
+    + [...rows].reverse().map((r) => `<tr><td>${esc(r.date || "—")}</td><td>${esc(r.opponent || "?")}</td><td>${resultChip(r.result)}</td><td>${esc(r.time_class || "—")}</td>`
+      + `<td class="num">${r.accuracy != null ? `${r.accuracy}%` : "—"}</td><td class="num">${r.blunders}</td><td class="num">${r.mistakes}</td><td class="num">${r.missed_threats}</td></tr>`).join("")
+    + `</tbody></table></div></details></div>`;
+  body.innerHTML = html;
 }
 
 function resultFor(g) {
@@ -1368,7 +1518,9 @@ async function fetchChesscom(user, tc = "") {
   const archives = (await r.json()).archives || [];
   const games = [];
   for (const url of archives.slice(tc ? -12 : -3).reverse()) {
-    const month = await (await fetch(url)).json();
+    const mr = await fetch(url);
+    if (!mr.ok) throw new Error(`chess.com answered HTTP ${mr.status}`);
+    const month = await mr.json();
     for (const g of (month.games || []).reverse()) {
       if (!g.pgn || !["chess", "chess960"].includes(g.rules || "chess")) continue;
       if (tc && g.time_class !== tc) continue;
@@ -2391,7 +2543,7 @@ function renderExplain(m) {
   }
   if (m.expl) {
     html += (opponent ? `<span class="opp-label">What your opponent is up to</span>` : m.flow ? `<div class="section-label">Coach's note</div>` : "")
-      + `<div class="md">${md(m.expl)}</div>` + engineChecks(m.checks);
+      + `<div class="md">${noteHtml(m.expl)}</div>` + engineChecks(m.checks);
   } else if (m.flow) {
     /* the commentary line says it all */
   } else if (g.jobId) {
@@ -2523,7 +2675,7 @@ function renderPractice() {
   if (p.result || p.showAnswer) html += `<button class="secondary sm" data-pa="explore" title="Move the pieces yourself; the engine analyses (E)">🔍 Explore</button>`;
   html += `<div class="spacer"></div><button class="ghost sm" data-pa="exit">${puzzle ? "See the game" : "Exit practice"}</button></div>`;
   if (puzzle && (p.result?.solved || p.showAnswer) && m.expl) {
-    html += `<div class="section-label">Coach's note on ${esc(m.san)}</div><div class="md">${md(m.expl)}</div>`;
+    html += `<div class="section-label">Coach's note on ${esc(m.san)}</div><div class="md">${noteHtml(m.expl)}</div>`;
   }
   if (p.result || p.showAnswer) html += learnLinks({ tags: m.tags, threat: m.threat, themes: puzzle?.themes || [] });
   if (p.showAnswer) {
@@ -3251,7 +3403,7 @@ function renderPosition() {
   $("moveList").innerHTML = `<div class="small" style="grid-column: span 3">Position mode — there is no move list.</div>`;
   state.previewMap = {};
   let html = `<div class="expl-title"><span class="san">Position assessment</span><span class="small">${esc(d.perspective)}'s perspective · ${esc(d.turn)} to move</span></div>`;
-  html += d.commentary ? `<div class="md">${md(d.commentary)}</div>` : `<p class="small">No written assessment (the AI coach is off or unavailable). The engine lines are below.</p>`;
+  html += d.commentary ? `<div class="md">${noteHtml(d.commentary)}</div>` : `<p class="small">No written assessment (the AI coach is off or unavailable). The engine lines are below.</p>`;
   html += `<div class="section-label">Engine lines · click to play one out</div>`;
   d.lines.forEach((c, k) => {
     state.previewMap[`pos${k}`] = { steps: c.steps || [], base: d.fen, label: `${c.san} line` };
@@ -3436,6 +3588,7 @@ function renderExpert() {
   $("setExpertModel").placeholder = p.default_model || "model name";
   $("expertModelList").innerHTML = p.models.map((m) => `<option value="${esc(m)}">`).join("");
   $("setExpertKey").value = "";
+  showKeyEntry("expertKeyEntry", "expertKeySaved", !p.key.present);
   $("expertKeyStatus").textContent = p.key.present ? `✓ Key saved (${p.key.hint})`
     : p.needs_key ? `No ${p.label} key saved yet.` : "Optional — only needed if your server requires one.";
   const main = spec(draft.provider);
@@ -3446,6 +3599,8 @@ function renderExpert() {
       + "The running commentary stays with your main model.";
 }
 $("setExpertProvider").addEventListener("change", () => { $("setExpertModel").value = ""; $("testExpertResult").textContent = ""; renderExpert(); });
+$("replaceExpertKey").addEventListener("click", () => { showKeyEntry("expertKeyEntry", "expertKeySaved", true, true); });
+$("cancelExpertKey").addEventListener("click", () => { $("setExpertKey").value = ""; showKeyEntry("expertKeyEntry", "expertKeySaved", false); });
 $("saveExpertKey").addEventListener("click", async () => {
   const id = $("setExpertProvider").value, key = $("setExpertKey").value.trim();
   if (!id || !key) { toast("Paste a key first.", true); return; }
@@ -3503,17 +3658,32 @@ function renderProviders() {
   }
 }
 
+/** A saved key shows as a status line with Replace/Remove; the paste box only appears when there is
+ *  no key or the user asks to replace it. The entry row keeps a Cancel button only while replacing. */
+function showKeyEntry(entryId, savedId, entry, replacing = false) {
+  $(entryId).classList.toggle("hidden", !entry);
+  $(savedId).classList.toggle("hidden", entry);
+  $(entryId).querySelector("button.ghost").classList.toggle("hidden", !replacing);
+  if (replacing) $(entryId).querySelector("input").focus();
+}
+
 function renderKeyStatus(key) {
   const p = spec();
   const where = { env: `from the ${p.key_env} environment variable`, keychain: `stored in ${state.settings.secure_store || "your system keychain"}`,
     session: "kept in memory for this session only" }[key.source];
-  $("keyStatus").innerHTML = key.present
-    ? `✓ Key ${esc(where)} <span class="mono">(${esc(key.hint)})</span>`
+  showKeyEntry("keyEntry", "keySaved", !key.present);
+  $("keyStatus").innerHTML = key.present ? `✓ Key ${esc(where)} <span class="mono">(${esc(key.hint)})</span>` : "";
+  $("keyNote").textContent = key.present
+    ? (key.source === "env" ? "To change it, edit the environment variable or your .env file." : "")
     : (p.needs_key ? "No key saved yet." : "Optional — only needed if your server requires one.")
-      + (state.settings.secure_store ? ` Keys are saved in ${esc(state.settings.secure_store)}.`
-        : ` No secure credential store was found, so a saved key lasts until Lucidfish stops — or set ${esc(p.key_env)} in a .env file.`);
-  $("removeKey").classList.toggle("hidden", !(key.present && key.source !== "env"));
+      + (state.settings.secure_store ? ` Keys are saved in ${state.settings.secure_store}.`
+        : ` No secure credential store was found, so a saved key lasts until Lucidfish stops — or set ${p.key_env} in a .env file.`);
+  $("replaceKey").classList.toggle("hidden", key.source === "env");
+  $("removeKey").classList.toggle("hidden", key.source === "env");
 }
+
+$("replaceKey").addEventListener("click", () => { showKeyEntry("keyEntry", "keySaved", true, true); });
+$("cancelKey").addEventListener("click", () => { $("setKey").value = ""; renderKeyStatus(spec().key); });
 
 $("saveKey").addEventListener("click", async () => {
   const key = $("setKey").value.trim();

@@ -47,3 +47,40 @@ def test_stats_include_insights_and_backfill_old_games():
     assert {p["id"] for p in stats["patterns"]} == {"hanging", "rushed", "time_trouble", "missed_mate"}
     with store._db() as c:
         assert c.execute("SELECT insights FROM games").fetchone()[0]    # saved for next time
+
+
+def _game(i, acc, blunders, result="1-0", threats=0):
+    return ({"id": i, "date": f"2026.01.{i:02d}", "accuracy": acc, "acpl": 50, "blunders": blunders, "mistakes": 1,
+             "result": result, "user_side": "white", "time_class": "rapid", "opening": "", "white": "Me",
+             "black": f"opp{i}"},
+            {"game_id": i, "patterns": {"hanging": blunders}, "facts": {"missed_threats": threats, "result": "W"}})
+
+
+def test_progress_compares_recent_games_with_earlier_ones():
+    early = [_game(i, 60, 3, "0-1", threats=2) for i in range(1, 6)]
+    late = [_game(i, 72, 1, "1-0", threats=0) for i in range(6, 11)]
+    games, per_game = zip(*(early + late), strict=True)
+    prog = insights.progress(list(reversed(games)), list(per_game))     # list_games order is newest first
+    assert [r["id"] for r in prog["series"]] == list(range(1, 11))      # the timeline is oldest first
+    assert prog["recent"]["games"] == 5 and prog["earlier"]["games"] == 5
+    verdicts = {c["id"]: c["verdict"] for c in prog["changes"]}
+    assert verdicts["accuracy"] == "better" and verdicts["score"] == "better" and verdicts["blunders"] == "better"
+    assert verdicts["mistakes"] == "same" and verdicts["missed_threats"] == "better"
+    assert verdicts["pattern:hanging"] == "better"
+    # Too few games: only the timeline.
+    few = insights.progress([g for g, _ in early[:4]], [p for _, p in early[:4]])
+    assert few["recent"] is None and few["changes"] == [] and len(few["series"]) == 4
+
+
+def test_progress_section_is_written_from_the_statistics_when_the_coach_leaves_it_out():
+    from lucidfish.review_check import tidy_profile_review
+    stats = {"progress": {"recent": {"games": 5}, "earlier": {"games": 5}, "changes": [
+        {"id": "accuracy", "label": "Accuracy", "earlier": 60.0, "recent": 72.0, "delta": 12.0, "unit": "%",
+         "verdict": "better"},
+        {"id": "mistakes", "label": "Mistakes per game", "earlier": 1.0, "recent": 1.6, "delta": 0.6, "unit": "",
+         "verdict": "worse"},
+    ]}}
+    text = tidy_profile_review("You are improving.\n\n### Weaknesses\n- Hanging pieces.", stats)
+    assert "### 📈 Progress" in text and "**Improving**: accuracy 60.0% → 72.0%" in text
+    assert "**Slipping**: mistakes per game 1.0 → 1.6" in text
+    assert "📈" not in tidy_profile_review("Intro.\n### Weaknesses\n- x", {"progress": {"recent": None}})

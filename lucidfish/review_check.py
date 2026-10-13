@@ -549,6 +549,7 @@ def order_game_review(text: str) -> str:
 _SECTION_WORDS = (
     ("time_controls", re.compile(r"time control|by time|bullet|blitz|rapid|classical", re.I)),
     ("openings", re.compile(r"opening", re.I)),
+    ("progress", re.compile(r"progress|over time|trend|recent games|improv", re.I)),
     ("train", re.compile(r"train|next|practi|plan|focus|to do", re.I)),
     ("strengths", re.compile(r"working|strength|going well|well|positive", re.I)),
     ("weaknesses", re.compile(r"holding|weakness|improve|work on|problem|issue|mistake", re.I)),
@@ -597,6 +598,25 @@ def _stats_fallback(kind: str, stats: dict) -> list[str]:
             best = max(phases, key=phases.get)
             out = [f"- Your strongest phase is the {best} ({phases[best]}% accuracy)."]
         return out
+    if kind == "progress":
+        prog = stats.get("progress") or {}
+        changed = [c for c in prog.get("changes", []) if c["verdict"] != "same"]
+        if not prog.get("recent"):
+            return []
+        if not changed:
+            return [f"- Your last {prog['recent']['games']} games look much like the {prog['earlier']['games']} "
+                    "before them: no clear change yet."]
+        better = [c for c in changed if c["verdict"] == "better"]
+        worse = [c for c in changed if c["verdict"] == "worse"]
+        fmt = lambda c: f"{c['label'].lower()} {c['earlier']}{c['unit']} → {c['recent']}{c['unit']}"  # noqa: E731
+        out = []
+        if better:
+            out.append(f"- **Improving**: {', '.join(fmt(c) for c in better[:3])} over your last "
+                       f"{prog['recent']['games']} games.")
+        if worse:
+            out.append(f"- **Slipping**: {', '.join(fmt(c) for c in worse[:3])} over your last "
+                       f"{prog['recent']['games']} games.")
+        return out
     if kind == "openings":
         played = [o for o in stats.get("openings") or [] if o.get("games", 0) >= 2]
         score = lambda o: (o["w"] + 0.5 * o["d"]) / o["games"]  # noqa: E731
@@ -614,7 +634,7 @@ def _stats_fallback(kind: str, stats: dict) -> list[str]:
     return []
 
 
-_BULLET_LIMIT = {"time_controls": 5, "weaknesses": 3, "strengths": 2, "openings": 2, "train": 3}
+_BULLET_LIMIT = {"time_controls": 5, "weaknesses": 3, "strengths": 2, "progress": 2, "openings": 2, "train": 3}
 # A section heading the model copied into its bullets: '- ### ⚠ Holding you back: Missed threats ...'.
 _SECTION_NAMES = "|".join(re.escape(t.split(" ", 1)[1]) for _, t, _ in profile_sections())
 _ECHOED_HEADING = re.compile(r"^#{1,6}\s*(?:[^\w\s*]+\s*)?(?:(?:" + _SECTION_NAMES + r")\s*[:—–-]\s*)?", re.I)
@@ -636,6 +656,8 @@ def tidy_profile_review(text: str, stats: dict, time_class: str | None = None) -
     kinds = [k for k, _, _ in sections]
     if time_class is None and len(stats.get("by_time_class") or {}) < 2:
         kinds = [k for k in kinds if k != "time_controls"]
+    if not (stats.get("progress") or {}).get("recent"):     # too few games to compare then with now
+        kinds = [k for k in kinds if k != "progress"]
     intro: list[str] = []
     body: dict[str, list[str]] = {k: [] for k in kinds}
     current: str | None = None

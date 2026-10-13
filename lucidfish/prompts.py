@@ -33,6 +33,7 @@ can reuse between requests instead of re-reading it.
 from __future__ import annotations
 
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 import chess
@@ -329,9 +330,10 @@ def build_move_prompt(
                      f'{side}>"}}]')
         else:
             ideas = "[]"
-        p.append('Reply with a JSON object only, of this shape:\n{"explanation": "<2-7 sentences of flowing '
-                 f"prose: lead with the verdict and the single most important reason, explain {side}'s "
-                 'intention and, if a refutation is given, walk through why it punishes the move>", '
+        p.append('Reply with a JSON object only, of this shape:\n{"explanation": "<2-7 sentences in two or '
+                 "three short paragraphs, separated by a blank line (\\n\\n in the JSON string): first the "
+                 f"verdict and the single most important reason; then {side}'s intention and, if a "
+                 'refutation is given, why it punishes the move; last the lesson or the better move>", '
                  f'"line_ideas": {ideas}}}')
         if ideas != "[]":
             p.append(f"Write one line_ideas entry for each of: {', '.join(ideas_for)}. Describe the purpose "
@@ -691,6 +693,9 @@ PROFILE_SECTIONS = (
      "2-3 bullets, the most persistent first: **the weakness in a few words** — the evidence (how often, "
      "in which games)."),
     ("strengths", "✓ Working well", "1-2 bullets, only what the statistics or reviews show."),
+    ("progress", "📈 Progress",
+     "1-2 bullets comparing your recent games with the earlier ones, using only the 'Progress over time' "
+     "statistics: what has improved and what has not. Leave the list empty if those statistics are absent."),
     ("openings", "♟ Openings",
      "1-2 bullets: the opening that goes best and the one that goes worst, with how many games."),
     ("train", "🎯 Train next", "2-3 concrete things to practise, one line each."),
@@ -737,6 +742,21 @@ _TC_FOCUS = {
 }
 
 
+def progress_lines(progress: dict) -> list[str]:
+    """The verified 'then against now' comparison for the coach's review, or nothing when there are too
+    few games to compare."""
+    recent, earlier = progress.get("recent"), progress.get("earlier")
+    if not recent or not earlier:
+        return []
+    out = [f"Progress over time (verified): the most recent {recent['games']} games against the "
+           f"{earlier['games']} before them. Only the changes marked better or worse are real; treat the "
+           "rest as unchanged."]
+    for c in progress.get("changes", []):
+        out.append(f"  {c['label']}: {c['earlier']}{c['unit']} then, {c['recent']}{c['unit']} now "
+                   f"({c['verdict']})")
+    return out
+
+
 def build_player_summary_prompt(stats: dict, reviews: list, profile: dict | None = None,
                                 time_class: str | None = None) -> str:
     parts = []
@@ -773,6 +793,7 @@ def build_player_summary_prompt(stats: dict, reviews: list, profile: dict | None
     for o in stats.get("openings", []):
         parts.append(f"  Opening: {o['name']} — {o['games']} games, "
                      f"{o['w']}W/{o['l']}L/{o['d']}D, avg cp loss {o['acpl']}")
+    parts += progress_lines(stats.get("progress") or {})
     by_class = stats.get("by_time_class") or {}
     if len(by_class) >= 2:
         parts.append("By time control (verified). If they clearly differ, say how, in one or two sentences: "
@@ -891,6 +912,24 @@ _CAPTURED = re.compile(
     r"(?P<piece2>king|queen|rook|bishop|knight|pawn)\s+(?:on|at)\s+(?P<sq2>[a-h][1-8])", re.I)
 # Sentence breaks, but never inside move notation such as "12. Qc7" or "11... Qc7".
 _SENTENCE = re.compile(r"(?<=[.!?])(?<!\d\.)(?<!\.\.)\s+(?=[A-Z0-9\"'(“])")
+_PARAGRAPHS = re.compile(r"\n\s*\n")
+
+
+def _drop_sentences(text: str, problems: Callable[[str], list]) -> tuple[str, int]:
+    """`text` without the sentences `problems` objects to, paragraph breaks kept. Returns (text, removed)."""
+    paragraphs, removed = [], 0
+    for paragraph in _PARAGRAPHS.split((text or "").strip()):
+        kept = []
+        for sentence in _SENTENCE.split(paragraph.strip()):
+            if not sentence:
+                continue
+            if problems(sentence):
+                removed += 1
+            else:
+                kept.append(sentence)
+        if kept:
+            paragraphs.append(" ".join(kept))
+    return "\n\n".join(paragraphs), removed
 _PIECE_TYPES = {name: chess.PIECE_NAMES.index(name) for name in chess.PIECE_NAMES if name}
 
 
@@ -1028,13 +1067,7 @@ class EvidenceIndex:
 
     def clean(self, text: str) -> tuple[str, int]:
         """Drop sentences that still contain unsupported claims. Returns (text, sentences removed)."""
-        kept, removed = [], 0
-        for sentence in _SENTENCE.split(text.strip()):
-            if self._sentence_problems(sentence):
-                removed += 1
-            else:
-                kept.append(sentence)
-        return " ".join(kept).strip(), removed
+        return _drop_sentences(text, self._sentence_problems)
 
 
 # --------------------------------------------------------------- assessment check
@@ -1203,13 +1236,7 @@ class AssessmentIndex:
 
     def clean(self, text: str) -> tuple[str, int]:
         """Drop sentences whose assessment contradicts the evaluations. Returns (text, sentences removed)."""
-        kept, removed = [], 0
-        for sentence in _SENTENCE.split((text or "").strip()):
-            if self._sentence_problems(sentence):
-                removed += 1
-            else:
-                kept.append(sentence)
-        return " ".join(kept).strip(), removed
+        return _drop_sentences(text, self._sentence_problems)
 
 
 def correction_prompt(problems: list[str]) -> str:

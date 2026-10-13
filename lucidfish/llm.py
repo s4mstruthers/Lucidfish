@@ -211,6 +211,11 @@ class LLMProvider(ABC):
         the results, in this provider's own format."""
         raise ToolsUnsupported(f"{self.spec.label} cannot run tools.")
 
+    def assistant_turn(self, reply: Reply) -> dict:
+        """`reply` as the assistant message to replay, complete (some providers bind hidden reasoning
+        to the message, and a text-only copy would break the conversation)."""
+        return reply.assistant if isinstance(reply.assistant, dict) else {"role": "assistant", "content": reply.text}
+
     def chat(self, system: str, messages: list[dict], *, max_tokens: int | None = None) -> str:
         """Send a conversation; returns the assistant's text."""
         return self.complete(system, messages, max_tokens=max_tokens).text
@@ -267,19 +272,24 @@ def run_tools(llm, system: str, messages: list[dict], tools: list[ToolSpec], han
 
     Works for every provider: tool rounds are replayed in the provider's own message format
     (`tool_turn`). The answer's shape is enforced only on the final request, after the tool calls,
-    because that is the one request every provider lets us constrain. A provider that cannot run
-    tools at all is asked once, without them.
+    because that is the one request every provider lets us constrain. The tools stay on offer for
+    every request of the conversation: a history that contains tool calls is only valid alongside
+    the tools it called, and dropping them would break providers that bind hidden reasoning to the
+    tool set. A provider that cannot run tools at all is asked once, without them.
     """
     complete = getattr(llm, "complete", None)
     if complete is None or not tools:
         return ask(llm, system, messages, max_tokens=max_tokens, schema=schema, effort=effort)
+    plain = lambda: ask(llm, system, messages, max_tokens=max_tokens, schema=schema, effort=effort)  # noqa: E731
+    answer_now = {"role": "user", "content": "Now give your final answer in the required format, using what "
+                                             "the tool results showed. Do not call any more tools."}
     convo = list(messages)
     reply: Reply | None = None
     for _ in range(max_rounds):
         try:
             reply = complete(system, convo, max_tokens=max_tokens, tools=tools, effort=effort)
         except ToolsUnsupported:
-            return ask(llm, system, messages, max_tokens=max_tokens, schema=schema, effort=effort)
+            return plain()
         if not reply.tool_calls:
             break
         results = []
@@ -293,18 +303,24 @@ def run_tools(llm, system: str, messages: list[dict], tools: list[ToolSpec], han
                 on_call(call, out)
         convo += llm.tool_turn(reply, results)
     else:
-        # Out of rounds: ask for the answer with no tools on offer.
-        reply = complete(system, convo, max_tokens=max_tokens, effort=effort)
+        # Out of rounds: ask for the answer, tools still defined so the history stays valid.
+        convo += [answer_now]
+        reply = complete(system, convo, max_tokens=max_tokens, tools=tools, schema=schema, effort=effort)
+        if reply.tool_calls and not reply.text.strip():
+            return plain()
     text = reply.text if reply else ""
     if schema is None:
         return text
     if parse_json(text) is not None:
         return text
     if text.strip():
-        convo += [{"role": "assistant", "content": text}]
-    convo += [{"role": "user", "content": "Now give your final answer in the required JSON format, "
-                                          "using what the tool results showed."}]
-    return complete(system, convo, max_tokens=max_tokens, schema=schema, effort=effort).text
+        turn = getattr(llm, "assistant_turn", None)
+        convo += [turn(reply) if turn else {"role": "assistant", "content": text}]
+    convo += [answer_now]
+    reply = complete(system, convo, max_tokens=max_tokens, tools=tools, schema=schema, effort=effort)
+    if reply.tool_calls and parse_json(reply.text) is None:
+        return plain()
+    return reply.text
 
 
 # --------------------------------------------------------------------- HTTP
@@ -589,7 +605,12 @@ class AnthropicProvider(LLMProvider):
         except ImportError as e:
             raise LLMError("The Anthropic SDK is not installed. Run `pip install anthropic`.", fatal=True) from e
         self._anthropic = anthropic
-        self._client = anthropic.Anthropic(api_key=self.api_key, timeout=cfg.timeout_s, max_retries=2)
+        # An organisation-level key (one not created inside a workspace) must say which workspace
+        # each request belongs to, or the API refuses it with a 400.
+        workspace = os.environ.get("ANTHROPIC_WORKSPACE_ID", "").strip()
+        self._client = anthropic.Anthropic(
+            api_key=self.api_key, timeout=cfg.timeout_s, max_retries=2,
+            default_headers={"anthropic-workspace-id": workspace} if workspace else None)
         version = _claude_version(self.model)
         family, ver = version if version else ("", 0.0)
         # Sampling parameters: accepted up to Opus/Sonnet 4.6 and Haiku 4.5; rejected by every 5.x model.
@@ -601,6 +622,17 @@ class AnthropicProvider(LLMProvider):
 
     def _rejects(self, option: str) -> bool:
         return option in self._rejected.get(self.model, set())
+
+    WORKSPACE_HELP = ("This Anthropic API key is not tied to a workspace, so each request must name one. "
+                      "Set the ANTHROPIC_WORKSPACE_ID environment variable (or a line in .env) to the ID of "
+                      "the workspace to use (it starts with wrkspc_, see Workspaces in the Anthropic "
+                      "console) and restart Lucidfish, or create a key inside a workspace instead.")
+
+    def _bad_request(self, e) -> LLMError:
+        """A 400 the request loop could not fix by dropping an option."""
+        if "workspace" in str(e).lower():
+            return self._fail(self.WORKSPACE_HELP, fatal=True)
+        return self._fail(f"Anthropic error (HTTP {e.status_code}): {e.message}")
 
     def _remember(self, option: str) -> None:
         with self._lock:
@@ -640,6 +672,8 @@ class AnthropicProvider(LLMProvider):
             raise self._fail("Anthropic rate limit reached; try again shortly.") from e
         except a.APIConnectionError as e:
             raise self._fail(f"Cannot reach Anthropic: {e}") from e
+        except a.BadRequestError as e:
+            raise self._bad_request(e) from e
         except a.APIStatusError as e:
             raise self._fail(f"Anthropic error (HTTP {e.status_code}): {e.message}") from e
         if resp.stop_reason == "refusal":
@@ -683,15 +717,20 @@ class AnthropicProvider(LLMProvider):
         return self._client.messages.create(**kwargs)
 
     def tool_turn(self, reply: Reply, results: list[tuple[ToolCall, str]]) -> list[dict]:
-        return [{"role": "assistant", "content": reply.assistant},
+        return [self.assistant_turn(reply),
                 {"role": "user", "content": [{"type": "tool_result", "tool_use_id": call.id, "content": out}
                                              for call, out in results]}]
+
+    def assistant_turn(self, reply: Reply) -> dict:
+        return {"role": "assistant", "content": reply.assistant if reply.assistant is not None else reply.text}
 
     def list_models(self) -> list[str]:
         try:
             return [m.id for m in self._client.models.list(limit=100)]
         except self._anthropic.AuthenticationError as e:
             raise self._fail("Anthropic rejected the API key.", fatal=True) from e
+        except self._anthropic.BadRequestError as e:
+            raise self._bad_request(e) from e
 
 
 _KINDS = {"ollama": OllamaProvider, "openai": OpenAICompatibleProvider, "anthropic": AnthropicProvider}
