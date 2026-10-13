@@ -4,7 +4,7 @@ Newest first. Each [release on GitHub](https://github.com/s4mstruthers/Lucidfish
 version's section here as its description, and the desktop app shows it when it offers the update.
 Write for the people using the app: what they will notice, not how it was done.
 
-## Unreleased
+## 0.5.0
 
 - **See yourself improve.** A new *Stats* page charts your accuracy, results, blunders and mistakes, and missed threats game by game, with a then-and-now comparison of your most recent games against the ones before them. Home shows the changes that matter, and the coach's review gains a *Progress* section that says what has improved and what has not, from those verified numbers only.
 - **Coach's notes in paragraphs.** The coach now writes each note as two or three short paragraphs (verdict, what the line shows, the lesson) instead of one block of text, and notes from earlier analyses are split at sentence boundaries when shown.
