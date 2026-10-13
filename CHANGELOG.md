@@ -7,9 +7,6 @@ Write for the people using the app: what they will notice, not how it was done.
 ## 0.5.2
 
 - **macOS no longer says the app is damaged.** A downloaded Lucidfish now gets macOS's usual "Apple could not verify" message the first time, and *System Settings → Privacy & Security → Open Anyway* opens it. No Terminal command needed.
-
-## 0.5.1
-
 - **Check for updates works again in the desktop app.** Settings → About & updates said "Command check_update not allowed by ACL" instead of checking. Versions before this one cannot update themselves to it: download this release once by hand, and later updates install from inside the app again.
 - **Analysis no longer stalls on forced mates.** A depth-limited search could run for an hour in a position with a forced mate (the demo's Opera game sat on move 14 for that long). Every search now also has a time cap, 30 seconds per position by default (`LUCIDFISH_MAX_SECONDS`).
 
