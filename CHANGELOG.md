@@ -4,7 +4,7 @@ Newest first. Each [release on GitHub](https://github.com/s4mstruthers/Lucidfish
 version's section here as its description, and the desktop app shows it when it offers the update.
 Write for the people using the app: what they will notice, not how it was done.
 
-## Unreleased
+## 0.5.4
 
 - **A tidier Home page.** Progress, patterns and your recent games now sit beside the coach review instead of below it, so there is far less scrolling and no empty column.
 - **The analysis progress bar is back on the game page.** Since 0.5.0 it stayed hidden while a game was being analysed.

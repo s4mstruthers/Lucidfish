@@ -4,4 +4,4 @@
 
 """Lucidfish — Stockfish tells you the best move; Lucidfish tells you why."""
 
-__version__ = "0.5.3"
+__version__ = "0.5.4"
