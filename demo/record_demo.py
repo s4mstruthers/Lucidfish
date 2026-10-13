@@ -4,7 +4,7 @@
 # This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
 """Record a short, captioned demo video of Lucidfish for a post or a README.
 
-    python demo/record_demo.py --app http://127.0.0.1:8420 --rename "s4mstruthers=You"
+    python demo/record_demo.py --app http://127.0.0.1:8420 --anonymise
                                                     # record your running app, games already analysed
     python demo/record_demo.py                      # the configured coach (Ollama by default)
     python demo/record_demo.py --no-coach           # engine-only, for a quick draft
@@ -169,6 +169,32 @@ def pick_game(base: str) -> int:
     return best["id"]
 
 
+def anonymous_names(base: str) -> list[tuple[str, str]]:
+    """Every name in the active profile, mapped to a stand-in: the player's own names and usernames
+    become 'You', each opponent a numbered 'Opponent N' (the same person keeps the same number)."""
+    d = requests.get(f"{base}/api/profile", timeout=15).json()
+    prof, games = d.get("profile") or {}, d.get("games") or []
+    own = {n.strip() for n in (prof.get("name"), prof.get("chesscom_user"), prof.get("lichess_user"))
+           if n and n.strip()}
+    pairs = [(n, "You") for n in own]
+    seen: dict[str, str] = {}
+    # Oldest first, so 'Opponent 1' is the first person you played.
+    for g in sorted(games, key=lambda g: g.get("analysed_at") or ""):
+        for colour in ("white", "black"):
+            name = (g.get(colour) or "").strip()
+            if not name or name.lower() in {o.lower() for o in own} or name.lower() in seen:
+                continue
+            if g.get("user_side") == colour:      # the player's side under a name the profile doesn't list
+                seen[name.lower()] = "You"
+            else:
+                seen[name.lower()] = f"Opponent {sum(v != 'You' for v in seen.values()) + 1}"
+            pairs.append((name, seen[name.lower()]))
+    # Longest first, so 'Sam Smith' is replaced before 'Sam'.
+    pairs.sort(key=lambda p: -len(p[0]))
+    print(f"anonymise: {len(pairs)} names replaced ({sum(v != 'You' for _, v in pairs)} opponents)")
+    return pairs
+
+
 # ------------------------------------------------------------------ the tour ----
 
 CAPTION_CSS = """
@@ -198,7 +224,9 @@ p{font-size:24px;color:#cbd5e1;margin:0;line-height:1.45}
 
 RENAME_JS = """(pairs) => {
     // Swap names in the visible text, now and whenever the app redraws (it re-renders on every page).
-    const rules = pairs.map(([a, b]) => [new RegExp(a.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&'), 'gi'), b]);
+    const esc = (a) => a.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
+    // Whole names only: 'Sam' must not turn 'same' into 'Youe', nor eat part of a longer username.
+    const rules = pairs.map(([a, b]) => [new RegExp('(?<![\\\\w])' + esc(a) + '(?![\\\\w])', 'giu'), b]);
     const fix = (root) => {
         const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
         for (let n = walk.nextNode(); n; n = walk.nextNode()) {
@@ -398,6 +426,8 @@ def main() -> int:
     ap.add_argument("--game", type=int, help="with --app: the game to feature (default: the one with most mistakes)")
     ap.add_argument("--rename", action="append", default=[], metavar="OLD=NEW",
                     help="replace a name on screen while recording (repeatable)")
+    ap.add_argument("--anonymise", action="store_true",
+                    help="with --app: replace every player name and username (you -> 'You', others numbered)")
     ap.add_argument("--pgn", action="append", type=Path, help="game(s) to analyse (default: two built-in games)")
     ap.add_argument("--side", default="black", help="which side the profile played in --pgn games")
     ap.add_argument("--no-coach", action="store_true", help="engine-only: no written explanations")
@@ -430,6 +460,8 @@ def main() -> int:
             raise SystemExit(f"No Lucidfish answers at {base}. "
                              "Copy the address from the app's window or terminal.") from None
         game_id = args.game or pick_game(base)
+        if args.anonymise:
+            rename = rename + anonymous_names(base)    # explicit --rename pairs win: they come first
         with_coach = bool(health.get("coach", {}).get("enabled"))
         print("recording…")
         webm = record(base, game_id, with_coach, args.out.parent, width, height, rename)
