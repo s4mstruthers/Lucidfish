@@ -63,7 +63,6 @@ and in time small local models trained on explanations that have survived the fa
 the desktop apps work but are not yet signed, and the eval set is small. It is ready to use and
 ready for contributors; see [Contributing](#contributing).
 
-
 ## Download
 
 Lucidfish runs on **macOS, Windows and Linux**. Take the file for your system from the
@@ -79,15 +78,15 @@ Stockfish, so there is nothing else to install.
 The apps are not signed with a paid developer certificate, so the system asks once, the first time
 you start one:
 
-- **macOS** says Apple could not check it. Click *Done*, open *System Settings ▸ Privacy & Security*
+- **macOS** says Apple could not check it. Click *Done*, open *System Settings → Privacy & Security*
   and click *Open Anyway* next to Lucidfish (or in Terminal: `xattr -dr com.apple.quarantine
   /Applications/Lucidfish.app`).
 - **Windows** shows *Windows protected your PC*. Click *More info*, then *Run anyway*.
 
 The `.app.tar.gz`, `.sig` and `latest.json` files on the release page are what installed apps use
-to update themselves; you never need them. Later versions install themselves: a banner appears when a new version is out, and *Update and
-restart* installs it in the background (Settings → About & updates checks on demand). Your games and
-settings stay where they are. What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
+to update themselves; you never need them. Later versions install themselves: a banner appears
+when a new version is out, and *Update and restart* installs it in the background (Settings → About &
+updates checks on demand). Your games and settings stay where they are. What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 
 The optional AI coach is set up inside the app (Settings → AI coach): free and private on your own
 computer with [Ollama](https://ollama.com), or with a cloud provider and an API key.
@@ -177,7 +176,7 @@ Prefer to run from source, or want the command line? See [Installation](#install
   Lichess (so "analyse my last 5 rapid games" is two clicks). Each time control gets its own
   coach review, and the overall review compares them. Time controls follow each site's own
   rules: a 30-minute game is rapid on chess.com and classical on Lichess.
-- **Explore any position.** Press 🔍 *Explore* (<kbd>E</kbd>) and move the pieces yourself:
+- **Explore any position.** Press *Explore* (<kbd>E</kbd>) and move the pieces yourself:
   Stockfish runs inside the browser and shows the evaluation and its three best lines as you
   go. Take moves back and forth with the arrow keys.
 - **Share a profile with someone who doesn't run Lucidfish.** Save a profile as a single web
@@ -203,14 +202,13 @@ Prefer to run from source, or want the command line? See [Installation](#install
   how far each game and the whole batch are, how much time is left, and roughly when it
   will be done. Reorder, pause, resume or remove games at any time; the queue survives a
   restart. Time estimates learn how fast your computer is.
-- **A clean, fast workspace.** A sidebar takes you to Home, Learn, Games, Train and the Board; the
-  design is minimal and quick, with light and dark themes, and it works on a phone or tablet too.
-  Moves appear while the game is analysed, with an interactive board,
-  arrows and an evaluation bar, a clickable evaluation graph, buttons that jump between
-  the key moments, variation previews, coach chat, and light and dark themes. Engine hints
-  (best-move arrow, evaluation bar and graph, move highlights) can each be switched off.
-  Several people can share one computer, each with their own profile. It also works on
-  phones and tablets.
+- **A clean, fast workspace.** A sidebar takes you to Home, Learn, Games, Train and the Board;
+  the design is minimal and quick, with light and dark themes, and it works on a phone or tablet
+  too. Moves appear while the game is analysed, with an interactive board, arrows and an
+  evaluation bar, a clickable evaluation graph, buttons that jump between the key moments,
+  variation previews and coach chat. Engine hints (best-move arrow, evaluation bar and graph,
+  move highlights) can each be switched off. Several people can share one computer, each with
+  their own profile.
 - **Export.** Annotated PGN (verdict symbols, evaluations, notes and best lines, ready for a
   Lichess study or ChessBase) or a Markdown report.
 - **Efficient without cutting corners.** Commentary is written for 8 moves per AI request,
@@ -221,22 +219,10 @@ Prefer to run from source, or want the command line? See [Installation](#install
 
 ## How it works
 
-```
- PGN / chess.com / Lichess
-            │
-            ▼
- ┌────────────────────┐  candidate lines, evals,       ┌───────────────────┐
- │ Stockfish          │─ refutations, winning chances ─▶│                   │
- │ (engine.py)        │                                  │  Prompt builder   │
- ├────────────────────┤  hanging pieces, forks, pins,    │  (prompts.py)     │    ┌──────────────┐
- │ Board analysis     │─ mate threats, king safety,    ─▶│  only verified    │───▶│  AI coach    │──▶ explanation
- │ (tactics.py,       │  pawn structure, development     │  evidence goes in │    │  (llm.py)    │   (fact-checked
- │  features.py)      │                                  │                   │    └──────────────┘    against the board)
- ├────────────────────┤  opening name + what masters     │                   │
- │ Opening explorer   │─ play in this position          ─▶│                   │
- │ (opening.py)       │                                  └───────────────────┘
- └────────────────────┘
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/pipeline-dark.svg">
+  <img alt="How Lucidfish analyses a game: Stockfish and board checks in Python establish the facts, the coach model writes from that evidence, and a fact-checker reads every sentence back against the board." src="docs/pipeline-light.svg" width="100%">
+</picture>
 
 The engine and the AI run at the same time: while the coach writes about move 10, Stockfish
 is already analysing move 14. Results appear in the web app as soon as each move is ready.
@@ -269,6 +255,11 @@ the review combines the chapters, and your coach profile combines your reviews a
 patterns found across your games. Only the combining is done by the AI; everything it
 combines has been verified.
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/layers-dark.svg">
+  <img alt="The layers of a review: facts from code at the bottom, then commentary, chapters, the post-game review and the coach profile, each written by the model from the verified layer below." src="docs/layers-light.svg" width="100%">
+</picture>
+
 ### Why it's fast
 
 Writing one AI request per move would be slow, especially with a local model, and would lose
@@ -300,7 +291,7 @@ Lucidfish needs two programs besides itself: **Stockfish** (the engine) and, opt
 an **AI model** for the written explanations.
 
 > **Running an AI model locally is processor-intensive.** Local models use a lot of memory
-> and compute. They run best on a Mac with Apple Silicon or a PC with a recent graphics card.
+> and compute. They run best on a Mac with Apple silicon or a PC with a recent graphics card.
 > On a laptop without a GPU, expect each explanation to take several seconds, and your
 > fans to spin up. Stockfish is also CPU-heavy while it analyses.
 > If your computer struggles, choose a smaller model, set the coaching detail to
@@ -345,7 +336,7 @@ brew install stockfish
 # 2. Local AI (optional — skip if you'll use a cloud provider or engine-only mode)
 brew install ollama          # or download the app from https://ollama.com/download
 ollama serve                 # leave running (the Ollama app does this for you)
-ollama pull llama3.1:8b      # ~5 GB, one-off download
+ollama pull qwen3:8b         # ~5 GB, one-off download
 
 # 3. Lucidfish
 git clone https://github.com/s4mstruthers/Lucidfish.git
@@ -363,7 +354,7 @@ cd Lucidfish
    folders, Program Files, and the Chocolatey, Scoop and winget folders. If it can't find it, set the path in
    **Settings → Analysis → Stockfish**.
 3. **Local AI (optional):** install [Ollama for Windows](https://ollama.com/download), then in a
-   terminal run `ollama pull llama3.1:8b`.
+   terminal run `ollama pull qwen3:8b`.
 4. **Lucidfish:** download this repository (Code → Download ZIP, or `git clone`), open the folder
    and double-click `scripts\start.bat`.
 
@@ -383,7 +374,7 @@ sudo apt install stockfish python3-venv
 
 # 2. Local AI (optional)
 curl -fsSL https://ollama.com/install.sh | sh
-ollama pull llama3.1:8b
+ollama pull qwen3:8b
 
 # 3. Lucidfish
 git clone https://github.com/s4mstruthers/Lucidfish.git
@@ -495,10 +486,10 @@ Under **Settings → AI coach → Second model for the hard parts** you can add 
   takes over its jobs and the game page shows a warning.
 
 A good setup for a laptop is a local main model (e.g. `qwen2.5:7b`) with a small cloud model
-(e.g. `claude-haiku-4-5`, `gpt-4.1-mini` or `gemini-2.5-flash`) as the second model. The
+(e.g. `claude-haiku-5-5`, `gpt-4.1-mini` or `gemini-2.5-flash`) as the second model. The
 cloud model only sees the evidence for your key moments and the review, so the cost stays
 small. It also works in parallel with your computer, so games finish sooner. From the
-command line: `--expert-provider anthropic --expert-model claude-haiku-4-5`, or set
+command line: `--expert-provider anthropic --expert-model claude-haiku-5-5`, or set
 `LUCIDFISH_EXPERT_PROVIDER` / `LUCIDFISH_EXPERT_MODEL`.
 
 ## Using API keys safely
@@ -547,7 +538,7 @@ profile, the theme switch and ⚙ **Settings** are at the bottom of the sidebar.
    hundred points higher. The profile keeps your newest rating per site and time control by
    itself, from the games you analyse; *Look up* fetches your current ones. Those are used for
    games without a rating (e.g. over the board) and the board editor. To add another person or
-   switch between profiles, click your name in the top-right corner.
+   switch between profiles, click your name at the bottom of the sidebar.
 2. **Analyse games** (Games → *Analyse new games*): choose chess.com or Lichess to list your
    recent games, and a time control to list only those (for chess.com, Lucidfish looks back up
    to a year to find them). Click games to select them (<kbd>Shift</kbd>-click selects a range,
@@ -575,8 +566,8 @@ profile, the theme switch and ⚙ **Settings** are at the bottom of the sidebar.
    answers straight away, switch this off in Settings → Analysis.)
 6. **Draw and choose what the board shows:** right-click a square to circle it, right-drag
    for an arrow (<kbd>Shift</kbd> red, <kbd>Alt</kbd> blue, both yellow), or press
-   *✎ Draw* (<kbd>D</kbd>) to draw with a normal click or a finger. A plain click on the
-   board clears the drawing. *👁 Board* switches the best-move arrow (<kbd>A</kbd>), the
+   *Draw* (<kbd>D</kbd>) to draw with a normal click or a finger. A plain click on the
+   board clears the drawing. *Board ▾* switches the best-move arrow (<kbd>A</kbd>), the
    last-move highlight, the evaluation bar and the graph on or off.
 7. **Games:** every analysed game is saved to your profile. Search and filter them by time
    control, result, colour or text (e.g. all your losses as Black in blitz, or every
@@ -589,7 +580,7 @@ profile, the theme switch and ⚙ **Settings** are at the bottom of the sidebar.
    Markdown report from the game header.
 10. **Board editor:** set up any position (or paste a FEN) and ask for an assessment from
     either side's point of view.
-11. **Explore:** press *🔍 Explore* under the board (or <kbd>E</kbd>) to leave the game and move
+11. **Explore:** press *Explore* under the board (or <kbd>E</kbd>) to leave the game and move
     the pieces yourself. The engine (Stockfish, running in your browser) shows the evaluation,
     an arrow for its best move and its three best lines; click a line to play its first move.
     <kbd>←</kbd>/<kbd>→</kbd> take moves back and replay them, *⟲ Reset* returns to where you
@@ -627,7 +618,7 @@ Lucidfish needs a reasonably fast computer for the analysis, but the *results* c
 anywhere. Someone without Lucidfish (a partner, a student, a friend on a Chromebook) can get
 a profile as **one web page**:
 
-- Click your name in the top-right corner → **Share this profile**.
+- Click your name at the bottom of the sidebar → **Share this profile**.
 - **Download the page** and send it by email, AirDrop or a chat app. Or
 - **keep it up to date in a shared folder**: pick a folder that syncs to their computer (a
   shared iCloud Drive, Google Drive, Dropbox or OneDrive folder; Lucidfish suggests the ones it
@@ -642,8 +633,8 @@ API key, and never contacts a server. They can:
   statistics and patterns;
 - **practise their mistakes** and **train** with spaced repetition. Progress is saved in their
   browser and carries over when a newer copy replaces the file, as the shared folder does.
-  *💾 Save my progress* on the Train page downloads it as a small file (a backup, or to carry
-  it to another computer or browser) and *📂 Load progress* merges it back in; for each puzzle
+  *Save my progress* on the Train page downloads it as a small file (a backup, or to carry
+  it to another computer or browser) and *Load progress…* merges it back in; for each puzzle
   the most recently practised version wins, so an old backup never undoes newer practice;
 - **explore** any position with the built-in engine;
 - draw on the board (also saved in their browser).
@@ -826,7 +817,7 @@ faithfulness and helpfulness from a strong model that sees the same evidence.
 | Problem | Fix |
 |---|---|
 | "Stockfish isn't set up yet" | Press *Download Stockfish* in the banner (or Settings → Analysis): Lucidfish fetches the official build for your computer, about 40 MB. Or install it yourself (see [Installation](#installation)) and set its path in Settings → Analysis. |
-| macOS says the app is damaged or from an unidentified developer | The desktop app is not notarised yet. Right-click (or Control-click) it → *Open*, once. |
+| macOS says the app is damaged, or that Apple could not check it | The desktop app is not notarised yet. Open *System Settings → Privacy & Security* and click *Open Anyway* next to Lucidfish, once (see [Download](#download)). |
 | "Cannot reach Ollama" | Start the Ollama app (or run `ollama serve`). Check the server URL in Settings if Ollama runs on another port or machine. |
 | "Model … is not installed in Ollama" | Run `ollama pull <model>`, or pick one of the installed models shown in Settings. |
 | Analysis is slow | Use the *Key moments* detail level, a smaller model, a cloud provider, or the *Fast* engine preset. Close other heavy apps. |
@@ -901,6 +892,8 @@ folder and the network is disabled. CI runs the suite on Linux, macOS and Window
 | `lucidfish/concepts.py` | The Learn section: concepts, explained and tied to the player's own mistakes |
 | `lucidfish/web.py` + `static/` | FastAPI backend and the browser app (plain JS, no build step) |
 | `desktop/` | The desktop app: Tauri shell, PyInstaller recipe, release scripts (see its README) |
+| `docs/make_diagrams.py` | Draws the README's workflow diagrams (`docs/*.svg`); edit the text there, not the SVGs |
+| `demo/record_demo.py` | Records the captioned demo video with a scripted browser (see its docstring) |
 
 ## Roadmap
 

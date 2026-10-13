@@ -1,0 +1,35 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1180 450' width='1180' height='450' role='img' aria-label='The layers of a review' font-family="-apple-system, 'Segoe UI', Inter, Roboto, Helvetica, Arial, sans-serif" font-size='14'>
+<defs><marker id='arrow' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='7' markerHeight='7' orient='auto-start-reverse'><path d='M0 0L10 5L0 10z' fill='#475569'/></marker><marker id='arrow-accent' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='7' markerHeight='7' orient='auto-start-reverse'><path d='M0 0L10 5L0 10z' fill='#818cf8'/></marker></defs>
+<text x='0' y='22' font-size='18' font-weight='700' fill='#e5e7eb' text-anchor='start'>Each written layer combines the verified layer below it</text>
+<text x='0' y='44' font-size='13' font-weight='400' fill='#94a3b8' text-anchor='start'>Only the combining is done by the model; everything it combines has been checked, and the result is checked again.</text>
+<rect x='0' y='64' width='800' height='56' rx='10' fill='none' stroke='#475569' stroke-width='1.5'/>
+<text x='16' y='88' font-size='15' font-weight='600' fill='#e5e7eb' text-anchor='start'>Coach profile</text>
+<text x='16' y='108' font-size='12.5' font-weight='400' fill='#e5e7eb' text-anchor='start'>Your recurring weaknesses, patterns across games, and the progress review; referred to in later games.</text>
+<text x='816' y='88' font-size='12' font-weight='600' fill='#818cf8' text-anchor='start'>written by the model</text>
+<text x='816' y='108' font-size='11.5' font-weight='400' fill='#94a3b8' text-anchor='start'>from the reviews and the findings across games</text>
+<path d='M400.0 140V120' fill='none' stroke='#475569' stroke-width='1.6' marker-end='url(#arrow)'/>
+<rect x='0' y='140' width='800' height='56' rx='10' fill='none' stroke='#475569' stroke-width='1.5'/>
+<text x='16' y='164' font-size='15' font-weight='600' fill='#e5e7eb' text-anchor='start'>Post-game review</text>
+<text x='16' y='184' font-size='12.5' font-weight='400' fill='#e5e7eb' text-anchor='start'>What decided the game, the costliest mistakes and what was better, what went well.</text>
+<text x='816' y='164' font-size='12' font-weight='600' fill='#818cf8' text-anchor='start'>written by the model</text>
+<text x='816' y='184' font-size='11.5' font-weight='400' fill='#94a3b8' text-anchor='start'>from the chapter summaries and verified game facts</text>
+<path d='M400.0 216V196' fill='none' stroke='#475569' stroke-width='1.6' marker-end='url(#arrow)'/>
+<rect x='0' y='216' width='800' height='56' rx='10' fill='none' stroke='#475569' stroke-width='1.5'/>
+<text x='16' y='240' font-size='15' font-weight='600' fill='#e5e7eb' text-anchor='start'>Chapters</text>
+<text x='16' y='260' font-size='12.5' font-weight='400' fill='#e5e7eb' text-anchor='start'>The game split where the phase changes and at its turning points, each with a summary.</text>
+<text x='816' y='240' font-size='12' font-weight='600' fill='#818cf8' text-anchor='start'>written by the model</text>
+<text x='816' y='260' font-size='11.5' font-weight='400' fill='#94a3b8' text-anchor='start'>from the commentary, split by the engine's evaluation</text>
+<path d='M400.0 292V272' fill='none' stroke='#475569' stroke-width='1.6' marker-end='url(#arrow)'/>
+<rect x='0' y='292' width='800' height='56' rx='10' fill='none' stroke='#475569' stroke-width='1.5'/>
+<text x='16' y='316' font-size='15' font-weight='600' fill='#e5e7eb' text-anchor='start'>Commentary and notes</text>
+<text x='16' y='336' font-size='12.5' font-weight='400' fill='#e5e7eb' text-anchor='start'>A line on the purpose of every move, eight moves at a time; a full explanation of every mistake.</text>
+<text x='816' y='316' font-size='12' font-weight='600' fill='#818cf8' text-anchor='start'>written by the model</text>
+<text x='816' y='336' font-size='11.5' font-weight='400' fill='#94a3b8' text-anchor='start'>from the evidence for each stretch of moves</text>
+<path d='M400.0 368V348' fill='none' stroke='#475569' stroke-width='1.6' marker-end='url(#arrow)'/>
+<rect x='0' y='368' width='800' height='56' rx='10' fill='#1e293b' stroke='#4ade80' stroke-width='2'/>
+<text x='16' y='392' font-size='15' font-weight='600' fill='#e5e7eb' text-anchor='start'>Facts from code</text>
+<text x='16' y='412' font-size='12.5' font-weight='400' fill='#e5e7eb' text-anchor='start'>Engine lines and what they lead to, tactics on the board, plans, threats, endgame technique, opening theory.</text>
+<text x='816' y='392' font-size='12' font-weight='600' fill='#4ade80' text-anchor='start'>verified by code</text>
+<text x='816' y='412' font-size='11.5' font-weight='400' fill='#94a3b8' text-anchor='start'>Stockfish + Python, no model involved</text>
+<text x='0' y='460' font-size='12.5' font-weight='400' fill='#94a3b8' text-anchor='start'>The fact-checker reads every layer back against the board and the game: a move must be playable by the side named, a piece must stand where the text says, a result must be right.</text>
+</svg>

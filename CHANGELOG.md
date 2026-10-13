@@ -8,6 +8,8 @@ Write for the people using the app: what they will notice, not how it was done.
 
 - **Lucidfish now has a licence: AGPL-3.0-or-later.** The `LICENSE` file is in the repository; you are free to use, change and share Lucidfish under its terms.
 - **A clearer front page and a way in for contributors.** The README now opens with why Lucidfish exists and where it is going; `CONTRIBUTING.md`, a code of conduct, a security policy, issue and pull-request templates and a citation file are in the repository.
+- **Diagrams of how it works.** The README now shows the analysis pipeline and the layers of a review as drawings, in light and dark.
+- **Install notes match the defaults.** The quick-start snippets pull `qwen3:8b`, the model the coach uses by default, and the macOS first-start tip matches current macOS.
 
 ## 0.4.2
 

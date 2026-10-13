@@ -51,3 +51,6 @@ models/
 *.log
 logs/
 data/
+
+# Demo recordings
+demo/out/

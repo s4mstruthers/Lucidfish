@@ -1,0 +1,59 @@
+<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1180 440' width='1180' height='440' role='img' aria-label='How Lucidfish analyses a game' font-family="-apple-system, 'Segoe UI', Inter, Roboto, Helvetica, Arial, sans-serif" font-size='14'>
+<defs><marker id='arrow' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='7' markerHeight='7' orient='auto-start-reverse'><path d='M0 0L10 5L0 10z' fill='#cbd5e1'/></marker><marker id='arrow-accent' viewBox='0 0 10 10' refX='9' refY='5' markerWidth='7' markerHeight='7' orient='auto-start-reverse'><path d='M0 0L10 5L0 10z' fill='#4f46e5'/></marker></defs>
+<text x='0' y='22' font-size='18' font-weight='700' fill='#0f172a' text-anchor='start'>How Lucidfish analyses a game</text>
+<text x='0' y='44' font-size='13' font-weight='400' fill='#64748b' text-anchor='start'>The engine and the code decide what is true; the model only puts it into words; every sentence is checked before you read it.</text>
+<rect x='0' y='68' width='250' height='108' rx='10' fill='none' stroke='#cbd5e1' stroke-width='1.5'/>
+<text x='16' y='94' font-size='15' font-weight='600' fill='#0f172a' text-anchor='start'>Your game</text>
+<text x='16' y='116' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>A PGN, or games fetched from</text>
+<text x='16' y='134' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>chess.com or Lichess</text>
+<text x='16' y='152' font-size='12.5' font-weight='400' fill='#64748b' text-anchor='start'>· every move by both sides</text>
+<rect x='310' y='68' width='250' height='108' rx='10' fill='none' stroke='#cbd5e1' stroke-width='1.5'/>
+<text x='326' y='94' font-size='15' font-weight='600' fill='#0f172a' text-anchor='start'>Stockfish</text>
+<text x='546' y='94' font-size='11.5' font-weight='500' fill='#64748b' text-anchor='end'>separate process, UCI</text>
+<text x='326' y='116' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>Best lines and winning chances</text>
+<text x='326' y='134' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>for every move; deeper search</text>
+<text x='326' y='152' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>when a verdict looks suspicious</text>
+<rect x='620' y='68' width='250' height='108' rx='10' fill='none' stroke='#cbd5e1' stroke-width='1.5'/>
+<text x='636' y='94' font-size='15' font-weight='600' fill='#0f172a' text-anchor='start'>Board checks</text>
+<text x='856' y='94' font-size='11.5' font-weight='500' fill='#64748b' text-anchor='end'>Python</text>
+<text x='636' y='116' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>Hanging pieces, forks, pins, mate</text>
+<text x='636' y='134' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>threats, king safety, structure</text>
+<text x='636' y='152' font-size='12.5' font-weight='400' fill='#64748b' text-anchor='start'>· what every line actually leads to</text>
+<rect x='930' y='68' width='250' height='108' rx='10' fill='none' stroke='#cbd5e1' stroke-width='1.5'/>
+<text x='946' y='94' font-size='15' font-weight='600' fill='#0f172a' text-anchor='start'>Specialists</text>
+<text x='1166' y='94' font-size='11.5' font-weight='500' fill='#64748b' text-anchor='end'>Python</text>
+<text x='946' y='116' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>Missed threats, endgame technique,</text>
+<text x='946' y='134' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>where you left opening theory</text>
+<text x='946' y='152' font-size='12.5' font-weight='400' fill='#64748b' text-anchor='start'>· what masters and your peers play</text>
+<path d='M250 122.0H310' fill='none' stroke='#cbd5e1' stroke-width='1.6' marker-end='url(#arrow)'/>
+<path d='M560 122.0H620' fill='none' stroke='#cbd5e1' stroke-width='1.6' marker-end='url(#arrow)'/>
+<path d='M870 122.0H930' fill='none' stroke='#cbd5e1' stroke-width='1.6' marker-end='url(#arrow)'/>
+<rect x='930' y='270' width='250' height='108' rx='10' fill='#eef2ff' stroke='#4f46e5' stroke-width='2'/>
+<text x='946' y='296' font-size='15' font-weight='600' fill='#0f172a' text-anchor='start'>Coach model</text>
+<text x='1166' y='296' font-size='11.5' font-weight='500' fill='#64748b' text-anchor='end'>local or cloud</text>
+<text x='946' y='318' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>Ollama on your computer, or a</text>
+<text x='946' y='336' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>cloud model with your own key</text>
+<text x='946' y='354' font-size='12.5' font-weight='400' fill='#64748b' text-anchor='start'>· never analyses the position itself</text>
+<rect x='620' y='270' width='250' height='108' rx='10' fill='none' stroke='#cbd5e1' stroke-width='1.5'/>
+<text x='636' y='296' font-size='15' font-weight='600' fill='#0f172a' text-anchor='start'>Fact-checker</text>
+<text x='856' y='296' font-size='11.5' font-weight='500' fill='#64748b' text-anchor='end'>Python</text>
+<text x='636' y='318' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>Every move, piece, capture and</text>
+<text x='636' y='336' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>'who is better' claim is checked;</text>
+<text x='636' y='354' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>wrong sentences fixed or removed</text>
+<rect x='310' y='270' width='250' height='108' rx='10' fill='#f8fafc' stroke='#cbd5e1' stroke-width='1.5'/>
+<text x='326' y='296' font-size='15' font-weight='600' fill='#0f172a' text-anchor='start'>What you read</text>
+<text x='326' y='318' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>The story of the game, a note on</text>
+<text x='326' y='336' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>every move, the post-game review,</text>
+<text x='326' y='354' font-size='12.5' font-weight='400' fill='#0f172a' text-anchor='start'>Learn concepts and Train puzzles</text>
+<path d='M1095.0 176V270' fill='none' stroke='#4f46e5' stroke-width='1.6' marker-end='url(#arrow-accent)'/>
+<text x='1085.0' y='216' font-size='12' font-weight='500' fill='#64748b' text-anchor='end'>verified evidence</text>
+<text x='1085.0' y='233' font-size='12' font-weight='500' fill='#64748b' text-anchor='end'>as structured JSON</text>
+<path d='M930 324.0H870' fill='none' stroke='#4f46e5' stroke-width='1.6' marker-end='url(#arrow-accent)'/>
+<text x='900.0' y='302.0' font-size='12' font-weight='500' fill='#64748b' text-anchor='middle'>draft</text>
+<text x='900.0' y='316.0' font-size='12' font-weight='500' fill='#64748b' text-anchor='middle'>note</text>
+<path d='M620 324.0H560' fill='none' stroke='#cbd5e1' stroke-width='1.6' marker-end='url(#arrow)'/>
+<text x='590.0' y='316.0' font-size='12' font-weight='500' fill='#64748b' text-anchor='middle'>verified</text>
+<path d='M1015.0 270V223.0H435.0V176' fill='none' stroke='#cbd5e1' stroke-width='1.6' stroke-dasharray='5 4' marker-end='url(#arrow)'/>
+<text x='449.0' y='215.0' font-size='12' font-weight='500' fill='#64748b' text-anchor='start'>check_line: the coach can ask Stockfish to test a variation</text>
+<text x='0' y='422' font-size='12.5' font-weight='400' fill='#64748b' text-anchor='start'>lucidfish eval runs this pipeline on engine-verified positions and scores any model on how faithfully it explains them.</text>
+</svg>
