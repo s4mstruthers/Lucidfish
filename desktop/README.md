@@ -58,14 +58,14 @@ request and every "Run workflow" builds the apps and keeps them as downloadable 
 page; a version tag publishes them as a GitHub release.
 
 1. Set the version in `lucidfish/__init__.py`, `desktop/src-tauri/tauri.conf.json`,
-   `desktop/src-tauri/Cargo.toml` and `desktop/package.json`, then `cargo update -w --offline` in
+   `desktop/src-tauri/Cargo.toml`, `desktop/package.json` (and its lock file) and `CITATION.cff`, then `cargo update -w --offline` in
    `desktop/src-tauri` so `Cargo.lock` follows (`python desktop/scripts/check_version.py` checks that
    all of them agree; the test suite does too).
 2. Add a `## <version>` section to `CHANGELOG.md`, written for the people using the app. It becomes
    the release's description and the text the app shows before it installs the update
    (`python desktop/scripts/release_notes.py <version>` prints it; the workflow refuses to release
    without it).
-3. Commit, then `git tag v0.4.0 && git push origin v0.4.0`.
+3. Commit, then `git tag v0.5.2 && git push origin v0.5.2` (with your version).
 4. The workflow runs the tests, builds on macOS (Apple silicon and Intel), Windows and Linux, bundles
    Stockfish for each, smoke-tests the frozen backend, signs the updater artifacts and publishes the
    release with the installers and `latest.json`. Installed apps pick the update up from
@@ -93,8 +93,9 @@ Keep the key somewhere safe: if it is lost, a new pair means one release that us
 
 ### Optional: signed and notarised macOS builds
 
-Without an Apple Developer ID the macOS app is unsigned; macOS then asks the user to right-click → Open
-the first time (and may call the download "damaged" until they do). To sign and notarise in CI, add the
+Without an Apple Developer ID the workflow signs the macOS app ad hoc. macOS then says it could not
+verify the app, and the user clicks *Open Anyway* in *System Settings → Privacy & Security* once. (A
+completely unsigned bundle is worse: macOS calls the download "damaged" and offers no way to open it.) To sign and notarise in CI, add the
 secrets `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`,
 `APPLE_PASSWORD` and `APPLE_TEAM_ID` as described in the
 [Tauri documentation](https://tauri.app/distribute/sign/macos/). Windows builds can be signed the same
@@ -106,7 +107,8 @@ way (`tauri.conf.json` → `bundle.windows.certificateThumbprint`).
 |---|---|
 | `src-tauri/src/lib.rs` | The shell: starts and stops the backend, checks and installs updates |
 | `src-tauri/tauri.conf.json` | Window, bundle (sidecar, Stockfish resource, installers) and updater settings |
-| `src-tauri/capabilities/default.json` | What the page may ask the shell to do (updater, restart, open links) |
+| `src-tauri/capabilities/default.json` | What the page may ask the shell to do (updater, restart, open links, and the app's own commands) |
+| `src-tauri/build.rs` | Declares the app's own commands, so the capability can grant them to the page served from localhost |
 | `ui/index.html` | The splash page shown until the backend is up |
 | `lucidfish-server.spec` | PyInstaller recipe for the backend |
 | `scripts/build_sidecar.py` | Builds the backend and names it for Tauri |

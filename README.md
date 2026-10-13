@@ -59,8 +59,8 @@ plans and ideas, a larger verified eval set, a "would a player at your level fin
 and in time small local models trained on explanations that have survived the fact-checker. The
 [roadmap](#roadmap) has the order.
 
-**Status.** Lucidfish is at 0.4: the pipeline is complete and tested on three operating systems,
-the desktop apps work but are not yet signed, and the eval set is small. It is ready to use and
+**Status.** Lucidfish is at 0.5: the pipeline is complete and tested on three operating systems,
+the desktop apps work but are not yet signed with a paid developer certificate, and the eval set is small. It is ready to use and
 ready for contributors; see [Contributing](#contributing).
 
 ## Download
@@ -78,16 +78,17 @@ Stockfish, so there is nothing else to install.
 The apps are not signed with a paid developer certificate, so the system asks once, the first time
 you start one:
 
-- **macOS** says Apple could not check it, or that *"Lucidfish" is damaged*. It is not damaged. Click
-  *Cancel* or *Done* (never *Move to Bin*), then run this once in Terminal:
-  `xattr -dr com.apple.quarantine /Applications/Lucidfish.app`. For the "could not check" message,
-  *System Settings → Privacy & Security → Open Anyway* also works.
+- **macOS** says Apple could not verify it. Click *Done*, open *System Settings → Privacy & Security*
+  and click *Open Anyway* next to Lucidfish. Versions before 0.5.2 may instead say *"Lucidfish" is
+  damaged*. It is not damaged: click *Cancel* (never *Move to Bin*), then run this once in Terminal:
+  `xattr -dr com.apple.quarantine /Applications/Lucidfish.app`.
 - **Windows** shows *Windows protected your PC*. Click *More info*, then *Run anyway*.
 
 The `.app.tar.gz`, `.sig` and `latest.json` files on the release page are what installed apps use
 to update themselves; you never need them. Later versions install themselves: a banner appears
 when a new version is out, and *Update and restart* installs it in the background (Settings → About &
-updates checks on demand). Your games and settings stay where they are. What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
+updates checks on demand). Versions before 0.5.2 cannot check for updates: if you have one, download
+the latest release by hand once. Your games and settings stay where they are. What changed in each version is in [CHANGELOG.md](CHANGELOG.md).
 
 The optional AI coach is set up inside the app (Settings → AI coach): free and private on your own
 computer with [Ollama](https://ollama.com), or with a cloud provider and an API key.
@@ -159,6 +160,11 @@ Prefer to run from source, or want the command line? See [Installation](#install
   missed threats, errors in time trouble, …) and **patterns across your games**: whether
   you convert winning positions, how you score when you castle late, with White and with
   Black, in each time control, and how your games go after they leave opening theory.
+- **See yourself improve.** The *Stats* page charts your accuracy, results, blunders and mistakes,
+  and missed threats game by game, per time control, and compares your most recent games with the
+  ones before them. A change is only reported when it is big enough to mean something, and the
+  numbers are computed, never written by the AI; the coach's review builds its *Progress* section
+  from them.
 - **Practise your mistakes.** Jump back to any position where you went wrong, play a better
   move on the board, and the engine tells you straight away whether it works and, if not,
   shows the line that refutes it. The answer to your own mistakes stays hidden until you
@@ -203,7 +209,7 @@ Prefer to run from source, or want the command line? See [Installation](#install
   how far each game and the whole batch are, how much time is left, and roughly when it
   will be done. Reorder, pause, resume or remove games at any time; the queue survives a
   restart. Time estimates learn how fast your computer is.
-- **A clean, fast workspace.** A sidebar takes you to Home, Learn, Games, Train and the Board;
+- **A clean, fast workspace.** A sidebar takes you to Home, Learn, Games, Train, Stats and the Board;
   the design is minimal and quick, with light and dark themes, and it works on a phone or tablet
   too. Moves appear while the game is analysed, with an interactive board, arrows and an
   evaluation bar, a clickable evaluation graph, buttons that jump between the key moments,
@@ -528,9 +534,10 @@ keychain app.
 Start it with `./scripts/start.sh`, `scripts\start.bat`, or `lucidfish web`. It opens
 `http://127.0.0.1:8420`; if that port is busy, it uses the next free one and prints the address.
 
-The sidebar has five sections: **Home** (your progress and what to work on next), **Learn** (the
+The sidebar has six sections: **Home** (your progress and what to work on next), **Learn** (the
 concepts behind your mistakes, explained with your own games), **Games** (your analysed games and new
-ones to analyse), **Train** (puzzles from your mistakes) and **Board** (set up any position). Your
+ones to analyse), **Train** (puzzles from your mistakes), **Stats** (your numbers over time) and
+**Board** (set up any position). Your
 profile, the theme switch and ⚙ **Settings** are at the bottom of the sidebar.
 
 1. **Create a profile** (first launch): your name, level, and chess.com / Lichess usernames.
@@ -819,8 +826,9 @@ faithfulness and helpfulness from a strong model that sees the same evidence.
 | Problem | Fix |
 |---|---|
 | "Stockfish isn't set up yet" | Press *Download Stockfish* in the banner (or Settings → Analysis): Lucidfish fetches the official build for your computer, about 40 MB. Or install it yourself (see [Installation](#installation)) and set its path in Settings → Analysis. |
-| macOS says *"Lucidfish" is damaged and can't be opened* | It is not damaged: the app is not notarised yet, and macOS blocks unsigned downloads this way. Click *Cancel* (not *Move to Bin*), then run `xattr -dr com.apple.quarantine /Applications/Lucidfish.app` in Terminal, once. |
-| macOS says Apple could not check the app | Open *System Settings → Privacy & Security* and click *Open Anyway* next to Lucidfish, once, or use the `xattr` command above. |
+| macOS says Apple could not verify the app | The app is not notarised yet. Open *System Settings → Privacy & Security* and click *Open Anyway* next to Lucidfish, once (see [Download](#download)). |
+| macOS says *"Lucidfish" is damaged and can't be opened* | Versions before 0.5.2 were unsigned, and macOS blocks those downloads this way. It is not damaged: click *Cancel* (not *Move to Bin*), then run `xattr -dr com.apple.quarantine /Applications/Lucidfish.app` in Terminal, once. Or download the latest version. |
+| *Check for updates* says "Command check_update not allowed by ACL" | A bug in versions before 0.5.2. Download the [latest release](https://github.com/s4mstruthers/Lucidfish/releases/latest) by hand once; updates work from inside the app after that. |
 | "Cannot reach Ollama" | Start the Ollama app (or run `ollama serve`). Check the server URL in Settings if Ollama runs on another port or machine. |
 | "Model … is not installed in Ollama" | Run `ollama pull <model>`, or pick one of the installed models shown in Settings. |
 | Analysis is slow | Use the *Key moments* detail level, a smaller model, a cloud provider, or the *Fast* engine preset. Close other heavy apps. |
