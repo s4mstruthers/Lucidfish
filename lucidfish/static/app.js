@@ -1150,7 +1150,8 @@ function renderInsights(s) {
       + `<span>${esc(f.text)}</span></div>`).join("")
     : `<div class="empty small">Patterns across your games appear after about 3 analysed games where Lucidfish knows which side
         you played (it detects this from your chess.com / Lichess username).</div>`;
-  $("insightsRow").classList.toggle("hidden", !s.games);
+  $("phaseCard").classList.toggle("hidden", !s.games);
+  $("patternsCard").classList.toggle("hidden", !s.games);
   if (!s.games) return;
   const phases = ["opening", "middlegame", "endgame"], pa = s.phase_accuracy || {};
   $("phaseBars").innerHTML = phases.some((p) => pa[p] != null)
@@ -1179,12 +1180,12 @@ const fmtDelta = (c) => `${c.delta > 0 ? "+" : ""}${c.unit === "%" ? Math.round(
 
 /** The Home card: the changes that matter, then and now. */
 function renderProgressCard(prog) {
-  const card = $("progressCard");
+  const card = $("homeProgressCard");
   const changed = (prog?.changes || []).filter((c) => c.verdict !== "same");
   card.classList.toggle("hidden", !prog?.recent);
   if (!prog?.recent) return;
   const head = `<p class="small" style="margin:0 0 8px">Your last ${prog.recent.games} games against the ${prog.earlier.games} before them.</p>`;
-  $("progress").innerHTML = head + (changed.length
+  $("homeProgress").innerHTML = head + (changed.length
     ? changed.slice(0, 4).map((c) => `<div class="finding ${c.verdict}"><span class="f-icon">${VERDICT_ICONS[c.verdict]}</span>`
       + `<span><b>${esc(c.label)}</b>: ${fmtVal(c, c.earlier)} then, ${fmtVal(c, c.recent)} now (${VERDICT_WORDS[c.verdict]})</span></div>`).join("")
     : `<div class="finding"><span class="f-icon">=</span><span>No clear change yet: your recent games look much like the earlier ones.</span></div>`);

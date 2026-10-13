@@ -101,31 +101,33 @@
         </div>
         <div class="md review-text" id="summary"></div>
       </div>
-      <div class="card hidden" id="findingsCard">
-        <div class="card-head"><h2>Patterns across your games</h2></div>
-        <div class="findings" id="findings"></div>
-      </div>
-      <div class="card hidden" id="progressCard">
-        <div class="card-head"><h2>Progress</h2><div class="spacer"></div>
-          <button class="ghost sm" id="seeStats">All stats →</button></div>
-        <div class="findings" id="progress"></div>
-      </div>
-    </div>
-    <div class="grid-2 hidden" id="insightsRow">
-      <div class="card">
-        <div class="card-head"><h2>Accuracy by game phase</h2></div>
-        <div id="phaseBars"></div>
-      </div>
-      <div class="card">
-        <div class="card-head"><h2>Recurring mistakes</h2></div>
-        <div class="list" id="patterns"></div>
+      <div class="col-stack">
+        <div class="card hidden" id="homeProgressCard">
+          <div class="card-head"><h2>Progress</h2><div class="spacer"></div>
+            <button class="ghost sm" id="seeStats">All stats →</button></div>
+          <div class="findings" id="homeProgress"></div>
+        </div>
+        <div class="card hidden" id="findingsCard">
+          <div class="card-head"><h2>Patterns across your games</h2></div>
+          <div class="findings" id="findings"></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><h2>Recently analysed</h2><div class="spacer"></div>
+            <button class="ghost sm" id="seeAllGames">All games →</button></div>
+          <div class="list" id="savedGames"></div>
+        </div>
       </div>
     </div>
     <div class="grid-2">
-      <div class="card">
-        <div class="card-head"><h2>Recently analysed</h2><div class="spacer"></div>
-          <button class="ghost sm" id="seeAllGames">All games →</button></div>
-        <div class="list" id="savedGames"></div>
+      <div class="col-stack">
+        <div class="card hidden" id="phaseCard">
+          <div class="card-head"><h2>Accuracy by game phase</h2></div>
+          <div id="phaseBars"></div>
+        </div>
+        <div class="card hidden" id="patternsCard">
+          <div class="card-head"><h2>Recurring mistakes</h2></div>
+          <div class="list" id="patterns"></div>
+        </div>
       </div>
       <div class="card">
         <div class="card-head"><h2>Your openings</h2></div>
