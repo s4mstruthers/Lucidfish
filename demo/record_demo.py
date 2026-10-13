@@ -15,7 +15,8 @@ What it does, in order:
    the same way Settings → Analysis does.
 2. Creates a profile and analyses the demo games (``--pgn``, default: the Opera game from the player's
    side that loses, plus one club game), waiting until the analysis, and the coach, are done. With a
-   coach this takes a few minutes; progress is printed.
+   local coach this takes 5 to 15 minutes; the slow part comes after the last move (mistake notes,
+   chapters, review), and the printed stage says what is happening. ``--detail key`` is much faster.
 3. Opens the app in a scripted Chromium window (Playwright) and records a tour: title card, Home, the
    game as a story, a mistake and its explanation, Learn, Train, closing card. Captions are drawn
    into the page, so they are part of the recording.
@@ -126,13 +127,21 @@ def analyse_games(base: str, games: list[tuple[Path, str | None, int]], name: st
     ids = []
     t0 = time.time()
     for label, jid in jobs:
-        last = ""
+        last, last_print = "", 0.0
         while True:
-            j = requests.get(f"{base}/api/job/{jid}", timeout=10).json()
-            msg = f"{label}: {j['status']} · {len(j.get('moves', []))}/{j.get('total') or '?'} moves"
-            if msg != last:
-                print(f"  {msg} ({time.time() - t0:.0f}s)")
-                last = msg
+            j = requests.get(f"{base}/api/job/{jid}?since=0", timeout=10).json()
+            total = j.get("total") or "?"
+            # What the pipeline is doing right now: the engine runs ahead of the coach, and after the last
+            # move the coach still writes the mistake notes, the chapters and the review, so the move count
+            # can stand still for minutes while real work happens. The job's own label says which part.
+            stage = j.get("label") or j["status"]
+            eta = j.get("eta_s")
+            msg = (f"{label}: engine {j.get('engine_done', 0)}/{total} · coach {j.get('done', 0)}/{total} · "
+                   f"{stage}" + (f" · about {eta / 60:.0f} min left" if eta and eta > 90 else ""))
+            now = time.time()
+            if msg != last or now - last_print > 20:
+                print(f"  {msg} ({now - t0:.0f}s)", flush=True)
+                last, last_print = msg, now
             if j["status"] not in ("queued", "running"):
                 break
             time.sleep(3)
