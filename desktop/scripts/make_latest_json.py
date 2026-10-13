@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
 """Write the updater manifest (`latest.json`) for a release from the files in `dist/`.
 
     python desktop/scripts/make_latest_json.py v0.4.0 --notes notes.md --out dist/latest.json

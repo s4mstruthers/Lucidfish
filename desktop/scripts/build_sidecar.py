@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
 """Build the backend into one executable and put it where Tauri expects a sidecar.
 
     python desktop/scripts/build_sidecar.py            # for this computer

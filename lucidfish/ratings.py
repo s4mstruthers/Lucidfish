@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
+
 """Ratings: the player's rating in each game, and their latest rating on each site.
 
 chess.com and Lichess ratings are not on the same scale (Lichess numbers run a few

@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
+
 """Evaluation maths: winning chances, move accuracy, and human-readable evals.
 
 Centipawns are a poor measure of how bad a move was: dropping from +8 to +5

@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
+
 """Feature layer: turn a raw position into named chess concepts.
 
 This is what separates "eval dropped 1.5" from "you traded your active bishop

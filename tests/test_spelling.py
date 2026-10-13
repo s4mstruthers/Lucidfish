@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
+
 """British English everywhere: the coach's text, opening names, and text stored by older versions."""
 import json
 import sqlite3

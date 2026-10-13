@@ -42,6 +42,7 @@ models/
 *.pgn.gz
 
 # Editors
+.claude/settings.local.json
 .vscode/
 .idea/
 *.swp

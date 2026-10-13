@@ -1,3 +1,9 @@
+/*
+ * Copyright (C) 2026 Sam Struthers
+ * SPDX-License-Identifier: AGPL-3.0-or-later
+ * This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
+ */
+
 /* Lucidfish — design system and application styles.
  *
  * Plain CSS, no build step. Everything is built from the tokens at the top: colours, type, spacing,

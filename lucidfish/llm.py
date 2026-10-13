@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
+
 """LLM providers: one small interface over local and cloud models.
 
 Supported out of the box:

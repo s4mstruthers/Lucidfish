@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
+
 """The coach's progress review always has the same structure."""
 from lucidfish.prompts import player_summary_system
 from lucidfish.review_check import presentable_review, tidy_profile_review

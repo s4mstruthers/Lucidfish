@@ -4,6 +4,8 @@
   <a href="https://github.com/s4mstruthers/Lucidfish/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/s4mstruthers/Lucidfish?label=download&color=2563EB"></a>
   <a href="https://github.com/s4mstruthers/Lucidfish/actions/workflows/ci.yml"><img alt="Tests" src="https://img.shields.io/github/actions/workflow/status/s4mstruthers/Lucidfish/ci.yml?label=tests"></a>
   <a href="https://github.com/s4mstruthers/Lucidfish/actions/workflows/build-apps.yml"><img alt="App builds" src="https://img.shields.io/github/actions/workflow/status/s4mstruthers/Lucidfish/build-apps.yml?label=app%20builds"></a>
+  <a href="LICENSE"><img alt="Licence: AGPL-3.0-or-later" src="https://img.shields.io/badge/licence-AGPL--3.0--or--later-2563EB"></a>
+  <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776AB">
 </p>
 
 <p align="center">
@@ -23,6 +25,44 @@ The feedback is pitched at your level and linked to the mistakes you keep making
 
 ![Lucidfish game view](docs/screenshot.png)
 <sub>Game view, shown here in engine-only mode. With an AI coach enabled, each move also gets a written explanation.</sub>
+
+## Why Lucidfish exists
+
+An engine is the strongest analyst in chess and the worst teacher. It gives you a number and a
+line and leaves the understanding to you, and at club level the understanding is the whole
+problem. Lucidfish starts from a different picture of what a game is: a story. Each side has
+plans, the plans meet, at some moment one of them breaks, and everything afterwards follows from
+that. You improve when you can tell that story about your own games, and most of us cannot,
+because nobody tells it to us.
+
+A language model can tell the story. On its own it cannot be trusted to: models misplace pieces,
+describe captures that never happened and praise moves that lose. Lucidfish's answer is a strict
+division of labour. **The engine and the code decide what is true; the model only puts it into
+words; and every sentence is checked against the board before you read it.** The model never looks
+at a position by itself. It is handed verified evidence (the engine's lines and what each one leads
+to, the tactics on the board, the plans each side has been following, the point where the game left
+theory) and, when it wants to claim something the evidence does not cover, it has to ask Stockfish
+first.
+
+Two further choices follow from wanting this to be something anyone can run:
+
+- **Local first.** The coach runs on your own computer with a free, open-weight model by default.
+  Your games stay on your machine unless you choose a cloud model with your own key. There is no
+  account, no server and no subscription.
+- **Open and measured.** The whole pipeline is free software under the AGPL, and `lucidfish eval`
+  scores any model on how faithfully it explains engine-verified positions, so a claim about
+  accuracy can be checked rather than taken on trust.
+
+Where it is going: a coach that any club player can run for nothing, that is right far more often
+than it is wrong, that shows its evidence, and that improves in the open, with more detectors for
+plans and ideas, a larger verified eval set, a "would a player at your level find this?" judgement,
+and in time small local models trained on explanations that have survived the fact-checker. The
+[roadmap](#roadmap) has the order.
+
+**Status.** Lucidfish is at 0.4: the pipeline is complete and tested on three operating systems,
+the desktop apps work but are not yet signed, and the eval set is small. It is ready to use and
+ready for contributors; see [Contributing](#contributing).
+
 
 ## Download
 
@@ -58,6 +98,7 @@ Prefer to run from source, or want the command line? See [Installation](#install
 
 ## Contents
 
+- [Why Lucidfish exists](#why-lucidfish-exists)
 - [Download](#download)
 - [Features](#features)
 - [How it works](#how-it-works)
@@ -75,6 +116,8 @@ Prefer to run from source, or want the command line? See [Installation](#install
 - [Troubleshooting](#troubleshooting)
 - [Privacy and your data](#privacy-and-your-data)
 - [Development](#development)
+- [Roadmap](#roadmap)
+- [Contributing](#contributing)
 - [Acknowledgements and licences](#acknowledgements-and-licences)
 
 ---
@@ -861,8 +904,40 @@ folder and the network is disabled. CI runs the suite on Linux, macOS and Window
 
 ## Roadmap
 
-- Real-time coaching from a connected board (e.g. ChessUp 2 over Bluetooth)
-- "What would a human play?" suggestions (Maia)
+In rough order. Open an issue to argue for a different one.
+
+**Now**
+
+- An accuracy table in this README: `lucidfish eval` results for the common local and cloud
+  models, so you can choose a coach on evidence rather than reputation.
+- A first run that works without downloading a 5 GB model: a free cloud tier as the one-click
+  option, a local model as the private one.
+- Signed macOS and Windows builds, once the certificates are funded.
+
+**Next**
+
+- "Would a player at your rating find this?": human-likelihood (in the style of Maia) so the coach
+  can tell an objectively best move from a findable one.
+- More plan and concept detectors (minority attacks, outposts, bad bishops, rook lifts), each with
+  its own fact-check and eval cases.
+- A larger eval set from club-level games, and a comparison against published benchmarks for
+  chess explanation.
+
+**Later**
+
+- A small local model fine-tuned on Lucidfish notes that survived the fact-checker: faster,
+  cheaper, and grounded by construction.
+- Real-time coaching from a connected board (for example ChessUp 2 over Bluetooth).
+
+## Contributing
+
+Issues and pull requests are welcome, from a wrong coach note (that is a bug) to a new plan
+detector. [CONTRIBUTING.md](CONTRIBUTING.md) explains the setup, the conventions, and the one rule
+every change to the coach follows: it may not assert what the code has not verified. Issues
+labelled [good first issue](https://github.com/s4mstruthers/Lucidfish/labels/good%20first%20issue)
+are a place to start. The [Code of Conduct](CODE_OF_CONDUCT.md) applies everywhere in the project,
+and [SECURITY.md](SECURITY.md) says how to report a security problem privately. If Lucidfish is
+useful in research or writing, [CITATION.cff](CITATION.cff) has the reference.
 
 ## Acknowledgements and licences
 
@@ -881,4 +956,4 @@ folder and the network is disabled. CI runs the suite on Linux, macOS and Window
 The desktop app bundles an official Stockfish binary (GPL-3.0); the notices are in
 [`desktop/THIRD_PARTY.md`](desktop/THIRD_PARTY.md), shipped inside the app.
 
-Lucidfish itself has not chosen a licence yet.
+Lucidfish itself is free software under the [GNU Affero General Public License, version 3 or later](LICENSE) (AGPL-3.0-or-later): you may use, study, change and share it, and anyone who distributes a changed version, or runs one as a service for others, must make their source available under the same terms. The same family of licence as Stockfish and python-chess, which Lucidfish depends on.

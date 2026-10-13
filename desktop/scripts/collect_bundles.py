@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
 """Gather what `tauri build` produced into `dist/`, named for people and for the updater.
 
     python desktop/scripts/collect_bundles.py --target aarch64-apple-darwin

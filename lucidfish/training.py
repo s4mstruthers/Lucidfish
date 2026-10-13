@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
+
 """Training: the coached player's own mistakes, across all games, as puzzles.
 
 Every inaccuracy, mistake and blunder the player made in an analysed game

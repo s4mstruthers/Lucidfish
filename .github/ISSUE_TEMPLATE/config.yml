@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Troubleshooting
+    url: https://github.com/s4mstruthers/Lucidfish#troubleshooting
+    about: Install problems, Stockfish or Ollama not found, slow analysis — check here first.
+  - name: Security problem
+    url: https://github.com/s4mstruthers/Lucidfish/security/advisories/new
+    about: Report privately rather than in a public issue.

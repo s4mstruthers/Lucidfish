@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
+
 """Per-game insights for the progress dashboard: accuracy by game phase, the
 kinds of mistakes a player keeps making, and patterns across their games
 (converting winning positions, castling late, results by colour, ...).

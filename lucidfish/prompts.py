@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
+
 """Prompt construction, output parsing, and fact-checking of LLM notes.
 
 Design rule: the LLM NEVER analyses the position itself. It receives verified

@@ -1,0 +1,22 @@
+name: Feature request
+description: Something the coach should explain, detect or do.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What you want to understand or do, and what gets in the way today
+      description: Describe the chess situation or the task, not only the feature. "I never understand why my rook endings go wrong" is more useful than "add endgame mode".
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like Lucidfish to do
+      description: If it is something the coach should say, remember that the coach may only state what the code has verified, so say what evidence would back it up.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything you have tried or seen elsewhere

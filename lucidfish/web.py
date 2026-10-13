@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
+
 """Web UI backend: a FastAPI server wrapping the analysis pipeline.
 
 Run with ``lucidfish web`` (or ``python -m lucidfish.web``) → http://127.0.0.1:8420

@@ -1,4 +1,7 @@
 #!/usr/bin/env sh
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
 # One-step launcher for macOS and Linux: creates a private Python environment
 # in .venv the first time, keeps its packages up to date, and opens the web app.
 #   ./scripts/start.sh              start on http://127.0.0.1:8420

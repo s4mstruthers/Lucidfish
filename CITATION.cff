@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use Lucidfish in research or writing, please cite it as below."
+title: "Lucidfish: explainable chess coaching with an engine-grounded language model"
+type: software
+authors:
+  - family-names: Struthers
+    given-names: Sam
+repository-code: "https://github.com/s4mstruthers/Lucidfish"
+license: AGPL-3.0-or-later
+version: 0.4.2
+date-released: 2026-10-11
+keywords:
+  - chess
+  - Stockfish
+  - large language models
+  - explainable AI
+  - coaching
+  - grounding
+abstract: >-
+  Lucidfish reviews chess games as a coach and a commentator. The Stockfish engine and
+  board-inspecting code establish what is true in each position; a language model, running
+  locally or in the cloud, puts those verified facts into words; and every sentence is
+  fact-checked against the board before it is shown. It includes an evaluation harness that
+  scores any model on how faithfully it explains engine-verified positions.

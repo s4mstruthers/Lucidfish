@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
+
 """Share a profile as a single web page that needs nothing installed.
 
 The page is the normal Lucidfish app (same HTML, CSS and JavaScript) with the

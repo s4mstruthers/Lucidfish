@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
+
 """Export an analysed game as an annotated PGN or a Markdown report.
 
 Both work from the move dictionaries produced by ``AnnotatedMove.to_dict()``,

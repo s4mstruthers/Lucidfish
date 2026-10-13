@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
+
 """The Learn section: chess concepts, explained, and tied to the player's own games.
 
 Lucidfish's analysis already *names* what went wrong in a move (a missed

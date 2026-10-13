@@ -1,4 +1,7 @@
 #!/usr/bin/env python3
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
 """Check that every file carrying Lucidfish's version agrees (and matches a release tag, if given).
 
     python desktop/scripts/check_version.py          # the files agree with each other

@@ -1,3 +1,7 @@
+# Copyright (C) 2026 Sam Struthers
+# SPDX-License-Identifier: AGPL-3.0-or-later
+# This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
+
 """British English: Lucidfish writes British spelling everywhere (analyse, colour, centre, defence).
 
 The AI coach is asked to write British English, but models trained mostly on American text still slip,

@@ -1,0 +1,47 @@
+name: Bug report
+description: Something is wrong, including a coach note that is factually wrong about the position.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report. A wrong explanation is a bug too: the whole point of Lucidfish is that its notes can be trusted, so please report those with the game and the model.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead. For a wrong note, quote the note and say what is wrong about it.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce it
+      description: The steps, and the game if one is involved (paste the PGN, or attach the file).
+      placeholder: |
+        1. Analyse the attached game with …
+        2. Open move 23 …
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Lucidfish version and how you run it
+      placeholder: "0.4.2, desktop app on macOS 15 / from source with `lucidfish web`"
+    validations:
+      required: true
+  - type: input
+    id: coach
+    attributes:
+      label: Coach provider and model
+      placeholder: "Ollama qwen3:8b / Gemini 2.5 Flash / engine-only"
+  - type: input
+    id: engine
+    attributes:
+      label: Stockfish version and analysis preset
+      placeholder: "Stockfish 17 (bundled), Balanced"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or screenshots
+      description: Anything from the terminal, or `desktop.log` in the data folder for the desktop app. Remove API keys before pasting.
