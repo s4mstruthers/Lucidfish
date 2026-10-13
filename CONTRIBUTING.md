@@ -81,7 +81,7 @@ fluent but less verifiable will be asked to add the verification first.
 2. Branch from `main`, keep the PR to one change, and fill in the PR template (what, why, how
    tested).
 3. CI must be green. The `Desktop shell compiles` job catches version-number mismatches between
-   `lucidfish/__init__.py`, `desktop/package.json` and `desktop/src-tauri/tauri.conf.json`.
+   the files that carry the version (`python desktop/scripts/check_version.py` lists them).
 
 By contributing, you agree that your contribution is licensed under the same terms as Lucidfish,
 the [GNU AGPL v3 or later](LICENSE), and that you have the right to license it that way. There is
@@ -89,6 +89,7 @@ no contributor licence agreement and no copyright assignment: you keep the copyr
 
 ## Releasing (maintainers)
 
-Bump the version in the three files above, move the `Unreleased` section of `CHANGELOG.md` under
-the new version heading, tag `vX.Y.Z` and push the tag; the `build-apps` workflow builds the
+Bump the version everywhere it appears (the steps, including `Cargo.lock` and `CITATION.cff`, are in
+[`desktop/README.md`](desktop/README.md#releasing)), move the `Unreleased` section of `CHANGELOG.md`
+under the new version heading, tag `vX.Y.Z` and push the tag; the `build-apps` workflow builds the
 installers and publishes the release with that changelog section as its description.
