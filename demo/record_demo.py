@@ -4,11 +4,18 @@
 # This file is part of Lucidfish <https://github.com/s4mstruthers/Lucidfish>; see LICENSE for the terms.
 """Record a short, captioned demo video of Lucidfish for a post or a README.
 
+    python demo/record_demo.py --app http://127.0.0.1:8420 --rename "s4mstruthers=You"
+                                                    # record your running app, games already analysed
     python demo/record_demo.py                      # the configured coach (Ollama by default)
     python demo/record_demo.py --no-coach           # engine-only, for a quick draft
     python demo/record_demo.py --provider gemini    # a cloud coach (its key must be set up already)
 
-What it does, in order:
+With ``--app`` it records the Lucidfish you already have open (desktop or ``lucidfish web``): no
+analysis, no waiting. It only looks: the recording browser has its own storage, so your Train
+progress is untouched. ``--rename OLD=NEW`` (repeatable, case-insensitive) swaps names on screen while
+it records, for usernames and opponents you would rather not publish.
+
+Without ``--app``, what it does, in order:
 
 1. Starts ``lucidfish web`` on its own port with a throw-away data folder, so your real profile and
    games are never touched. If that folder has no Stockfish and none is on the PATH, it downloads one
@@ -151,6 +158,17 @@ def analyse_games(base: str, games: list[tuple[Path, str | None, int]], name: st
     return ids
 
 
+def pick_game(base: str) -> int:
+    """The analysed game with the most to show: most mistakes and blunders, then the most recent."""
+    games = requests.get(f"{base}/api/profile", timeout=15).json().get("games") or []
+    if not games:
+        raise SystemExit("The running app's active profile has no analysed games yet.")
+    best = max(games, key=lambda g: ((g.get("mistakes") or 0) + (g.get("blunders") or 0), g.get("analysed_at") or ""))
+    print(f"game: #{best['id']} {best.get('white')} vs {best.get('black')} ({best.get('date')}); "
+          "use --game N for another")
+    return best["id"]
+
+
 # ------------------------------------------------------------------ the tour ----
 
 CAPTION_CSS = """
@@ -176,6 +194,32 @@ p{font-size:24px;color:#cbd5e1;margin:0;line-height:1.45}
 </style></head><body><div class="wrap">
 <div class="logo"><div class="mark">♞</div><div class="name">Lucid<b>fish</b></div></div>
 <h1>%(title)s</h1><p>%(sub)s</p></div><div class="foot">%(foot)s</div></body></html>"""
+
+
+RENAME_JS = """(pairs) => {
+    // Swap names in the visible text, now and whenever the app redraws (it re-renders on every page).
+    const rules = pairs.map(([a, b]) => [new RegExp(a.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&'), 'gi'), b]);
+    const fix = (root) => {
+        const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+        for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+            let t = n.nodeValue, u = t;
+            for (const [re, b] of rules) u = u.replace(re, b);
+            if (u !== t) n.nodeValue = u;
+        }
+        // The profile avatar is the name's first letter, so it has to follow the renamed name.
+        const av = document.getElementById('accountAvatar'), nm = document.getElementById('accountName');
+        const first = nm && nm.textContent.trim().charAt(0).toUpperCase();
+        if (av && first && av.textContent !== first) av.textContent = first;
+    };
+    const start = () => {
+        fix(document.body);
+        new MutationObserver((ms) => ms.forEach((m) => m.addedNodes.forEach((x) =>
+            fix(x.nodeType === 3 ? x.parentNode || document.body : x)))).observe(document.body,
+            {childList: true, subtree: true, characterData: true});
+        document.title = rules.reduce((t, [re, b]) => t.replace(re, b), document.title);
+    };
+    if (document.body) start(); else document.addEventListener('DOMContentLoaded', start);
+}"""
 
 
 def card(page, title: str, sub: str, foot: str, seconds: float) -> None:
@@ -311,7 +355,8 @@ def tour(page, base: str, game_id: int, with_coach: bool) -> None:
          "github.com/s4mstruthers/Lucidfish", 5.0)
 
 
-def record(base: str, game_id: int, with_coach: bool, out_dir: Path, width: int, height: int) -> Path:
+def record(base: str, game_id: int, with_coach: bool, out_dir: Path, width: int, height: int,
+           rename: list[tuple[str, str]] | None = None) -> Path:
     from playwright.sync_api import sync_playwright
     out_dir.mkdir(parents=True, exist_ok=True)
     with sync_playwright() as p:
@@ -324,6 +369,9 @@ def record(base: str, game_id: int, with_coach: bool, out_dir: Path, width: int,
         size = {"width": width, "height": height}
         context = browser.new_context(viewport=size, record_video_dir=str(out_dir), record_video_size=size,
                                       color_scheme="light")
+        if rename:
+            import json
+            context.add_init_script(f"({RENAME_JS})({json.dumps(rename)})")
         page = context.new_page()
         tour(page, base, game_id, with_coach)
         video = page.video
@@ -346,6 +394,10 @@ def encode(webm: Path, out: Path, poster: Path) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--app", help="record the Lucidfish already running at this address, e.g. http://127.0.0.1:8420")
+    ap.add_argument("--game", type=int, help="with --app: the game to feature (default: the one with most mistakes)")
+    ap.add_argument("--rename", action="append", default=[], metavar="OLD=NEW",
+                    help="replace a name on screen while recording (repeatable)")
     ap.add_argument("--pgn", action="append", type=Path, help="game(s) to analyse (default: two built-in games)")
     ap.add_argument("--side", default="black", help="which side the profile played in --pgn games")
     ap.add_argument("--no-coach", action="store_true", help="engine-only: no written explanations")
@@ -362,6 +414,30 @@ def main() -> int:
         raise SystemExit("ffmpeg is not installed (brew install ffmpeg / apt install ffmpeg).")
     width, height = (int(v) for v in args.size.lower().split("x"))
     games = [(p, args.side, 1200) for p in args.pgn] if args.pgn else DEFAULT_GAMES
+
+    rename = []
+    for pair in args.rename:
+        if "=" not in pair:
+            raise SystemExit(f"--rename wants OLD=NEW, got {pair!r}")
+        old, new = pair.split("=", 1)
+        rename.append((old.strip(), new.strip()))
+
+    if args.app:
+        base = args.app.rstrip("/")
+        try:
+            health = requests.get(f"{base}/api/health", timeout=5).json()
+        except requests.RequestException:
+            raise SystemExit(f"No Lucidfish answers at {base}. "
+                             "Copy the address from the app's window or terminal.") from None
+        game_id = args.game or pick_game(base)
+        with_coach = bool(health.get("coach", {}).get("enabled"))
+        print("recording…")
+        webm = record(base, game_id, with_coach, args.out.parent, width, height, rename)
+        poster = args.out.with_suffix(".png")
+        encode(webm, args.out, poster)
+        webm.unlink(missing_ok=True)
+        print(f"done: {args.out} (poster {poster.name})")
+        return 0
 
     temp = None
     if args.data_dir:
@@ -380,7 +456,7 @@ def main() -> int:
         print("analysing the demo games…")
         ids = analyse_games(base, games, args.name)
         print("recording…")
-        webm = record(base, ids[0], with_coach, args.out.parent, width, height)
+        webm = record(base, ids[0], with_coach, args.out.parent, width, height, rename)
         poster = args.out.with_suffix(".png")
         encode(webm, args.out, poster)
         webm.unlink(missing_ok=True)
