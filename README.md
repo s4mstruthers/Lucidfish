@@ -6,6 +6,7 @@
   <a href="https://github.com/s4mstruthers/Lucidfish/actions/workflows/build-apps.yml"><img alt="App builds" src="https://img.shields.io/github/actions/workflow/status/s4mstruthers/Lucidfish/build-apps.yml?label=app%20builds"></a>
   <a href="LICENSE"><img alt="Licence: AGPL-3.0-or-later" src="https://img.shields.io/badge/licence-AGPL--3.0--or--later-2563EB"></a>
   <img alt="Python 3.10+" src="https://img.shields.io/badge/python-3.10%2B-3776AB">
+  <a href="https://github.com/sponsors/s4mstruthers"><img alt="Sponsor" src="https://img.shields.io/github/sponsors/s4mstruthers?label=sponsor&logo=githubsponsors&color=EA4AAA"></a>
 </p>
 
 <p align="center">
@@ -119,6 +120,7 @@ Prefer to run from source, or want the command line? See [Installation](#install
 - [Development](#development)
 - [Roadmap](#roadmap)
 - [Contributing](#contributing)
+- [Supporting Lucidfish](#supporting-lucidfish)
 - [Acknowledgements and licences](#acknowledgements-and-licences)
 
 ---
@@ -917,7 +919,8 @@ In rough order. Open an issue to argue for a different one.
   models, so you can choose a coach on evidence rather than reputation.
 - A first run that works without downloading a 5 GB model: a free cloud tier as the one-click
   option, a local model as the private one.
-- Signed macOS and Windows builds, once the certificates are funded.
+- Signed macOS and Windows builds, once the certificates are funded
+  ([sponsorship](#supporting-lucidfish) helps).
 
 **Next**
 
@@ -943,6 +946,14 @@ labelled [good first issue](https://github.com/s4mstruthers/Lucidfish/labels/goo
 are a place to start. The [Code of Conduct](CODE_OF_CONDUCT.md) applies everywhere in the project,
 and [SECURITY.md](SECURITY.md) says how to report a security problem privately. If Lucidfish is
 useful in research or writing, [CITATION.cff](CITATION.cff) has the reference.
+
+## Supporting Lucidfish
+
+Lucidfish is free and open source, and I build it alongside a full-time MSc. If it helps your
+chess, you can support it through [GitHub Sponsors](https://github.com/sponsors/s4mstruthers).
+Sponsorship goes towards testing the coach on more AI models and towards signed builds, so the
+app installs without security warnings. Starring the repo, reporting a wrong coach note or
+sharing Lucidfish helps too.
 
 ## Acknowledgements and licences
 
